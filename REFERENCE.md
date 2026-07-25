@@ -57,6 +57,7 @@ convention in `CLAUDE.md`.
 - [32. Halve-It](#32-halve-it)
 - [33. Dead Man Walking](#33-dead-man-walking)
 - [34. The Pressure Chamber](#34-the-pressure-chamber)
+- [35. Test Data Seeder](#35-test-data-seeder)
 
 ---
 
@@ -1051,7 +1052,7 @@ below the table.
 | **90- AVG** | per-visit-avg | same shape, `<= 90` |
 | **140/Leg** | first-visit-only | `% of opening visits scoring >=140`. **Scoped to exactly 501/301/170/101.** |
 | **180s/Leg** | fraction | `legs containing ≥1 180 / total legs` |
-| **Average Pace** | — | darts/minute, returned as the `pace` key — same formula as the Home page/chart versions (consecutive `thrown_at` gaps within a turn, clamped to `0 < gap < 60000ms`); `null` (bubble shows "—") until per-dart timing data exists. *Note: this key was missing from `getPlayerStatBubbles()`'s return object until the audit that produced this manual caught it — the bubble was permanently blank before that.* |
+| **Average Pace** | — | darts/minute, returned as the `pace` key — same formula **and the same game-type exclusion** as the Home page/chart versions (consecutive `thrown_at` gaps within a turn, clamped to `0 < gap < 60000ms`, scoped by `NOT_CONTINUOUS_STREAM`); `null` (bubble shows "—") until per-dart timing data exists. All three sites — this bubble, `getHomeExtra()`'s Pulse `_pace()`, and `getMetricHistory()`'s `'pace'` case — must use `NOT_CONTINUOUS_STREAM`, i.e. exclude Just Chuckin' It, Checkout Trainer **and guided Around the World**: all three are rapid-fire per-dart rhythms with no real inter-visit pacing. `docs/bug-roadmap.md` BUG-31: the history case used the narrower `NOT_HYPOTHETICAL_DARTS` (which omits `around_the_world`), so the chart read ~14x the bubble directly above it for a player who had done the drill. `backend/test/db.pace-parity.test.js` asserts the three agree. *Note: this key was missing from `getPlayerStatBubbles()`'s return object until the audit that produced this manual caught it — the bubble was permanently blank before that.* |
 
 ### Player Profile header row (name + these four, `HEADER_STAT_DEFS` + Household Rating)
 
@@ -1250,7 +1251,43 @@ can only ever be built from legs the requesting player genuinely won themselves:
   (`ghostLegToolbarHtml()`, shared between the populated and empty-result
   render paths) — a mode-aware empty message ("No won legs in 170 yet — try
   a different mode, or 'All modes'.") rather than losing the control that
-  would let the player switch back.
+  would let the player switch back. A zero-result list also clears
+  `setup.ghostLeg`, so the picker can never read "no won legs in 301" while a
+  previously-picked 501 leg is still armed for Play Now.
+
+  **Deep-linked targets (`_ghostLegTarget`, set by `raceLeg()`/`repeatGhostLeg()`).**
+  The Player Profile's 👻 button links to the player's **best** leg, but the
+  picker's own default page is the 10 most **recent** wins — so a normal paged
+  fetch frequently wouldn't contain the requested leg at all. When a target is
+  pending, `renderGhostLegPicker()` therefore sets the picker's own paging for that
+  one request: `limit=100` (the server's own hard ceiling for this public route,
+  `getGhostCandidateLegs()`, SEC-23) and no category filter, since the active
+  filter could exclude the target outright. If the exact leg is still not in the
+  response, **nothing** is selected and the picker says so — falling back to
+  `legs[0]` is what previously raced a different leg than the one clicked, with
+  no indication anything had gone wrong.
+
+  Because that override is real picker state rather than a per-request special
+  case, `loadGhostLegPage()` stays a plain function of the picker's own
+  sort/page/size/category — no separate "hunting" mode, and no post-hoc
+  reconciliation of state against what the request actually asked for (which
+  had left the toolbar advertising a page size the fetch didn't use).
+
+  `_ghostLegTarget` is consumed at **request** time, not when the response
+  lands: `renderGhostLegPicker()` runs more than once per Race-this-leg entry
+  (`setMode()` renders, then `show('setup')`'s own raceLeg branch renders
+  again), and a target that stayed armed until the response arrived started a
+  second and sometimes third identical 100-row fetch that the staleness guard
+  then discarded. `box._loaded` is set in the same breath, so the reload guard
+  settles immediately.
+
+  `renderGhostLegPicker()` reloads only when a target is pending or no load has
+  started yet for this player (`box._loaded`) — **not** when simply nothing is
+  selected. Having nothing selected is a legitimate settled state (an unfound
+  deep link, or a filter matching none), and treating it as "needs reloading"
+  re-fetched on every `renderPlayers()` and re-armed `legs[0]`, silently
+  undoing the clearing that prevents a mis-targeted race. A player change needs
+  no term of its own: that branch resets `box._loaded`.
 - **`getGhostLegScript(gameId, setNo, legNo, playerName)`**: that leg's turns in
   playback order, each with its raw `{sector, multiplier}` darts, plus `category`,
   `config`, and the leg's actual recorded `outMode` (double/single-out) — returns
@@ -2807,7 +2844,31 @@ for X01 games).
 above plus `modeState` and `tournamentRoundLabel` as opaque values (the same
 "unrestricted shape, sanitized as a whole" treatment `players` already gets,
 not validated field-by-field) — anything else in a `POST /api/live` body is
-silently dropped (413 if the sanitized payload still exceeds 64KB). Before
+silently dropped (413 if the sanitized payload still exceeds 64KB).
+
+**Because `modeState` is opaque, `display.html` owns its own robustness.** The
+server guarantees nothing about the shape *inside* it, so every renderer must
+treat each nested field as possibly absent — a truthiness check on a container
+followed by unguarded reads of its nested fields is a bug (`docs/bug-roadmap.md`
+BUG-30: `renderers.pressure_chamber.scorecard()` checked only that the card
+existed, then read `card.target.label`, so a card missing `target` threw). Two
+rules follow, both required:
+
+1. **Guard the nested shape at the renderer.** A field group that can't be
+   rendered is omitted, not half-built — see `hasBanner` in
+   `renderers.pressure_chamber.scorecard()` and the `Array.isArray()` checks in
+   `renderers.halve_it`.
+2. **Every redraw goes through `renderSafe()`, never `render()` directly.**
+   `render()` writes to the DOM incrementally (format bar → player grid →
+   banners), so an exception part-way through leaves a **torn frame** — the new
+   game's header above the previous game's scores. `renderSafe()` logs the
+   failure (a bare `catch(e){}` on the only redraw path is what made this
+   invisible) and repaints `lastGoodSnapshot`, so a failure degrades to a
+   consistent stale frame instead of an incoherent one. Note `lastSnapshot` is
+   assigned on entry to `render()` and is therefore already the offending
+   snapshot when a throw is caught — `lastGoodSnapshot`, set only after a clean
+   render, is the one to fall back to. `backend/test/display.render-resilience.test.js`
+   asserts both rules. Before
 item 42, every one of `modeState`'s per-mode fields was its own top-level
 `ALLOWED_LIVE_KEYS` entry, and a new mode's fields were silently stripped
 twice by a forgotten allow-list update (`docs/bug-roadmap.md` BUG-28's 7
@@ -3222,6 +3283,41 @@ left every section of the page frozen on its static "Loading…" placeholder
 forever with no error shown, indistinguishable from the app having actually
 lost its data.
 
+### Escaping user data into HTML — the two-context rule
+
+Both frontend files build markup as template strings, so a stored value can land
+in one of two contexts, and they need different escaping:
+
+| Context | Helper | Escapes |
+|---|---|---|
+| Text content, or a **double-quoted** HTML attribute | `escapeHtml(s)` (aliased `esc`) | `&` `<` `>` `"` |
+| Inside a JavaScript string **within** an HTML attribute (an inline handler) | `jsArg(s)` = `escapeHtml(escapeJs(s))` | both of the above |
+
+`escapeJs()` alone escapes only `'` and `\`. **It must never be used bare in an
+interpolation.** An inline handler like `onchange="f('${escapeJs(name)}')"` is
+double-quoted, so a value containing `"` ends the attribute and everything after
+it is parsed as further attributes — including an event handler of the
+attacker's choosing. Player names permit any non-control character (§13), so a
+quote in a name is legal and stored verbatim; this is a real stored-XSS vector,
+not a theoretical one, and the CSP does not mitigate it (`script-src` includes
+`'unsafe-inline'`, which permits inline handlers by definition).
+
+This invariant has regressed twice — `docs/security-audit-roadmap.md` SEC-12
+established it, SEC-15 re-asserted it, and SEC-28 found it broken again in
+`renderHandicapOptions()`. It is now enforced mechanically by
+`backend/test/frontend.inline-handler-escaping.test.js`, which fails on any bare
+`${escapeJs(...)}` in either frontend file.
+
+**Prefer removing the question to answering it.** Where the code already
+re-queries the rendered elements — as `renderHandicapOptions()` does, to
+re-select each dropdown's current value — attach the listener there
+(`sel.addEventListener('change', () => setHandicap(n, sel.value))`) and emit no
+inline handler at all. Closing over the value means it is never serialized into
+markup, so no escaping applies. Note also that `escapeHtml()` does **not** escape
+`'`, which is correct for text and double-quoted attributes but would be unsafe
+inside a single-quoted attribute — there are none today, and new markup should
+keep it that way.
+
 ### Sessions
 
 Server-side, keyed by a SHA-256 hash of the raw token (the raw token itself is
@@ -3316,10 +3412,12 @@ player knows which mode to pick.
 
 `#screen-game`'s in-game markup (both the static pre-game-start skeleton and
 `renderGameShell()`'s per-leg/game rebuilt template, `frontend/index.html`)
-groups `#scoreboard`/`#slots`/`#status`/`.turn-actions` inside one `.rail`
-wrapper, sibling to `.oche` (the multi-row + Pad/Dartboard board itself). Both
-`.game-play-area` (the outer, single-innerHTML-target wrapper `renderGameShell()`
-replaces wholesale) and `.rail` are `display:contents` by default, so on a
+groups `#scoreboard` plus a `#rail-play` sub-wrapper (holding
+`#slots`/`#status`/`.turn-actions`) inside one `.rail` wrapper, sibling to
+`.oche` (the multi-row + Pad/Dartboard board itself) and to `#game-result`
+(the results host, empty and hidden during play). `.game-play-area` (the
+outer, single-innerHTML-target wrapper `renderGameShell()` replaces
+wholesale), `.rail`, and `#rail-play` are all `display:contents` by default, so on a
 portrait/narrow viewport everything flattens straight through to `#screen-game`'s
 existing `display:flex;flex-direction:column` layout — unchanged from before
 this redesign, aside from `.oche`/`.turn-actions` needing explicit `order`
@@ -3329,11 +3427,16 @@ scoreboard/slots/status.
 
 `@media (orientation:landscape) and (min-width:700px)` (a tablet held
 sideways) flips `.rail` into a real `display:flex;flex-direction:column` box
-and grid-places it beside `.oche` in a **single-row** two-column grid
+and grid-places it beside `.oche` in a two-column grid
 (`#screen-game{display:grid;grid-template-columns:minmax(190px,300px) 1fr;
-grid-template-rows:1fr}`) — a narrow rail column for scores/status/actions,
-full-height board column. Deliberately a single row with `.rail` as one real
-box, not `.oche` spanning multiple rail rows: an earlier version grid-placed
+grid-template-rows:auto 1fr}`) — a narrow rail column for scores/status/actions,
+full-height board column. Row 1 exists solely for Marathon Mode's persistent
+banner, which `renderMarathonBanner()` inserts before `.oche` and which
+therefore becomes a grid item of its own; it's placed `grid-column:1/-1;
+grid-row:1` so it spans the full width above both columns, and the `auto` row
+collapses to zero height whenever no banner exists. Everything else sits in
+row 2. Every item occupies exactly **one** row — no multi-row span — because
+an earlier version grid-placed
 `#scoreboard`/`#slots`/`#status`/`.turn-actions` as four separate row-1..5
 items with `.oche` spanning `grid-row:1/-1` across all of them, which hit a
 genuine CSS Grid behavior (verified live via Playwright, not a guess): a
@@ -3354,15 +3457,73 @@ genuinely narrower than the old full-width scoring screen:
   outcome grid down to almost no width, wrapping it into dozens of rows and
   ballooning the card's height; stacked, the grid gets the rail's full width.
 
-GAME OVER/LEG COMPLETE/etc. results overlays (`finishUnit()`,
-`finishMarathonLeg()`, `renderMarathonAnalysisScreen()`, the Checkout Blitz
-"TIME'S UP" screen) all target `.game-play-area` (not `.oche`), replacing its
-entire innerHTML with one results div — the same takeover behavior as before
-this redesign, when `.oche` alone was the only child needing replacement.
-Since that results div becomes `.game-play-area`'s only child, a
-`.game-play-area > *:only-child{grid-column:1/-1;grid-row:1}` landscape rule
-gives it the full grid area instead of the narrow rail slot `.rail`/`.oche`
-would otherwise occupy.
+**Whole-session summaries clear the scoreboard —
+`showGameResult({wholeSession:true})`.** Keeping `#scoreboard` alive is right
+for a leg/game finish — it's the match state the card reports on — but wrong
+for a summary that ends the whole session, where the scoreboard would show a
+leg that may not even be finished. That choice is an argument to the helper
+rather than a line each caller remembers to write, so the helper owns all
+three regions the takeover touches and a future results screen can't inherit
+the wrong default silently. `renderMarathonAnalysisScreen()` and the Checkout
+Blitz results screen pass it; `finishUnit()` and `finishMarathonLeg()` (the
+pause *between* marathon legs, where the just-finished leg's scoreboard is
+exactly what should stay) do not. Without it, "End Marathon" mid-leg left the
+unfinished leg's live X01 scoreboard sitting directly above
+"🏁 MARATHON COMPLETE".
+
+`showGameResult()` takes no HTML: it hides the play regions, empties and
+unhides the host, and returns it for the caller to fill. It previously also
+accepted an `html` argument that no call site ever used, giving the helper two
+ways to do one job.
+
+**Results takeover — `showGameResult(html)`.** GAME OVER/LEG COMPLETE/MARATHON
+COMPLETE/Checkout Blitz "TIME'S UP" all go through this one helper
+(`finishUnit()`, `finishMarathonLeg()`, `renderMarathonAnalysisScreen()`, and
+the Blitz results function each call it and write into the host it returns).
+It **hides** the two play regions — `#rail-play` and `.oche` — and unhides
+`#game-result`; it deliberately does **not** replace `.game-play-area`'s
+innerHTML.
+
+That distinction is load-bearing, not stylistic: `#scoreboard` lives inside
+`.game-play-area` too, and `finishUnit()` prepends its "🎯 X wins the leg"
+banner into the scoreboard immediately before the takeover. An innerHTML
+replace therefore destroyed that banner in the same tick it was built (it
+never rendered at all) and blanked the very match state the summary card is
+reporting on. Hiding instead keeps the scoreboard and its banner on screen
+through the results screen — the behavior that predates the landscape-split
+redesign, when `#scoreboard` was a permanent sibling outside the replaced
+region.
+
+`renderGameShell()` rebuilds `.game-play-area` wholesale on every new
+leg/game, which naturally resets the takeover: `#game-result` comes back empty
+and hidden, `#rail-play`/`.oche` come back unhidden. In landscape,
+`#game-result` takes `grid-column:2` — the board's own column, free because
+`.oche` is hidden — so the rail keeps column 1 and the summary sits where the
+board was.
+
+`#game-result` is its own scroll container in both orientations
+(`flex:1;min-height:0;overflow-y:auto` in portrait, the grid cell plus
+`overflow-y:auto` in landscape). It has to be: the takeover deliberately keeps
+the scoreboard and winner banner above the card, so on a short screen the card
+can exceed the space left over, and `body.game-active{overflow:hidden}` means
+anything that overflows is unreachable rather than scrolled to. In landscape
+the card is centred with `justify-content:safe center` on a stretched host
+rather than `align-self:center` — a centred grid item is sized to its content,
+so `clientHeight` always equals `scrollHeight` and `overflow-y:auto` never
+forms a scroll container at all (verified live: clipped with no scrollable
+ancestor at 1024×380). `safe` degrades to flex-start once the content
+overflows, so the top of the card can never become unreachable either.
+
+One CSS trap worth knowing, since it silently defeats `hidden` and was hit
+twice while building this: **an author `display` declaration outranks the UA
+stylesheet's `[hidden]{display:none}` regardless of selector strength.**
+`.rail-play` (`display:contents`), `.oche` (`display:flex` under
+`body.game-active`), and `.slots` (`display:grid`) all carry one, so
+`el.hidden = true` on them does nothing on its own — verified live, the whole
+dartboard stayed on screen behind the results card. A single scoped rule,
+`.rail-play[hidden], .oche[hidden], .slots[hidden], .game-result[hidden]
+{display:none!important}`, fixes the class of bug for the game screen without
+a blanket `[hidden]` override that could change behavior elsewhere in the app.
 
 Bounce Out moved into `.turn-actions .undo-row` as a third flex button
 (relabeling "Undo Last Turn" to "Undo Turn" for space), reclaiming the
@@ -4229,6 +4390,27 @@ even on a normal LAN deployment.
 **Rate-limit buckets**: see §9's table — `global` (300/60s, every request),
 `setup`/`login`/`pin` (10/60s each, their own endpoint only). SSE uses separate
 hard connection caps, not a `rateLimit()` bucket.
+
+**Public reads must bound their own work, not just their rate.** The server is a
+single process with one thread, so any request that blocks the event loop blocks
+*everything* — including a dart being scored mid-leg and the live scoreboard. A
+rate limit alone does not contain a read whose cost scales with a caller-supplied
+parameter, because one request can be arbitrarily expensive. Two endpoints take
+such a parameter and both clamp it:
+
+| Endpoint | Caller-supplied cost driver | Bound |
+|---|---|---|
+| `GET /api/players/ghost-legs` | `limit` | clamped to 100 (`getGhostCandidateLegs()`, SEC-23) |
+| `GET /api/players/personal-bests-batch` | `names` list length | **deduped, then** truncated to `MAX_BATCH_NAMES` = 128 (SEC-27) |
+
+For the batch endpoint the order is load-bearing: dedupe first, cap second. Capping
+first would let a run of duplicates consume the whole budget and silently drop a real
+name behind it, and would leave the cap counting repeats rather than actual lookups.
+Deduping first makes `MAX_BATCH_NAMES` mean "at most N *distinct* players computed."
+The cap is 128 because it must clear `TOURNAMENT_MAX_PLAYERS` — the only real caller
+is tournament average-seeding, which sends one name per entrant. Uncapped, one 15KB
+anonymous GET repeating a real player's name froze the whole server for ~60 seconds.
+`backend/test/server.batch-bounds.test.js` covers both bounds.
 
 ---
 
@@ -5781,6 +5963,13 @@ first — a webhook silently returns `{skipped:true}` if `ha_url` or the specifi
 event's webhook ID is blank, and throws a caller-visible error (not silent) if
 the resolved host is blocked (loopback/link-local always; private-range only if
 `HA_BLOCK_PRIVATE=true`).
+
+**"This only goes wrong once there's real history behind it."** Several bug
+classes — a leaderboard sorted the wrong way, a "best ever" that never updates,
+a rate with the wrong denominator, a date bucket off by a day — produce the
+right-looking answer against the two or three turns a unit test seeds, and only
+diverge once there are hundreds of legs across months. Build a populated
+database with §35's seeder and look at the screen.
 
 **"Someone got locked out and I don't know why."** Check §9's lockout
 mechanics — default thresholds are 5 (admin) / 10 (PIN) failed attempts, 5-minute
@@ -8187,3 +8376,119 @@ end-to-end with Playwright: the full New Game → Pressure Chamber practice and
 H2H flows, a full 15-round solo run to a Composure Rating, badges/stat
 bubbles/personal bests/leaderboards via the API, and the live `/display`
 scorecard.
+
+---
+
+## 35. Test Data Seeder
+
+`backend/seed-dev-db.js` (`npm run seed`). Builds a populated, realistic,
+deterministic database by **simulating real matches** — the tool for any
+question that only has a different answer once there is history behind it.
+
+### Why it exists
+
+The two existing verification surfaces are both blind against an empty
+database. `backend/test/` seeds two or three hand-picked turns per case, which
+proves a formula and says nothing about how it behaves over a season; the
+`verify-ui` browser suite (`.claude/skills/verify-ui/`) runs against a scratch
+database, so every Home, Pulse, leaderboard and personal-best panel it renders
+is in its zero state. A leaderboard sorted backwards, a query that only breaks
+on ties, a "best ever" that never updates and a rate dividing by the wrong
+denominator all look correct until there is enough data for the wrong answer to
+be visibly different from the right one.
+
+### The two invariants that make its output trustworthy
+
+1. **Every row goes through `db.js`'s real write path** — `createGame()`,
+   `recordTurn()` and `completeGame()`/`abandonGame()`, never raw SQL.
+   `recordTurn()` specifically, which is the `enforceConsistency: true` wrapper
+   the HTTP layer uses (§9, SEC-22). The seeder therefore *cannot* manufacture a
+   row the running app could not have produced. This is not tidiness: a bug
+   "found" against an impossible state costs an afternoon to disprove.
+2. **Every visit is scored by `frontend/scoring.js`'s real evaluators** —
+   `evaluateVisit()` for X01, `evaluateVisitCricket()` for Cricket (§2). There is
+   no second copy of the rules here to drift out of step with the app's. Cricket
+   matters most: its `turns.scored` is not arithmetically derivable from the
+   darts, so it *must* come from the engine.
+
+### The throwing model
+
+Each player carries a `skill` in 0..1 — their chance of hitting a plain single
+they aimed at — scaled per ring by `ringFactor()` (treble 0.34, double 0.44,
+bull 0.55, double-bull 0.30 of it). A miss degrades the way a real one does:
+~55% land on the right number through the wrong ring, ~35% on a clockwise board
+neighbour, the rest off the board. Every derived statistic — trebleless visits,
+ton-plus rate, checkout percentage, the miss heatmap — falls out of that one
+distribution rather than being invented separately.
+
+Once a finish is live, aiming defers to `checkoutHint()` (§2) — the app's own
+checkout advice — rather than a second opinion. Besides realism this is what
+makes a 170 Big Fish and a nine-darter *reachable at all*: a hand-rolled
+"set up 32, take the double" policy never aims at the bull, so both would be
+structurally impossible no matter how much data was generated.
+
+The default roster's skills are spaced widely on purpose (`0.85` descending by
+`0.13`). That produces a clean monotone ordering across every derived metric —
+3-dart average, darts per leg, trebleless rate, Elo, Cricket MPR — which is what
+makes "is this leaderboard the right way up?" an answerable question. Adjacent
+skills a few points apart would leave the ordering inside sampling noise.
+
+### Determinism
+
+A seeded mulberry32 PRNG drives everything: the roster, who plays whom, and
+every dart. The same `--seed` always reproduces the same play, which is the
+difference between a bug report and an anecdote. Only the timestamps differ
+between runs, deliberately — they are anchored to "the last `--days` days"
+relative to when the command runs, so a freshly-seeded database still has
+something in Legs Today and Legs This Week.
+
+### Backdating
+
+`createGame()`/`recordTurn()`/`completeGame()` all stamp `datetime('now')`, so
+without a fixup every seeded game would land in the same second and collapse
+exactly the stats worth testing (Legs Today/This Week, On This Day, form trends,
+the recap, streaks, every date-bucketed history query). Timestamps are therefore
+rewritten *after* creation — `games.created_at` plus `completed_at` **or**
+`dnf_at`, never both (§13's schema treats them as mutually exclusive) — and each
+game's turns are spread evenly across its ~4-minutes-a-leg duration so
+pace/duration derivations see plausible gaps.
+
+### Safety
+
+It refuses outright to write to `data/darts.db`, with or without `--force`, and
+refuses to overwrite any other existing file without it. `PRAGMA
+synchronous=OFF` is set for the run — the file is disposable and the command is
+re-runnable, and it is a ~30x speedup (500 games: 100s → 3s). The server never
+does this.
+
+### Options
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--db <path>` | `data/seed-dev.db` | target file |
+| `--seed <n>` | `1` | PRNG seed |
+| `--days <n>` | `90` | spread play over the last N days |
+| `--games <n>` | `40` | matches to simulate |
+| `--players <a,b,…>` | `Ada,Bex,Cal,Dot,Eli` | roster, strongest first |
+| `--force` | off | overwrite an existing target |
+
+Coverage is X01 (H2H and practice) and Cricket — where the bulk of the stat
+surface lives — not all 16 game types. Genuinely rare achievements (Big Fish,
+nine-darters) stay rare: the model can produce them, but a realistic household
+does not throw one in a thousand legs, so those panels will normally still be in
+their empty state. That is the honest answer, and fabricating the events instead
+would reintroduce exactly the impossible-state problem invariant 1 exists to
+prevent.
+
+### Testing
+
+`backend/test/seed-dev-db.test.js`: `parseRouteLabel()` round-tripping every
+label `checkoutHint()` can emit across all finishable scores 2–170 in both out
+modes; `aimX01()` never proposing an off-board or treble-bull dart at any
+remaining score; `aimCricket()` returning `null` only in a genuine stalemate
+(the guard that stops a closed-out Cricket leg looping forever); `makeRng()`
+reproducibility and `shuffle()` being a non-mutating permutation; `sqliteTs()`'s
+format; argument validation; and an end-to-end run asserting two same-seed runs
+produce identical darts, that every game reaches exactly one ending
+(`completed_at` xor `dnf_at`), that every leg has exactly one winning turn, that
+play is spread across more than one day, and that both write guards hold.

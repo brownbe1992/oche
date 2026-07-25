@@ -28,15 +28,35 @@
 > Halve-It, The Pressure Chamber, and Dead Man Walking) opened **SEC-26** (an unescaped
 > `modifier.icon` sink in the Pressure Chamber `/display` renderer — latent today because
 > its feeding field is stripped, but a stored-XSS the moment `docs/bug-roadmap.md`
-> **BUG-28** is fixed) — see "Part 10". Functional-defect counterparts live in
+> **BUG-28** is fixed) — see "Part 10". A **ninth-pass audit** (2026-07) broke with the
+> "weight it toward whatever shipped most recently" habit of Parts 4-10 and was instead
+> **aimed by test coverage** (`npm run test:coverage`, added in the same session as
+> `backend/seed-dev-db.js`): with the backend at 98.88% lines / 91.75% branches, the
+> useful question was "where does a green suite tell us the least?" — `backend/server.js`
+> (absent from the coverage report entirely, since its own tests spawn it as a child
+> process), `auth.js`'s cookie helpers (63% lines), `db.js`'s `getMetricHistory()` (the
+> largest uncovered block), and `fireHaWebhook()` (the only outbound HTTP, uncovered).
+> It opened **SEC-27** (an unauthenticated single-request denial of service:
+> `GET /api/players/personal-bests-batch` does one full personal-bests computation per
+> name with no cap and no dedupe — measured at 59.4s of total server unavailability from
+> one 15KB anonymous GET, on a single-threaded process) and **SEC-28** (a stored XSS: one
+> bare `escapeJs()` without `escapeHtml()` in `renderHandicapOptions()`, the third check
+> and second regression of the SEC-12/SEC-15 "zero bare `escapeJs`" invariant — confirmed
+> executing in a real browser) — **both now fixed in v0.20.1** — see "Part 11". Every Part 11 finding was
+> reproduced against a running server rather than inferred from reading, which the new
+> seeder made practical by supplying a household-sized database to measure against.
+> Functional-defect counterparts live in
 > `docs/bug-roadmap.md` (BUG-1/BUG-2/BUG-3 from the second pass; BUG-4/BUG-5 from the
 > third; BUG-6/BUG-7 from the fourth; BUG-9 from the fifth; BUG-10 through BUG-15 from
 > the sixth; BUG-19 from the seventh, all fixed; **BUG-27 through BUG-29** from the
-> eighth, all fixed). **SEC-1 through SEC-26 are all fixed as of this writing** — SEC-26
+> eighth, all fixed; **BUG-30** and **BUG-31** from the ninth, both open). **SEC-1 through
+> SEC-28 are all fixed as of this writing** — SEC-26
 > (opened by the eighth pass, coupled to BUG-28) shipped its escape-at-the-sink fix in the
 > same change as BUG-28's allowlist addition, so the field never became forwardable in an
-> unescaped released state. BUG-1 through BUG-29 are all fixed — nothing open on either
-> tracker.
+> unescaped released state. BUG-1 through BUG-31 are all fixed. The ninth pass's four findings
+> (SEC-27, SEC-28, BUG-30, BUG-31) were opened as a scan and **fixed in the following
+> change, v0.20.1**, each with a committed regression test proven to fail against the
+> pre-fix source. Nothing open on either tracker.
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -1683,3 +1703,299 @@ newest renderer.
 `undefined`, no image request fires, and the icon renders as literal escaped text. Confirm
 the same payload against the pre-fix `display.html` (with the key temporarily allowlisted)
 *does* set `window.__xss`, proving the sink was live.
+
+---
+
+## Part 11 — Ninth-pass audit (2026-07, coverage-targeted: the modules the test suite measures least)
+
+Unlike Parts 4–10, which were weighted toward whatever had been merged most recently,
+this pass was aimed by `npm run test:coverage` (added in the same session, alongside
+`backend/seed-dev-db.js`). The backend sits at 98.88% lines / 91.75% branches overall,
+so the question was not "what's new" but **"where does a green suite tell us the
+least?"** — `backend/server.js` (spawned as a child process by its own tests, so it
+appears in the coverage report not at all), `auth.js`'s cookie helpers (63% lines, the
+weakest module in the repo), `db.js`'s `getMetricHistory()` (the largest uncovered
+block), and `fireHaWebhook()` (the only outbound HTTP, entirely uncovered).
+
+Every finding below was **reproduced against a running server**, not inferred from
+reading — the new seeder made that practical by supplying a database with a realistic
+amount of history behind it (a household-sized 500 games / 1,070 legs / 54,086 darts),
+which is what makes an amplification cost measurable in the first place.
+
+Re-checked and still safe: SQL injection (every interpolated fragment in `db.js`
+traces to a module-level constant, an allowlisted lookup, or a regex-validated
+`YYYY-MM-DD` — every user value is a bound parameter); path traversal in
+`serveStatic()` and `backupLib.backupPath()` (the latter's `/^darts-[0-9TZ.-]+\.db$/`
+also rules out header injection through the `Content-Disposition` filename); the
+first-admin race (`createFirstAdmin()` re-checks `info.changes === 0` after an atomic
+conditional insert, so two simultaneous `POST /api/setup` calls cannot both win); CSRF
+(`readJson()`'s mandatory `application/json` closes the no-preflight path, and
+`SameSite=Strict` closes the cookie path); `fireHaWebhook()`'s egress guard and its
+call graph (one call site, on a dedicated route — it is **not** awaited from any
+game-lifecycle hook, so a blackholed Home Assistant cannot stall a write); and
+`display.html`'s escaping (SEC-26's `escapeHtml`-at-every-sink invariant holds across
+all 16 renderers; the remaining unescaped interpolations feed `queueSpeech()`, which
+is the Speech API, not the DOM).
+
+Functional-defect counterparts from this same pass are `docs/bug-roadmap.md`
+**BUG-30** and **BUG-31**.
+
+### SEC-27 — `GET /api/players/personal-bests-batch` runs one full personal-bests computation per name with no cap on how many names are asked for, so a single anonymous request can freeze the whole server for a minute  **(HIGH, unauthenticated denial of service)**
+
+**Status: ✅ Fixed (2026-07, v0.20.1).** Two independent bounds, because either alone
+leaves a hole. The route now **dedupes and then caps** (`[...new Set(...)].slice(0,
+MAX_BATCH_NAMES)`, `backend/server.js`), and `getPersonalBestsBatch()` (`backend/db.js`)
+dedupes again so the function is safe for any future caller that forgets the route's cap
+— the same "validated by construction" reasoning `recordTurn()` applies to `addTurn()`.
+Two details worth recording. **The cap is 128, not the 32 first drafted**: the suggested
+fix below reasoned from a wrong recollection of `TOURNAMENT_MAX_PLAYERS`, which is
+actually 128, and a lower cap would have silently truncated a large bracket's
+average-seeding — securing the endpoint by breaking its only real caller. **The order is
+load-bearing**: capping before deduping would let a run of duplicates consume the whole
+budget and drop a genuine name behind it, and would leave the cap counting repeats
+instead of real lookups. Deduping first makes `MAX_BATCH_NAMES` mean "at most N
+*distinct* players computed." Re-ran the original attack against the fix with
+`require_admin_auth` on: **59.4s → 0.02s**, the concurrent `/api/health` no longer
+stalled at all (58.9s → 0.00s), same correct 196-byte response. Committed regression
+test `backend/test/server.batch-bounds.test.js`. Its load-bearing case is deliberately
+**deterministic, not timing-based**: a list of 3,000 duplicates followed by one real name
+must answer both — which fails if the dedupe is missing or applied after the cap, on any
+machine, with any amount of history. (A first draft asserted on elapsed time instead and
+passed even with the dedupe deleted, because the scratch database was empty enough that
+128 uncollapsed lookups were still fast; the timing assertions that remain are loose and
+documentary only.) `REFERENCE.md` §14 gains a "public reads must bound their own work"
+table covering this and SEC-23's `ghost-legs` clamp. Full backend suite green.
+
+**What actually goes wrong (plain language):** this endpoint exists so the tournament
+screen can fetch several players' records in one request instead of one request per
+player. It takes a comma-separated list of names and does the full per-player
+personal-bests computation once for **each entry in the list**. Nothing limits how
+long that list is, and nothing removes duplicates — so asking for the same real player
+3,800 times makes the server do that player's whole personal-bests computation 3,800
+times.
+
+Two things make this much worse than a slow endpoint. First, Oche is a **single
+process with one thread**: while that work is running, the server cannot answer
+*anything* else — not the live scoreboard, not the page itself, not a dart being
+scored mid-leg. Second, the endpoint is a **public read**, so it is reachable with no
+login even when `require_admin_auth` is on. Everything an attacker needs is on the
+public `GET /api/players` list.
+
+Measured on a household-sized database (500 games, 1,070 legs, 54,086 darts): **one
+15KB request took 59.4 seconds, and a `GET /api/health` issued alongside it was
+stalled for 58.9 seconds.** The reply was 196 bytes. The global rate limiter allows
+300 requests a minute, so one client can keep the server unavailable indefinitely at
+essentially no cost to itself — and because the response is tiny and the request is a
+normal-looking GET, nothing about it looks like an attack in a log.
+
+This is the same class of finding as **SEC-23** (which clamped `ghost-legs`' `limit` to
+100 on the same reasoning: a public read must bound the work it will do). That pass
+clamped the endpoint it was looking at; this one was introduced later, for a different
+feature, and never got the same treatment.
+
+**Where:** `backend/server.js`, the `GET /api/players/personal-bests-batch` route:
+
+```js
+const names = (url.searchParams.get('names') || '').split(',').map(s => s.trim()).filter(Boolean);
+return send(res, 200, db.getPersonalBestsBatch(names));
+```
+
+and `backend/db.js`, `getPersonalBestsBatch()`:
+
+```js
+function getPersonalBestsBatch(names) {
+  return Object.fromEntries((names || []).map(name => [name, getPersonalBestsFor(undefined, name, undefined)]));
+}
+```
+
+Note that `Object.fromEntries` collapses duplicate keys, so the *response* stays small
+no matter how many times a name repeats — the cost is paid entirely on the server. An
+unknown name is free (`getPlayer()` returns null and `getPersonalBestsFor()` exits
+immediately), so the whole attack is "find one real name, repeat it."
+
+**Attack:** with the server reachable and `require_admin_auth` **on**:
+
+```
+GET /api/players/personal-bests-batch?names=Ada,Ada,Ada,...   (~3,800 times, 15KB of query string)
+```
+
+No cookie, no session. Repeat at the rate-limit ceiling to hold the app down for as
+long as you like. On a LAN deployment this is a guest on the wifi taking the scoreboard
+down mid-match; on an internet-facing deployment it is anyone at all.
+
+**Fix (step by step):**
+1. **Cap the list at the route**, the same shape SEC-23 used for `ghost-legs`' `limit`
+   — take at most N names and ignore the rest (the real caller sends one per tournament
+   entrant, so a cap of 16 or 32 is far above any legitimate use):
+   ```js
+   const MAX_BATCH_NAMES = 32;
+   const names = (url.searchParams.get('names') || '').split(',')
+     .map(s => s.trim()).filter(Boolean).slice(0, MAX_BATCH_NAMES);
+   ```
+2. **Dedupe before doing the work**, in `getPersonalBestsBatch()` itself, so the
+   function is safe regardless of which caller reaches it (`[...new Set(names)]`).
+   Belt and braces: step 1 alone would leave the amplification available to any future
+   caller that forgets the cap, and step 2 alone still permits 32 *distinct* expensive
+   lookups.
+3. **Sweep the other public reads for the same shape** — any endpoint whose cost scales
+   with a caller-supplied count or list. `getPersonalBestsBatch()` is the only unbounded
+   one found in this pass (`/api/leagues/eligible` uses only the first two names;
+   `/api/errors`' `limit` is bounded in practice by the 500-row table cap;
+   `ghost-legs` was clamped by SEC-23) — but this is now the second time the pattern has
+   shipped, so it is worth an explicit check whenever a list-taking read is added.
+4. Consider a **cheaper standing guard**: a per-request work budget, or moving the
+   heavy public reads behind the same tighter rate-limit bucket `login`/`setup` already
+   use. Not required to close this finding, but the single-threaded design means *any*
+   unbounded public read is one bad parameter away from the same outcome.
+
+**Verify:** against a database with real history (`cd backend && npm run seed`), start
+the server with `OCHE_REQUIRE_AUTH=true` and issue the request above with no session
+while timing a concurrent `GET /api/health`. Before the fix the health check stalls for
+the full duration of the batch request (measured: 58.9s). After the fix the batch
+request returns promptly, the health check is unaffected, and the response still
+contains correct records for the first N distinct names. Add a committed
+`backend/test/server.batch-bounds.test.js` asserting that a names list longer than the
+cap is truncated rather than honoured — this is exactly the kind of bound that silently
+regresses when someone "just raises the limit."
+
+### SEC-28 — A player name is interpolated into an inline `onchange` handler with `escapeJs()` but **not** `escapeHtml()`, so a name containing a double quote breaks out of the attribute and runs arbitrary JavaScript  **(HIGH, stored XSS)**
+
+**Status: ✅ Fixed (2026-07, v0.20.1).** Took step 3 of the fix list rather than the
+one-word `jsArg()` swap: `renderHandicapOptions()` (`frontend/index.html`) now emits no
+inline handler at all and attaches a real listener in the loop that was **already**
+re-querying these elements to re-select each dropdown's current value
+(`sel.addEventListener('change', () => setHandicap(n, sel.value))`). Closing over `n`
+means the name is never serialized into markup, so no escaping question arises at this
+site — the durable fix, and essentially free here because the loop existed. Verified in a
+real browser against the original payload: the attacker-named `<select>` now carries only
+`class` and `style` (no `on*` attribute), `window.__xss` stays `undefined` after a
+hover, the visible label renders the name literally, **and the feature still works** —
+selecting 401 lands `setup.handicaps` keyed by the player's real name, quote and all,
+with no uncaught page errors. The invariant is now mechanical rather than a habit:
+`backend/test/frontend.inline-handler-escaping.test.js` fails on any bare
+`${escapeJs(...)}` in either frontend file, asserts `jsArg()` is still the
+`escapeHtml(escapeJs(...))` composition it claims to be, and asserts this specific site
+builds no interpolated inline handler. `REFERENCE.md` §9 gains a "two-context rule"
+section stating which helper belongs in which context and why `escapeJs` alone is never
+correct in an interpolation. Full backend suite green.
+
+**What actually goes wrong (plain language):** the Handicap section of the New Game
+screen draws one dropdown per player, and wires each one up with an inline handler that
+carries the player's name:
+
+```html
+<select ... onchange="setHandicap('Ada', this.value)">
+```
+
+To build that safely, the name has to survive **two** different contexts: it is inside
+a JavaScript string (so quotes and backslashes need escaping — that's `escapeJs()`),
+and that JavaScript string is itself inside an HTML attribute (so `<`, `>`, `&` and
+`"` need escaping — that's `escapeHtml()`). This codebase already has a helper that
+does both, `jsArg()`, and it is used correctly at **24** other places. This one site
+calls `escapeJs()` alone.
+
+`escapeJs()` escapes `\` and `'`. It does not escape `"`. The attribute is
+double-quoted. So a player whose name contains a `"` ends the attribute early, and
+everything after it is parsed by the browser as *more attributes* — including a new
+event handler of the attacker's choosing.
+
+Player names permit any character except control characters (`validatePlayerName()`
+bounds the length and rejects control characters, per SEC-13, but deliberately allows
+punctuation), so a `"` in a name is perfectly legal and is stored as-is.
+
+Confirmed end to end against a running server. A player was created through the real
+public `POST /api/players` route (HTTP 200) with the name:
+
+```
+Bex" onmouseover="window.__xss=1;//
+```
+
+The Handicap section then rendered:
+
+```html
+<select class="date-input" style="width:auto" onchange="setHandicap('Bex" onmouseover="window.__xss=1;//', this.value)">
+```
+
+which the browser parsed as an element carrying a genuine second attribute —
+`onmouseover="window.__xss=1;//', this.value)"`. `sel.onmouseover` came back as a
+**function** (the browser compiled it), and dispatching a `mouseover` set
+`window.__xss` to 1. That is attacker-controlled JavaScript executing in the app's own
+origin, with the admin's session cookie in scope.
+
+The trailing `//` matters and is worth recording: a first attempt without it left the
+handler as a JavaScript syntax error, so it never compiled and nothing ran. That is why
+this needs an actual browser to confirm rather than reasoning about the markup — a
+naive test can easily conclude "not exploitable" when the only problem was a malformed
+payload.
+
+The CSP does not help here: `script-src 'self' 'unsafe-inline'` (SEC-10, a deliberate
+trade-off for this single-file app) permits inline event handlers by definition.
+
+This is a regression of the invariant **SEC-12** established and **SEC-15** re-asserted
+("zero bare `escapeJs`"). The handicap feature landed later
+(`docs/archive/rating-and-handicap-roadmap.md` Part B) and was never checked against it.
+Note the line directly above the faulty one renders the same name correctly with
+`escapeHtml(n)` for the visible label — this is a single-site omission in otherwise
+correct code, not a misunderstanding.
+
+**Where:** `frontend/index.html`, `renderHandicapOptions()`:
+
+```js
+<span class="lbl">${escapeHtml(n)}</span>                                  <!-- correct -->
+<select class="date-input" style="width:auto" onchange="setHandicap('${escapeJs(n)}', this.value)">
+                                                                            <!-- ^ missing escapeHtml -->
+```
+
+Compare the correct form used everywhere else, e.g. `confirmMergePlayers('${esc(escapeJs(p.source.name))}', ...)`,
+and the helper that names the composition:
+
+```js
+function jsArg(s){ return escapeHtml(escapeJs(s)); }
+```
+
+**Attack:** create (or rename) a player to `Bex" onmouseover="window.__xss=1;//` — a
+plain write, so anyone who can add a player can do it: any LAN device under the
+documented `OCHE_REQUIRE_AUTH=false` opt-out, or the admin themselves being socially
+engineered into accepting a pasted name. Then wait for anyone to open **New Game → X01
+→ 2 players → Handicap**. The payload fires in that viewer's browser, in the app's
+origin. Since the admin session cookie is `HttpOnly`, the script cannot read it
+directly — but it does not need to: it can issue same-origin `fetch()` calls with the
+cookie attached, so it can silently reach every `[admin]` route, including
+`POST /api/wipe-all`, `POST /api/backups/restore`, and `POST /api/admins`.
+
+**Fix (step by step):**
+1. Replace the bare call with the existing helper — a one-word change that makes this
+   site identical to the other 24:
+   ```js
+   onchange="setHandicap('${jsArg(n)}', this.value)"
+   ```
+2. Re-assert the invariant mechanically rather than by eye. `grep -nE '\$\{escapeJs\('`
+   across `frontend/index.html` and `frontend/display.html` must return **nothing** —
+   every use of `escapeJs` must be inside `jsArg()` or an explicit
+   `escapeHtml(escapeJs(...))`. This is the third time the invariant has been checked
+   by hand (SEC-12, SEC-15, now SEC-28) and the second time it has regressed, so it
+   should become a committed test, not a habit.
+3. Consider removing the footgun entirely for new code: the inline-handler pattern
+   only exists because these fragments are built as HTML strings. Where a site is
+   already re-querying the elements afterwards — `renderHandicapOptions()` does exactly
+   that, to re-select each dropdown's current value — attaching the listener in that
+   same loop (`sel.onchange = () => setHandicap(n, sel.value)`) removes the escaping
+   question rather than answering it.
+4. While fixing, also confirm `escapeHtml()`'s own coverage is adequate for every
+   context it is used in: it escapes `& < > "` but **not** `'`. That is correct for
+   text content and for double-quoted attributes (which is how it is used today), but
+   would be unsafe inside a single-quoted attribute. A sweep found no single-quoted
+   attribute interpolations at present — worth a note in the helper's own comment so a
+   future caller doesn't assume more than it delivers.
+
+**Verify:** create a player named `Bex" onmouseover="window.__xss=1;//`, open
+New Game → X01 with two players, expand **Handicap (optional)**, and hover that
+player's dropdown. Before the fix, `window.__xss === 1` and
+`document.querySelectorAll('#handicap-options-section select')[1].onmouseover` is a
+`function`. After the fix, the name appears as literal text inside the handler, no
+extra attribute exists on the element, and `window.__xss` stays `undefined`. Add a
+committed regression test in the shape of
+`backend/test/display.pressure-chamber-hardening.test.js` (SEC-26's) — extract
+`renderHandicapOptions()`'s template into a `vm` context, render with a quote-bearing
+name, and assert the output contains no `onmouseover` attribute — plus the grep check
+from step 2 as its own assertion.

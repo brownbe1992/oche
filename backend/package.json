@@ -1,12 +1,14 @@
 {
   "name": "Oche",
-  "version": "0.20.0",
+  "version": "0.20.1",
   "private": true,
   "description": "Per-dart darts scorer with player profiles and lifetime stats, backed by SQLite. No external dependencies.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "seed": "node seed-dev-db.js"
   },
   "engines": {
     "node": ">=22.13.0"
