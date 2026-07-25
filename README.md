@@ -1921,7 +1921,9 @@ oche/
 │   ├── netguard.js  Outbound-request egress guard (blocks loopback/link-local)
 │   ├── backup.js    Stand-alone WAL-safe backup script (see Backups)
 │   ├── backup-lib.js  Shared backup/restore mechanics (used by backup.js and server.js)
-│   └── admin-recovery.js  Stand-alone admin password reset / lockout-clear CLI
+│   ├── admin-recovery.js  Stand-alone admin password reset / lockout-clear CLI
+│   ├── seed-dev-db.js  Deterministic test-data seeder (see Development)
+│   └── test/        node:test suite (`npm test`)
 ├── frontend/
 │   ├── index.html    The entire app — one self-contained HTML file
 │   └── display.html  Read-only live scoreboard for a second screen
@@ -1958,6 +1960,27 @@ oche/
 | `sessions` | Server-side admin login sessions, keyed by cookie token |
 
 The `darts` table records every physical dart thrown and is the source of truth for treble rates, per-dart analytics, and checkout route history. Schema changes are applied automatically on startup using `ALTER TABLE … ADD COLUMN` or by dropping and recreating tables when the schema changes structurally — player profiles and settings are always preserved.
+
+### Development
+
+The repo has no `node_modules` — the app depends only on Node built-ins, and the
+test runner is Node's own.
+
+| Command (run in `backend/`) | What it does |
+|---|---|
+| `npm start` | Run the server |
+| `npm test` | Run the whole test suite |
+| `npm run test:coverage` | Same, with Node's built-in coverage report |
+| `npm run seed` | Build a populated test database (see below) |
+
+`npm run seed` writes a realistic, deterministic database to `data/seed-dev.db`
+by simulating real X01 and Cricket matches — every row goes through the same
+write path the app itself uses, so nothing in it is a state the app couldn't have
+produced. It exists because most of the app (Home, leaderboards, personal bests,
+anything date-bucketed) only shows its real behaviour once there is history
+behind it. Run the app against one with `DARTS_DB=../data/seed-dev.db npm start`.
+`node seed-dev-db.js --help` lists the options; it refuses to touch your real
+database.
 
 ---
 

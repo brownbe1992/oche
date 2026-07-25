@@ -57,6 +57,7 @@ convention in `CLAUDE.md`.
 - [32. Halve-It](#32-halve-it)
 - [33. Dead Man Walking](#33-dead-man-walking)
 - [34. The Pressure Chamber](#34-the-pressure-chamber)
+- [35. Test Data Seeder](#35-test-data-seeder)
 
 ---
 
@@ -5883,6 +5884,13 @@ event's webhook ID is blank, and throws a caller-visible error (not silent) if
 the resolved host is blocked (loopback/link-local always; private-range only if
 `HA_BLOCK_PRIVATE=true`).
 
+**"This only goes wrong once there's real history behind it."** Several bug
+classes — a leaderboard sorted the wrong way, a "best ever" that never updates,
+a rate with the wrong denominator, a date bucket off by a day — produce the
+right-looking answer against the two or three turns a unit test seeds, and only
+diverge once there are hundreds of legs across months. Build a populated
+database with §35's seeder and look at the screen.
+
 **"Someone got locked out and I don't know why."** Check §9's lockout
 mechanics — default thresholds are 5 (admin) / 10 (PIN) failed attempts, 5-minute
 lockout, configurable in Settings. The `RETURNING`-based increment means the
@@ -8288,3 +8296,119 @@ end-to-end with Playwright: the full New Game → Pressure Chamber practice and
 H2H flows, a full 15-round solo run to a Composure Rating, badges/stat
 bubbles/personal bests/leaderboards via the API, and the live `/display`
 scorecard.
+
+---
+
+## 35. Test Data Seeder
+
+`backend/seed-dev-db.js` (`npm run seed`). Builds a populated, realistic,
+deterministic database by **simulating real matches** — the tool for any
+question that only has a different answer once there is history behind it.
+
+### Why it exists
+
+The two existing verification surfaces are both blind against an empty
+database. `backend/test/` seeds two or three hand-picked turns per case, which
+proves a formula and says nothing about how it behaves over a season; the
+`verify-ui` browser suite (`.claude/skills/verify-ui/`) runs against a scratch
+database, so every Home, Pulse, leaderboard and personal-best panel it renders
+is in its zero state. A leaderboard sorted backwards, a query that only breaks
+on ties, a "best ever" that never updates and a rate dividing by the wrong
+denominator all look correct until there is enough data for the wrong answer to
+be visibly different from the right one.
+
+### The two invariants that make its output trustworthy
+
+1. **Every row goes through `db.js`'s real write path** — `createGame()`,
+   `recordTurn()` and `completeGame()`/`abandonGame()`, never raw SQL.
+   `recordTurn()` specifically, which is the `enforceConsistency: true` wrapper
+   the HTTP layer uses (§9, SEC-22). The seeder therefore *cannot* manufacture a
+   row the running app could not have produced. This is not tidiness: a bug
+   "found" against an impossible state costs an afternoon to disprove.
+2. **Every visit is scored by `frontend/scoring.js`'s real evaluators** —
+   `evaluateVisit()` for X01, `evaluateVisitCricket()` for Cricket (§2). There is
+   no second copy of the rules here to drift out of step with the app's. Cricket
+   matters most: its `turns.scored` is not arithmetically derivable from the
+   darts, so it *must* come from the engine.
+
+### The throwing model
+
+Each player carries a `skill` in 0..1 — their chance of hitting a plain single
+they aimed at — scaled per ring by `ringFactor()` (treble 0.34, double 0.44,
+bull 0.55, double-bull 0.30 of it). A miss degrades the way a real one does:
+~55% land on the right number through the wrong ring, ~35% on a clockwise board
+neighbour, the rest off the board. Every derived statistic — trebleless visits,
+ton-plus rate, checkout percentage, the miss heatmap — falls out of that one
+distribution rather than being invented separately.
+
+Once a finish is live, aiming defers to `checkoutHint()` (§2) — the app's own
+checkout advice — rather than a second opinion. Besides realism this is what
+makes a 170 Big Fish and a nine-darter *reachable at all*: a hand-rolled
+"set up 32, take the double" policy never aims at the bull, so both would be
+structurally impossible no matter how much data was generated.
+
+The default roster's skills are spaced widely on purpose (`0.85` descending by
+`0.13`). That produces a clean monotone ordering across every derived metric —
+3-dart average, darts per leg, trebleless rate, Elo, Cricket MPR — which is what
+makes "is this leaderboard the right way up?" an answerable question. Adjacent
+skills a few points apart would leave the ordering inside sampling noise.
+
+### Determinism
+
+A seeded mulberry32 PRNG drives everything: the roster, who plays whom, and
+every dart. The same `--seed` always reproduces the same play, which is the
+difference between a bug report and an anecdote. Only the timestamps differ
+between runs, deliberately — they are anchored to "the last `--days` days"
+relative to when the command runs, so a freshly-seeded database still has
+something in Legs Today and Legs This Week.
+
+### Backdating
+
+`createGame()`/`recordTurn()`/`completeGame()` all stamp `datetime('now')`, so
+without a fixup every seeded game would land in the same second and collapse
+exactly the stats worth testing (Legs Today/This Week, On This Day, form trends,
+the recap, streaks, every date-bucketed history query). Timestamps are therefore
+rewritten *after* creation — `games.created_at` plus `completed_at` **or**
+`dnf_at`, never both (§13's schema treats them as mutually exclusive) — and each
+game's turns are spread evenly across its ~4-minutes-a-leg duration so
+pace/duration derivations see plausible gaps.
+
+### Safety
+
+It refuses outright to write to `data/darts.db`, with or without `--force`, and
+refuses to overwrite any other existing file without it. `PRAGMA
+synchronous=OFF` is set for the run — the file is disposable and the command is
+re-runnable, and it is a ~30x speedup (500 games: 100s → 3s). The server never
+does this.
+
+### Options
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--db <path>` | `data/seed-dev.db` | target file |
+| `--seed <n>` | `1` | PRNG seed |
+| `--days <n>` | `90` | spread play over the last N days |
+| `--games <n>` | `40` | matches to simulate |
+| `--players <a,b,…>` | `Ada,Bex,Cal,Dot,Eli` | roster, strongest first |
+| `--force` | off | overwrite an existing target |
+
+Coverage is X01 (H2H and practice) and Cricket — where the bulk of the stat
+surface lives — not all 16 game types. Genuinely rare achievements (Big Fish,
+nine-darters) stay rare: the model can produce them, but a realistic household
+does not throw one in a thousand legs, so those panels will normally still be in
+their empty state. That is the honest answer, and fabricating the events instead
+would reintroduce exactly the impossible-state problem invariant 1 exists to
+prevent.
+
+### Testing
+
+`backend/test/seed-dev-db.test.js`: `parseRouteLabel()` round-tripping every
+label `checkoutHint()` can emit across all finishable scores 2–170 in both out
+modes; `aimX01()` never proposing an off-board or treble-bull dart at any
+remaining score; `aimCricket()` returning `null` only in a genuine stalemate
+(the guard that stops a closed-out Cricket leg looping forever); `makeRng()`
+reproducibility and `shuffle()` being a non-mutating permutation; `sqliteTs()`'s
+format; argument validation; and an end-to-end run asserting two same-seed runs
+produce identical darts, that every game reaches exactly one ending
+(`completed_at` xor `dnf_at`), that every leg has exactly one winning turn, that
+play is spread across more than one day, and that both write guards hold.

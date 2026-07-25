@@ -55,9 +55,16 @@ function startServer() {
   return child;
 }
 
+// A database this file invented is ours to delete; one the caller named via
+// VERIFY_UI_DB is theirs. Deleting the latter would silently destroy a seeded
+// fixture (backend/seed-dev-db.js) that took a command to build, on a run that
+// otherwise succeeded.
+const OWNS_DB = !process.env.VERIFY_UI_DB;
+
 function stopServer(child) {
   if (!child) return;
   try { process.kill(-child.pid, 'SIGTERM'); } catch { /* already gone */ }
+  if (!OWNS_DB) return;
   for (const suffix of ['', '-wal', '-shm']) {
     try { fs.unlinkSync(DB_PATH + suffix); } catch { /* fine */ }
   }

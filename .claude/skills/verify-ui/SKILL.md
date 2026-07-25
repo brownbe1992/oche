@@ -64,6 +64,34 @@ has a history: the controller's `legSummary` shape is an unstated contract with
 the display's `summary()` card, and mismatches have produced blank end-of-leg
 cards before — the sort of thing nobody notices until a match is on the TV.
 
+## Checking a screen that needs real history behind it
+
+The runner's scratch database starts empty, so every Home, Pulse, leaderboard
+and personal-best panel renders in its zero state. That is the right default —
+the checks here are about structure, and an empty DB makes them fast and
+reproducible — but it means this suite cannot see a leaderboard sorted the wrong
+way, a "best ever" that never updates, or a date bucket off by a day.
+
+For those, seed a database first and point the runner at it:
+
+```bash
+cd backend && npm run seed -- --db /tmp/oche-seeded.db --games 80
+VERIFY_UI_DB=/tmp/oche-seeded.db node .claude/skills/verify-ui/scripts/run.js
+```
+
+`backend/seed-dev-db.js` simulates real X01 and Cricket matches through `db.js`'s
+own write path, so it cannot produce a state the app couldn't — nothing found
+against it is a false positive from an impossible row. It is deterministic per
+`--seed`, and the default roster's skills are spaced so every derived metric
+comes out in the same order (strongest player first), which is what makes
+"is this leaderboard the right way up?" a question you can actually answer.
+Full mechanism: `REFERENCE.md` §35.
+
+Note the suite still creates its own throwaway players and legs on top, so a
+seeded run is a starting point, not a fixed fixture. A database you name via
+`VERIFY_UI_DB` is left on disk when the run ends; only the scratch one the
+runner invents for itself is deleted.
+
 ## When something fails
 
 Failures print the measured value, and a screenshot of the screen **at the

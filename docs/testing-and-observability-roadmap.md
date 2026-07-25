@@ -24,6 +24,11 @@
 > `db.ghost.test.js`, and Just Chuckin' It's `db.chuckin-stats.test.js` plus
 > `scoring.test.js`'s `chuckinTiersReached()` coverage for the milestone-badge
 > trigger condition).
+> A third target was added in 2026-07: `backend/seed-dev-db.js` (`npm run seed`),
+> a deterministic seeder that simulates real X01/Cricket matches through `db.js`'s
+> own write path so the whole-app surfaces (Home, Pulse, leaderboards, personal
+> bests) can be checked against real history instead of a zero state — see §A's
+> "Third target" below and `REFERENCE.md` §35.
 > `npm test` runs the whole suite (zero new dependency), and
 > `.github/workflows/test.yml` runs it on every push/PR, closing this doc's own
 > open CI question. Writing this suite found and fixed 3 small, real bugs
@@ -105,6 +110,28 @@ identity.
   without `await`-ing the PIN-hash write, so its own `hasPin` field (and
   `POST /api/players`'s HTTP response) could report `false` for a player that was,
   in fact, just given one.
+- ~~**Third target**: something that produces enough real data for the whole-app
+  surfaces to be checkable~~ ✅ **Done** (2026-07) — `backend/seed-dev-db.js`
+  (`npm run seed`). The two suites above are both blind against an empty
+  database: `node:test` seeds two or three hand-picked turns per case, and the
+  `verify-ui` browser suite runs against a scratch DB, so every Home/Pulse/
+  leaderboard/personal-best panel it renders is in its zero state. A leaderboard
+  sorted backwards, a query that only breaks on ties, a "best ever" that never
+  updates and a rate with the wrong denominator all look correct until there is
+  enough history for the wrong answer to differ visibly from the right one. The
+  seeder simulates real X01 and Cricket matches through `db.js`'s **own**
+  `createGame()`/`recordTurn()`/`completeGame()` (`recordTurn()` specifically —
+  the `enforceConsistency:true` path the HTTP layer uses, SEC-22) and scores
+  every visit with `frontend/scoring.js`'s **own** evaluators, so it cannot
+  manufacture a state the running app couldn't produce — the property that keeps
+  a "bug" found against it from being a false positive. A seeded PRNG makes a run
+  reproducible from its `--seed` alone; timestamps are backdated across
+  `--days` so the date-bucketed stats have something to bucket. The default
+  roster's skills are spaced widely enough that every derived metric (3-dart
+  average, darts/leg, trebleless rate, Elo, Cricket MPR) comes out in the same
+  monotone order, making "is this leaderboard the right way up?" answerable.
+  Covered by `backend/test/seed-dev-db.test.js`; full mechanism in `REFERENCE.md`
+  §35.
 - **Still not aiming for exhaustive coverage.** The goal remains a safety net
   around the highest-risk shared logic, not literally every line in `db.js` —
   e.g. `getSettings`/`updateSettings`'s full validation surface (mirrored in
