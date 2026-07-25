@@ -620,6 +620,166 @@
   body.game-active #game-header-controls .header-actions{justify-self:end;display:flex;gap:8px}
   /* Cricket has no Pad/Dartboard choice — its scoring screen replaces both. */
   body.cricket-active #game-header-controls .imt-row{display:none}
+  /* ---------- Pocket Card (Home) ----------
+     Same paper as the Checkout Trainer play area, at card scale. `.card` gives it
+     the app's own padding/radius; everything below repaints it as stock. Kept as
+     its own scope rather than reusing body.paper-mode, which is a whole-screen
+     mode — this is one card sitting on the dark Home page, which is the point. */
+  .pocket{
+    --paper:#efe7d2; --paper-hi:#f6f0e0; --paper-ink:#14160f;
+    --paper-rule:#c9bfa4; --paper-soft:#6a6047;
+    position:relative;color:var(--paper-ink);
+    background:linear-gradient(178deg,#f4eddb 0%,var(--paper) 55%,#e8dfc6 100%);
+    border-color:#b9ad8d;
+  }
+  .pocket::before{content:'';position:absolute;inset:7px;border:1px solid var(--paper-rule);
+    border-radius:8px;pointer-events:none;opacity:.6}
+  .pocket > *{position:relative}
+  .pocket .pk-eyebrow{display:flex;align-items:center;gap:8px;font-size:9.5px;font-weight:700;
+    letter-spacing:.16em;text-transform:uppercase;color:var(--paper-soft)}
+  .pocket .pk-eyebrow::after{content:'';flex:1;height:1px;background:var(--paper-rule)}
+  .pocket .pk-mode{letter-spacing:.1em;color:#75570f}
+  .pocket .pk-q{font-family:'Kalam',cursive;font-weight:700;font-size:17px;margin-top:10px;color:#3a3524}
+  .pocket .pk-target{font-family:'Bebas Neue',sans-serif;font-size:74px;line-height:.82;
+    letter-spacing:.01em;margin-top:2px;color:var(--paper-ink)}
+  .pocket .pk-sub{font-size:11px;color:var(--paper-soft);margin-top:4px}
+  .pocket .pk-slots{display:flex;gap:7px;margin-top:13px}
+  .pocket .pk-slot{flex:1 1 0;border:1px dashed var(--paper-rule);border-radius:7px;padding:9px 0;
+    text-align:center;font-weight:700;font-size:14px;color:#6f664f;background:transparent}
+  .pocket .pk-slot.on{background:var(--paper-ink);border-style:solid;border-color:var(--paper-ink);color:var(--paper)}
+  .pocket .pk-acts{display:flex;gap:8px;margin-top:12px}
+  .pocket .pk-btn{flex:1;padding:10px;border-radius:9px;font:inherit;font-weight:700;font-size:13px;
+    cursor:pointer;border:1px solid var(--paper-rule);background:transparent;color:#4a442f}
+  .pocket .pk-btn.solid{background:var(--paper-ink);border-color:var(--paper-ink);color:var(--paper)}
+  /* Disabled sits on paper, so fading the ink fill just produces a muddy grey slab.
+     Fall back to the outline treatment instead — clearly inert, still stationery. */
+  .pocket .pk-btn.solid:disabled{background:transparent;border-style:dashed;
+    border-color:var(--paper-rule);color:#8c8365}
+  .pocket .pk-btn:disabled{cursor:not-allowed}
+  .pocket .pk-keys{margin-top:12px;border-top:1px solid var(--paper-rule);padding-top:11px}
+  .pocket .pk-mults{display:flex;gap:6px;margin-bottom:7px}
+  .pocket .pk-mults button{flex:1;padding:9px 0;border-radius:7px;font:inherit;font-weight:700;font-size:13px;
+    cursor:pointer;border:1px solid var(--paper-rule);background:var(--paper-hi);color:var(--paper-ink)}
+  .pocket .pk-mults button[aria-pressed="true"]{background:var(--paper-ink);border-color:var(--paper-ink);color:var(--paper)}
+  .pocket .pk-nums{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .pocket .pk-nums button{padding:9px 0;border-radius:6px;font:inherit;font-weight:600;font-size:14px;
+    cursor:pointer;border:1px solid var(--paper-rule);background:var(--paper-hi);color:var(--paper-ink)}
+  .pocket .pk-nums button.bull{grid-column:span 2;color:#a3271c}
+  .pocket .pk-verdict{margin-top:12px;font-family:'Kalam',cursive;font-weight:700;font-size:15px;color:#3a3524}
+  .pocket .pk-verdict.good{color:#1f6b34}
+  .pocket .pk-verdict.bad{color:#a3271c}
+  .pocket .pk-route{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:.06em;
+    color:var(--paper-ink);margin-top:3px}
+  .pocket .pk-foot{margin-top:11px;font-size:11px;color:var(--paper-soft)}
+  .pocket .pk-foot a{color:#75570f;font-weight:700;cursor:pointer;text-decoration:underline}
+  .pocket :focus-visible{outline:2px solid var(--paper-ink);outline-offset:2px}
+
+  /* ================= PAPER MODE =================
+     GAME_TYPES.<type>.paperTheme — today only Checkout Trainer. The whole app is
+     the black dartboard bed or the slate scoreboard; this ONE mode inverts to the
+     board's own wedge cream, because it isn't the board on the wall, it's the
+     checkout card in your back pocket. You should be able to tell at a glance,
+     with the phone at arm's length, that this is the mode you can play with no
+     board in the room.
+
+     Scoped entirely to `body.paper-mode` and to the PLAY AREA — the masthead and
+     the app chrome around it stay dark on purpose, so the sheet reads as a card
+     laid on the app rather than a whole second skin of it. Presentation only:
+     nothing here changes what is scored or recorded.
+
+     Ink/rule/shade are local to this block. The app's --cream is the paper, but
+     it has no dark-ink-on-light pair anywhere else, so those three are defined
+     here rather than promoted to :root and left looking global. */
+  body.paper-mode{
+    --paper:#efe7d2;
+    --paper-hi:#f6f0e0;
+    --paper-ink:#14160f;
+    --paper-rule:#c9bfa4;
+    --paper-soft:#6a6047;
+    --paper-edge:#b9ad8d;
+  }
+  /* The sheet is painted on #screen-game, NOT on .game-play-area — that wrapper is
+     `display:contents`, so it generates no box at all and cannot carry a background.
+     Setting one there silently does nothing and leaves ink-coloured text sitting on
+     the black board, which is how the first attempt at this looked. Painting the
+     grid/flex container itself is safe: a background never affects layout. */
+  body.paper-mode #screen-game.on{
+    background:linear-gradient(178deg,#f4eddb 0%,var(--paper) 55%,#e8dfc6 100%);
+    border-radius:14px;
+    box-shadow:0 18px 30px -20px #000,0 2px 0 var(--paper-edge) inset;
+    color:var(--paper-ink);
+  }
+  body.paper-mode #screen-game.on::before{
+    content:'';position:absolute;inset:6px;border:1px solid var(--paper-rule);
+    border-radius:9px;pointer-events:none;opacity:.6;z-index:0;
+  }
+  body.paper-mode #screen-game.on{position:relative;padding:14px 12px 16px}
+  body.game-active.paper-mode #screen-game{padding:12px 12px 0}
+  body.paper-mode #screen-game.on > *{position:relative;z-index:1}
+  body.paper-mode #scoreboard .pscore{
+    background:transparent;border:1px solid var(--paper-rule);border-radius:9px;
+    box-shadow:none;color:var(--paper-ink);
+  }
+  body.paper-mode #scoreboard .pscore.active{border-color:var(--paper-ink);box-shadow:none}
+  body.paper-mode .pscore .nm{color:var(--paper-ink)}
+  body.paper-mode .pscore .nm-out,
+  body.paper-mode .pscore .meta .avgs{color:var(--paper-soft)}
+  body.paper-mode .pscore .meta .avgs b{color:var(--paper-ink)}
+  /* The target is the hero — same Bebas numeral the pocket card leads with. */
+  body.paper-mode .pscore .rem{color:var(--paper-ink)}
+  body.paper-mode .pscore .turnflag,
+  body.paper-mode .pscore .meta .standing,
+  body.paper-mode .pscore .co-inline{color:#75570f}  /* 5.45:1 on paper; #8a6a1f measured 4.09 */
+
+  body.paper-mode .slot{
+    background:transparent;border:1px dashed var(--paper-rule);color:var(--paper-ink);
+  }
+  body.paper-mode .slot.filled{background:var(--paper-ink);border-color:var(--paper-ink);color:var(--paper)}
+  body.paper-mode .slot.filled .lab{color:var(--paper)}
+  body.paper-mode .slot.filled .pts{color:#cdc4a8}
+  body.paper-mode .slot .ph{color:#6f664f}  /* 4.62:1 on paper; #aa9f80 measured 2.13 */
+  /* The treble/double slot tints are a board convention (a red/green ring); on
+     paper the filled slot is already ink-on-cream, so they'd read as noise. */
+  body.paper-mode .slot.t,
+  body.paper-mode .slot.d{border-color:var(--paper-ink)}
+
+  /* The verdict line — the one place this mode actually talks to you, so it gets
+     the handwriting. Kalam is already loaded for the app's chalk moments. */
+  body.paper-mode .status{
+    font-family:'Kalam',cursive;font-weight:700;font-size:15px;color:#3a3524;
+  }
+  body.paper-mode .status.bust{color:#a3271c}
+  body.paper-mode .status.win{color:#1f6b34}
+
+  /* `.oche` is the dark inset panel the input sits in — a black well in the middle
+     of the sheet if it isn't cleared. On paper the keys carry their own borders, so
+     the panel only needs to hold the padding. */
+  body.paper-mode .oche{background:transparent;border-color:var(--paper-rule)}
+  body.paper-mode .multi button,
+  body.paper-mode .pad button{
+    background:var(--paper-hi);border:1px solid var(--paper-rule);color:var(--paper-ink);
+  }
+  body.paper-mode .pad button:not(.bull):not(.miss):nth-child(even){background:#eee6d0}
+  body.paper-mode .multi button[aria-pressed="true"],
+  body.paper-mode .multi button.m-s[aria-pressed="true"],
+  body.paper-mode .multi button.m-d[aria-pressed="true"],
+  body.paper-mode .multi button.m-t[aria-pressed="true"]{
+    background:var(--paper-ink);border-color:var(--paper-ink);color:var(--paper);
+  }
+  body.paper-mode .pad button.bull{color:#a3271c}
+  body.paper-mode .pad button:hover:not(:disabled){border-color:var(--paper-ink);color:var(--paper-ink)}
+  body.paper-mode .pad button:disabled{opacity:.35}
+
+  body.paper-mode .turn-actions .btn-primary{
+    background:var(--paper-ink);color:var(--paper);border-color:var(--paper-ink);
+  }
+  body.paper-mode .turn-actions .btn-ghost,
+  body.paper-mode .undo-row .btn{
+    background:transparent;border:1px solid var(--paper-rule);color:#4a442f;
+  }
+  /* Focus must stay obvious on cream — the app's gold ring disappears against it. */
+  body.paper-mode .game-play-area :focus-visible{outline:2px solid var(--paper-ink);outline-offset:2px}
+
   /* A pad-only game type (GAME_TYPES.<type>.padOnly — Checkout Trainer) hides the
      toggle via the `hidden` attribute in applyDartMode(). `.imt-row{display:flex}`
      above is an AUTHOR declaration, and an author `display` always outranks the UA
@@ -1169,6 +1329,13 @@
       <h2 style="font-size:20px;margin-bottom:12px">🌙 Tonight's Recap</h2>
       <div id="home-recap-teaser-body"></div>
     </div>
+    <!-- Pocket Card (design direction A, /frontend-design 2026-07) — Checkout Trainer
+         surfaced on Home as the thing it actually is: the laminated checkout card in
+         your back pocket, not a game filed among 16 board games. The one paper
+         surface on an otherwise black screen, so "you can play this with no board in
+         the room" reads at arm's length without a word of explanation.
+         Answers here are a warm-up and are NOT recorded — see renderPocketCard(). -->
+    <div class="card pocket" id="home-pocket-card" style="margin-top:14px" hidden></div>
     <div class="card" style="text-align:center;margin-top:14px">
       <button class="btn btn-primary" onclick="show('setup')">Start new game →</button>
     </div>
@@ -2682,6 +2849,13 @@ function show(name){
   // Cricket never offers a Pad/Dartboard choice (its own dedicated scoring screen
   // replaces both) — hide the toggle rather than leave it visibly do-nothing.
   document.body.classList.toggle('cricket-active', name==='game' && !!game && game.gameType==='cricket');
+  // Paper mode (GAME_TYPES.<type>.paperTheme — Checkout Trainer): the one game type
+  // whose play area is a cream checkout card rather than the black board. Toggled
+  // HERE, alongside game-active/cricket-active, so leaving the screen for any
+  // reason clears it — a mode-specific skin left stuck on Home would be worse than
+  // never having applied it.
+  document.body.classList.toggle('paper-mode',
+    name==='game' && !!game && !!(GAME_TYPES[game.gameType] && GAME_TYPES[game.gameType].paperTheme));
   document.getElementById('nav-home').setAttribute('aria-current', name==='home');
   document.getElementById('nav-setup').setAttribute('aria-current', name==='setup');
   document.getElementById('nav-players').setAttribute('aria-current', name==='players'||name==='player');
@@ -3551,6 +3725,10 @@ function renderHomeGameTypeTabs(){
 }
 function renderHome(){
   renderHomeGameTypeTabs();
+  // Independent of the Home data fetches below — the Pocket Card needs nothing from
+  // the server (pickCheckoutTarget/gradeCheckoutAttempt are pure), so it renders
+  // immediately rather than waiting on /api/summary like the rest of the page.
+  renderPocketCard();
   const body=document.getElementById('home-body');
   if(!body) return;
   // Stale-while-revalidate, now split into two independent pieces (item 45):
@@ -3663,6 +3841,110 @@ function renderHomeContent(){
 // Ticker & Podium" direction) — built entirely from data renderHomeContent()
 // already has in scope (s/extra), no new endpoint. Hidden entirely if
 // nothing qualifies (e.g. a brand-new install with no games yet at all).
+/* ---------- Pocket Card (Home) — /frontend-design direction A, 2026-07 ----------
+   Checkout Trainer's problem was never its name, it was its filing: every other mode
+   answers "what shall we play at the board?", this one answers "I'm not at the board,
+   can I still get better?" So it gets a card on Home that IS the drill — a real target
+   you can answer where you stand, no navigation, no setup step.
+
+   These answers are NOT recorded, deliberately, and the card says so. Three reasons:
+   Home is shared by the whole household, so anyone walking past could otherwise
+   dump answers into somebody's Accuracy/Optimal%/streak; asking "who is this?" first
+   would destroy the two-tap immediacy that is the entire point of putting it here;
+   and Checkout Trainer's darts are already excluded from every physical stat
+   (REFERENCE.md §19), so a hypothetical warm-up is consistent with how the mode
+   already treats itself. "Play a full session" starts the real, recorded mode.
+
+   Grading reuses gradeCheckoutAttempt()/pickCheckoutTarget() from scoring.js
+   unchanged — the same functions the real mode grades with, so this can never drift
+   into disagreeing with it. */
+let pocketDrill = null;
+
+function pocketNewTarget(){
+  pocketDrill = {
+    // Double-out and the full 1-170 range: the household's per-player finish rule is
+    // a property of a player, and this card deliberately has no player.
+    target: pickCheckoutTarget(true, undefined, 'full', 0, null),
+    mult: 1,
+    darts: [],
+    result: null,
+  };
+}
+
+function pocketSetMult(m){ if(pocketDrill){ pocketDrill.mult = m; renderPocketCard(); } }
+function pocketThrow(sector){
+  if(!pocketDrill || pocketDrill.result || pocketDrill.darts.length >= 3) return;
+  pocketDrill.darts.push(makeDartCore(sector, pocketDrill.mult));
+  pocketDrill.mult = 1;   // same reset-after-each-dart the real pad does
+  renderPocketCard();
+}
+function pocketUndo(){ if(pocketDrill && !pocketDrill.result){ pocketDrill.darts.pop(); renderPocketCard(); } }
+function pocketCheck(){
+  if(!pocketDrill || !pocketDrill.darts.length) return;
+  pocketDrill.result = gradeCheckoutAttempt(pocketDrill.target, true, pocketDrill.darts);
+  renderPocketCard();
+}
+function pocketNext(){ pocketNewTarget(); renderPocketCard(); }
+function pocketPlayFullSession(){ setMode('checkout_trainer'); show('setup'); }
+
+function renderPocketCard(){
+  const el = document.getElementById('home-pocket-card');
+  if(!el) return;
+  // pickCheckoutTarget/gradeCheckoutAttempt live in scoring.js; if it somehow hasn't
+  // loaded, stay hidden rather than render a broken card.
+  if(typeof pickCheckoutTarget !== 'function' || typeof gradeCheckoutAttempt !== 'function'){ el.hidden = true; return; }
+  if(!pocketDrill) pocketNewTarget();
+  el.hidden = false;
+
+  const d = pocketDrill;
+  const slots = [0,1,2].map(i => {
+    const dart = d.darts[i];
+    return `<div class="pk-slot${dart?' on':''}">${dart ? escapeHtml(dart.label) : 'dart '+(i+1)}</div>`;
+  }).join('');
+
+  const keys = d.result ? '' : `
+    <div class="pk-keys">
+      <div class="pk-mults">
+        ${[[1,'Single'],[2,'Double'],[3,'Treble']].map(([m,lab]) =>
+          `<button type="button" aria-pressed="${d.mult===m}" onclick="pocketSetMult(${m})">${lab}</button>`).join('')}
+      </div>
+      <div class="pk-nums">
+        ${Array.from({length:20},(_,i)=>`<button type="button" onclick="pocketThrow(${i+1})">${i+1}</button>`).join('')}
+        <button type="button" class="bull" onclick="pocketThrow(25)">Bull</button>
+      </div>
+    </div>`;
+
+  let verdict = '', acts;
+  if(d.result){
+    const r = d.result;
+    const cls = r.optimal ? 'good' : r.legal ? '' : 'bad';
+    const line = r.optimal ? `Optimal — ${r.usedDarts} dart${r.usedDarts===1?'':'s'}.`
+      : r.legal ? `A finish, but not the shortest — you used ${r.usedDarts}, ${r.optimalDarts} will do it.`
+      : !r.hint ? `Trick question — ${d.target} has no checkout at all.`
+      : `That doesn't finish ${d.target}.`;
+    verdict = `<div class="pk-verdict ${cls}">${escapeHtml(line)}</div>
+      ${r.hint ? `<div class="pk-route">${escapeHtml(r.hint)}</div>` : ''}`;
+    acts = `<button type="button" class="pk-btn solid" onclick="pocketNext()">Next checkout</button>`;
+  } else {
+    acts = `<button type="button" class="pk-btn solid" onclick="pocketCheck()"${d.darts.length?'':' disabled'}>Check my answer</button>
+      ${d.darts.length ? `<button type="button" class="pk-btn" onclick="pocketUndo()">Undo dart</button>`
+                       : `<button type="button" class="pk-btn" onclick="pocketNext()">Skip</button>`}`;
+  }
+
+  el.innerHTML = `
+    <div class="pk-eyebrow">No board needed<span class="pk-mode">Freeform</span></div>
+    <div class="pk-q">What do you leave on…</div>
+    <div class="pk-target">${d.target}</div>
+    <div class="pk-sub">Double out · fewest darts</div>
+    <div class="pk-slots">${slots}</div>
+    ${verdict}
+    <div class="pk-acts">${acts}</div>
+    ${keys}
+    <div class="pk-foot">Warm-ups here aren't recorded ·
+      <a role="button" tabindex="0" onclick="pocketPlayFullSession()"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();pocketPlayFullSession();}">Play a full session</a></div>`;
+}
+
 function renderHomeTicker(){
   const wrap = document.getElementById('home-ticker');
   const track = document.getElementById('home-ticker-track');
@@ -14920,6 +15202,12 @@ const GAME_TYPES = {
     // indistinguishable to the player from the app mis-grading a route they entered
     // correctly. Removing the input that can't mean anything here is the fix.
     padOnly: true,
+    // The cream checkout-card skin for this mode's play area (see the `body.paper-mode`
+    // block in the stylesheet). Deliberately a SEPARATE member from padOnly above,
+    // even though today one type has both: "this mode can't use the dartboard" and
+    // "this mode looks like paper" are different claims, and a future no-board mode
+    // might well want one without the other.
+    paperTheme: true,
     ctorArg: 'config',
     newMatchPlayer: newMatchPlayerCheckoutTrainer,
     // Unlike Doubles Practice/Chuckin, this genuinely IS a per-visit evaluation —

@@ -5222,6 +5222,45 @@ graded instantly against the objectively optimal route. Two sub-modes sharing
 one core mechanic: untimed **Freeform** and the 60-second **Checkout Blitz**
 sprint.
 
+**Presentation — Paper Mode, and the Pocket Card on Home.** Chosen from four
+directions via `/frontend-design` (2026-07, direction A). The whole app is the black
+dartboard bed or the slate scoreboard; this **one** game type inverts to the board's
+own wedge cream (`--cream #efe7d2`) with printed rules and dark ink, because it isn't
+the board on the wall — it's the checkout card in your back pocket. You should be able
+to tell at arm's length that this is the mode needing no board in the room.
+
+Two surfaces share the treatment:
+
+- **Paper Mode** (`GAME_TYPES.<type>.paperTheme`, `body.paper-mode`) restyles the
+  Checkout Trainer play area. Toggled in `show()` alongside `game-active`/
+  `cricket-active`, so leaving the game screen for any reason clears it. Presentation
+  only — nothing about what is scored or recorded changes.
+  - The sheet is painted on **`#screen-game`**, not `.game-play-area`. That wrapper is
+    `display:contents` and so generates no box at all: a background set there silently
+    does nothing and leaves ink-coloured text on the black board. A background on the
+    grid/flex container itself never affects layout.
+  - `.oche` (the inset input panel) is cleared to transparent, or it reads as a black
+    well in the middle of the sheet.
+  - The dark theme's red/green double/treble tints are dropped: on paper a filled slot
+    is already ink-on-cream, so they'd read as noise.
+- **The Pocket Card** (`renderPocketCard()`, `#home-pocket-card`) puts a live target on
+  Home, below Today's Challenge and above Start new game, answerable in place with no
+  navigation. Its answers are deliberately **not recorded**, and the card says so.
+  Three reasons: Home is shared, so anyone passing could otherwise dump answers into
+  somebody's Accuracy/Optimal%/streak; asking "who is this?" first would destroy the
+  two-tap immediacy that is the whole point; and this mode's darts are already excluded
+  from every physical stat (below), so a hypothetical warm-up is consistent with how it
+  already treats itself. It grades double-out (it has no player, so it cannot honour a
+  per-player single-out rule) and says "Double out" on its face. Targets and verdicts
+  come from `pickCheckoutTarget()`/`gradeCheckoutAttempt()` — the same functions the
+  real mode uses, so the card can never drift into disagreeing with it. "Play a full
+  session" starts the real, recorded mode.
+
+Both palettes are held to `docs/accessibility-roadmap.md`'s 4.5:1 text standard, checked
+by `backend/test/frontend.pocket-card.test.js`, which captures each colour out of the
+stylesheet rather than from a copied list. Two colours were caught failing while the
+theme was built (`#8a6a1f` at 4.09:1, `#aa9f80` at 2.13:1).
+
 **Scoring-screen UI — Pad only, always.** This mode never offers the dartboard
 input. `GAME_TYPES.checkout_trainer.padOnly` is `true`, `boardInputActive()`
 (`dartboardMode && !padOnlyGame()`) returns false for it, and the Pad/Dartboard

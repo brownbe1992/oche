@@ -113,6 +113,15 @@ Open `http://localhost:8046`. The database is created at the path in the `DARTS_
 
 The landing page shows a live snapshot of all-time activity:
 
+**🃏 Pocket Card** — a live checkout question you can answer without leaving Home, and
+without a dartboard: "What do you leave on 167?", three dart slots, and an instant
+verdict against the objectively shortest route. It's the one cream, paper-textured card
+on an otherwise black screen, because it's the only thing here you can play with no
+board in the room — the checkout card in your back pocket rather than the board on the
+wall. Answers here are a warm-up and **aren't recorded** (Home is shared by the whole
+household, and no player is picked); *Play a full session* opens the recorded
+[Checkout Trainer](#new-game), whose own scoring screen uses the same paper treatment.
+
 **Hero stats:** Total darts thrown · 180s · Big Fish · 9-Darters *(shown even at zero, with an empty-state prompt, since it's the rarest feat in the game)*
 
 **Activity:** Players · Games played *(completed H2H matches — practice, solo, and Daily Challenge sessions don't count as games)* · Sets played · H2H legs thrown · Practice legs thrown
