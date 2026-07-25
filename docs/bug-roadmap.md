@@ -93,8 +93,13 @@
 > section at the bottom. Both were reproduced against a running server rather than
 > inferred from reading, and **all four were fixed in the following change, v0.20.1**,
 > each with a committed regression test proven to fail against the pre-fix source.
-> **BUG-1 through BUG-31 are all fixed as of this writing**, and nothing is open on the
-> security tracker either.
+> **BUG-32** was opened by an owner bug report (2026-07) against Checkout Trainer
+> appearing to mis-grade a legal checkout — the grader proved correct (7,810 routes
+> swept, zero mismatches) and the real cause was the dartboard input's miss rings
+> sitting where a thumb aims for a number, recording a Miss that turned a correct
+> route illegal; fixed by making the mode Pad-only, which also delivered the owner's
+> separate request that it always open on the pad. **BUG-1 through BUG-32 are all
+> fixed as of this writing**, and nothing is open on the security tracker either.
 
 ## Severity legend
 
@@ -2506,6 +2511,67 @@ per-dart timing enabled, open the Player Profile and compare the Average Pace bu
 with the Average Pace chart over the same period and mode. Before the fix they differ
 sharply (measured: 3.0 vs 41.0); after the fix they agree, and the Home page's Pulse
 pace agrees with both.
+
+### BUG-32 — Checkout Trainer offered the dartboard input, whose miss rings sit exactly where a thumb aims for a number — a mistap records a Miss and turns a correct checkout into "not a legal finish"  **(MED, user-facing / reads as a grading fault)**
+
+**Status: ✅ Fixed (2026-07).** Reported by the owner as a grading bug: entering
+18 → D16 on a target of 50 — a legal, non-optimal checkout — was told it "wasn't
+a legal finish."
+
+**The grader was verified correct before anything was changed.** `gradeCheckoutAttempt()`
+grades `[S18, D16]` on 50 as `{legal: true, optimal: false, hint: 'Bull'}`, both
+through the pure function and through the real UI in both input modes. An exhaustive
+sweep of every 1- and 2-dart route across every target 2–170 in both out modes —
+**7,810 routes** — found **zero** mismatches against ground truth. So the maths was
+never wrong, and "fixing" it would have been fixing the wrong thing.
+
+**What actually happens (plain language):** Checkout Trainer is a memory drill — you
+propose a route, no dart is ever physically thrown. That's why the Pad already hides
+"Miss" and "Bounce Out" for this mode. But the **dartboard** input still offered them:
+it carries two full miss rings (near and far, one per wedge) sitting immediately
+outside the double ring — which is exactly where a thumb lands when it is aiming for
+the number printed around the board's edge. Tap there and you record a genuine Miss
+(sector 0). A Miss makes a correct route arithmetically wrong: on 50, `[Miss, D16]`
+reaches only 32, so it grades illegal and prints *"Not a legal finish for 50. Best
+route: Bull."* — character for character the message reported. From the player's side
+that is indistinguishable from the app mis-grading a route they entered correctly,
+because the round has already advanced by the time they read it and the darts they
+actually recorded are no longer on screen.
+
+So one input honoured the mode's own "a miss is meaningless here" rule and the other
+contradicted it, in the most mistappable place on the widget.
+
+**Fix:** remove the input that cannot mean anything in this mode, rather than touch
+the maths. New `GAME_TYPES.checkout_trainer.padOnly` registry member (derived per-type
+from the registry, the same discipline items 39/41/46 applied to the other per-type
+lists) plus `boardInputActive()` = `dartboardMode && !padOnlyGame()`, which every
+render path now consults. The Pad/Dartboard toggle is hidden for this game type. This
+also closes the owner's separate request that Checkout Trainer always open on the pad
+regardless of the household's `default_scoring_input` setting.
+
+Two things worth recording from the fix itself:
+
+- **The first draft forced `dartboardMode = false`.** It worked for the trainer and
+  silently reset a board-preferring household to the pad for *every game they played
+  afterwards* — caught by checking the flag after a following X01 game. The stored
+  preference is now never mutated; only the derived value changes.
+- **Hiding the toggle needed a CSS rule, not just the attribute.** `.imt-row` sets
+  `display:flex`, and an author `display` declaration outranks the UA stylesheet's
+  `[hidden]{display:none}` however weak its selector, so `.hidden = true` alone did
+  nothing. Fixed with `#game-header-controls .imt-row[hidden]{display:none}` (id +
+  attribute out-specifies the base rule, no `!important`). Same trap the scoring
+  screen's `.rail-play`/`.oche`/`.slots` hit.
+
+Committed regression test `backend/test/frontend.checkout-trainer-pad-only.test.js`:
+the reported route grading legal-but-not-optimal, the leading-Miss variant genuinely
+illegal (the message that was seen), the full 7,810-route ground-truth sweep, the
+`padOnly` registry member, the derived-not-mutated preference (proven to fail against
+the first draft), the scoped `[hidden]` rule, and that no render path still branches
+on the raw preference. Verified live in a browser with the household default set to
+the dartboard: the trainer opens on the pad, the toggle is absent (computed
+`display:none`), `setDartMode('board')` does not stick, 18 → D16 on 50 now reads
+"Legal finish, but not optimal (you used 2 — 1 possible). Best route: Bull," and a
+following X01 game still gets the board. `REFERENCE.md` §19 rewritten accordingly.
 
 ## Standing practice
 

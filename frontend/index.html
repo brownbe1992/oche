@@ -620,6 +620,15 @@
   body.game-active #game-header-controls .header-actions{justify-self:end;display:flex;gap:8px}
   /* Cricket has no Pad/Dartboard choice — its scoring screen replaces both. */
   body.cricket-active #game-header-controls .imt-row{display:none}
+  /* A pad-only game type (GAME_TYPES.<type>.padOnly — Checkout Trainer) hides the
+     toggle via the `hidden` attribute in applyDartMode(). `.imt-row{display:flex}`
+     above is an AUTHOR declaration, and an author `display` always outranks the UA
+     stylesheet's own `[hidden]{display:none}` no matter how weak its selector — so
+     without this rule setting `.hidden = true` on the row does nothing at all and
+     the toggle stays fully on screen. Same trap the scoring screen's own
+     `.rail-play`/`.oche`/`.slots` hit. Scoped by id + attribute so it simply
+     out-specifies the base rule, no `!important` needed. */
+  #game-header-controls .imt-row[hidden]{display:none}
   body.game-active .imt-btn{font-size:12px;padding:5px 13px}
   body.game-active #game-header-controls .header-actions .game-menu-btn{font-size:14px;padding:4px 10px!important}
   /* screen container */
@@ -2612,10 +2621,32 @@ function buildDartboard(){
   return s;
 }
 
+// Whether the CURRENT game type refuses the dartboard input entirely
+// (GAME_TYPES.<type>.padOnly — today only Checkout Trainer; see that member's own
+// comment for why). Derived from the registry rather than a hand-maintained list
+// here, the same discipline items 39/41/46 applied to the other per-type lists.
+function padOnlyGame(){
+  return !!(game && GAME_TYPES[game.gameType] && GAME_TYPES[game.gameType].padOnly);
+}
+
+// The input mode actually in force right now. `dartboardMode` stays the household's
+// own PREFERENCE (seeded at boot from /api/settings/default-input, changed only by
+// the toggle); a pad-only game type overrides it for the duration of that game
+// without overwriting it. Every render path reads this, never `dartboardMode`
+// directly — an earlier draft forced `dartboardMode = false` instead, which worked
+// for the trainer but silently reset a board-preferring household to the pad for
+// every game they played afterwards.
+function boardInputActive(){
+  return dartboardMode && !padOnlyGame();
+}
+
 function applyDartMode(){
   const pad   = document.getElementById('pad');
   const multi = document.getElementById('multi-row');
   const board = document.getElementById('dart-board-wrap');
+  const boardOn = boardInputActive();
+  const imtRow = document.querySelector('#game-header-controls .imt-row');
+  if(imtRow) imtRow.hidden = padOnlyGame();
   // Bounce Out (docs/archive/dartboard-zone-tracking-roadmap.md "Bounce-out tracking") is
   // available in both Pad and Dartboard mode — unlike the old flat Miss button it
   // replaced (Dartboard-mode-only, now folded into the miss ring), it's never
@@ -2624,8 +2655,8 @@ function applyDartMode(){
   if(!pad || !board) return;
   const full  = !!(game && (game.darts.length>=3 || game.busted || game.won));
   if(bounceBtn) bounceBtn.disabled = full;
-  setPressed({pad:'imt-pad', board:'imt-board'}, dartboardMode ? 'board' : 'pad');
-  if(dartboardMode){
+  setPressed({pad:'imt-pad', board:'imt-board'}, boardOn ? 'board' : 'pad');
+  if(boardOn){
     pad.classList.add('hidden'); if(multi) multi.classList.add('hidden');
     board.classList.remove('hidden');
     if(!board.querySelector('svg')) board.innerHTML = buildDartboard(); // build once
@@ -11222,7 +11253,7 @@ function renderPad(){
   } else {
     const bounceBtn = document.getElementById('bounce-out-btn');
     if(bounceBtn) bounceBtn.disabled = full;
-    if(dartboardMode){
+    if(boardInputActive()){
       const board = document.getElementById('dart-board-wrap');
       if(board){
         if(!board.querySelector('svg')) board.innerHTML = buildDartboard(); // build SVG once
@@ -14139,14 +14170,14 @@ function renderGameShell(){
   // multiplier..." instruction is dropped in favor of a generic "Tap the
   // board to score." (plus whichever mode-specific flavor text still applies)
   // whenever dartboardMode is on — it used to show regardless of input mode.
-  const statusText = isChuckin ? `${dartboardMode ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. No score, no pressure — just throw.`
-    : isClock ? `${dartboardMode ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. Hit every 1-20 as a single.`
-    : isWorld ? `${dartboardMode ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. Chip away at every lifetime outcome.`
-    : isDoublesPractice ? (dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.')
-    : isCricketGame ? (dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a target number.')
+  const statusText = isChuckin ? `${boardInputActive() ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. No score, no pressure — just throw.`
+    : isClock ? `${boardInputActive() ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. Hit every 1-20 as a single.`
+    : isWorld ? `${boardInputActive() ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. Chip away at every lifetime outcome.`
+    : isDoublesPractice ? (boardInputActive() ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.')
+    : isCricketGame ? (boardInputActive() ? 'Tap the board to score.' : 'Select a multiplier, then tap a target number.')
     : isCheckoutTrainer ? 'Tap out your proposed checkout, then press Submit.'
-    : isKillerGame ? (dartboardMode ? 'Tap the board to score — your own numbers to build lives, an opponent\'s to attack once you\'re a killer.' : 'Select a multiplier, then tap a number — your own to build lives, an opponent\'s to attack once you\'re a killer.')
-    : dartboardMode ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.';
+    : isKillerGame ? (boardInputActive() ? 'Tap the board to score — your own numbers to build lives, an opponent\'s to attack once you\'re a killer.' : 'Select a multiplier, then tap a number — your own to build lives, an opponent\'s to attack once you\'re a killer.')
+    : boardInputActive() ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.';
   // Rebuilding this container also resets any previous leg's results screen:
   // #game-result comes back empty+hidden and #rail-play/.oche come back
   // unhidden, so showGameResult()'s takeover never leaks into the next leg.
@@ -14873,6 +14904,22 @@ const GAME_TYPES = {
     // "No live scoreboard, deliberate" (its roadmap) — pushLive() skips this
     // mode entirely; see the flag's comment there.
     noLiveDisplay: true,
+    // docs/bug-roadmap.md BUG-32: this mode always scores on the Pad, whatever the
+    // household's `default_scoring_input` setting says, and the Pad/Dartboard toggle
+    // is hidden for it.
+    //
+    // No dart is ever physically thrown here — the player is proposing a route from
+    // memory, which is the whole point of a mode you can play with no board in the
+    // room. That's why the Pad already hides "Miss" and "Bounce Out" for this game
+    // type. The dartboard input contradicts that: it carries two full miss rings
+    // (near/far, per wedge, `throwDartBoard(0,1,null,<wedge>,'near'|'far')`) sitting
+    // immediately outside the double ring — exactly where a thumb lands when it's
+    // aiming for the number printed at the board's edge. A mistap there silently
+    // records a Miss, and a Miss turns a correct route into an illegal one: on target
+    // 50, [Miss, D16] grades "Not a legal finish for 50. Best route: Bull," which is
+    // indistinguishable to the player from the app mis-grading a route they entered
+    // correctly. Removing the input that can't mean anything here is the fix.
+    padOnly: true,
     ctorArg: 'config',
     newMatchPlayer: newMatchPlayerCheckoutTrainer,
     // Unlike Doubles Practice/Chuckin, this genuinely IS a per-visit evaluation —

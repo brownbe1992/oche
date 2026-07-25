@@ -5222,7 +5222,32 @@ graded instantly against the objectively optimal route. Two sub-modes sharing
 one core mechanic: untimed **Freeform** and the 60-second **Checkout Blitz**
 sprint.
 
-**Scoring-screen UI**: the Pad-mode scoring screen hides three controls that
+**Scoring-screen UI — Pad only, always.** This mode never offers the dartboard
+input. `GAME_TYPES.checkout_trainer.padOnly` is `true`, `boardInputActive()`
+(`dartboardMode && !padOnlyGame()`) returns false for it, and the Pad/Dartboard
+toggle is hidden. This overrides the household's `default_scoring_input` setting
+for this game type only, and does **not** overwrite it — `dartboardMode` remains
+the stored preference, so a board-preferring household still gets the board for
+every other game (`docs/bug-roadmap.md` BUG-32).
+
+The reason is the same one behind the hidden controls below: **no dart is ever
+physically thrown here.** The player proposes a route from memory. The dartboard
+input contradicts that — it carries two miss rings (near/far, one per wedge,
+`throwDartBoard(0,1,null,<wedge>,'near'|'far')`) immediately outside the double
+ring, exactly where a thumb lands aiming for the number printed at the board's
+edge. A mistap records a genuine Miss, and a Miss turns a correct route illegal:
+on target 50, `[Miss, D16]` grades *"Not a legal finish for 50. Best route:
+Bull"* — from the player's side, indistinguishable from the app mis-grading a
+route they entered correctly.
+
+Note the toggle is hidden via the `hidden` attribute plus an explicit
+`#game-header-controls .imt-row[hidden]{display:none}` rule. `.imt-row` sets
+`display:flex`, and an author `display` declaration outranks the UA stylesheet's
+`[hidden]{display:none}` regardless of selector strength — without that rule
+setting `.hidden = true` does nothing at all. Same trap as the scoring screen's
+`.rail-play`/`.oche`/`.slots` (§1).
+
+**Hidden controls**: the Pad-mode scoring screen hides three controls that
 every other game type shows — the "Bounce Out" button, the inline "Miss"
 button, and "Undo Last Turn" (`renderGameShell()`/`renderPad()`,
 `frontend/index.html`, gated on `game.gameType === 'checkout_trainer'`). A
