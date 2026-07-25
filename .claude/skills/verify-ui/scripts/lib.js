@@ -47,6 +47,17 @@ function startServer() {
       // throwaway DB on a throwaway port — do NOT copy this into anything that
       // touches a real database (every compose file keeps auth ON by default).
       OCHE_REQUIRE_AUTH: 'false',
+      // The single biggest source of spurious failures in this suite. server.js
+      // allows 300 requests/60s/IP; driving a dozen full games blows through that,
+      // and once tripped the server 429s EVERYTHING — the next check's page load
+      // included, which then fails in a way that looks nothing like rate limiting.
+      // waitForServer() below only ever proved the window had rolled, never that
+      // there was budget left in it, so a check could still exhaust it mid-run —
+      // which is exactly what produced the "one random check fails per full run,
+      // every check passes alone" pattern. Raised only for this throwaway server;
+      // the limiter isn't what this suite tests, and the default is untouched
+      // everywhere else.
+      OCHE_RATE_LIMIT_GLOBAL: '100000',
     },
     detached: true,
     stdio: 'ignore',
@@ -70,13 +81,20 @@ function stopServer(child) {
   }
 }
 
-// The single most useful primitive in this file.
+// Blocks until the server answers a real 200.
 //
-// backend/server.js rate-limits 300 requests per 60s per IP. A check that drives
-// a few full games burns through that quickly, and once tripped the server 429s
-// EVERYTHING — including the next check's initial page load, which then fails in
-// a way that looks nothing like rate limiting. Blocking until the server answers
-// 200 turns that into a pause instead of a spurious failure.
+// This used to be the suite's rate-limit defence, and it was never sufficient: a
+// single 200 proves the fixed window has rolled, NOT that there is budget left in
+// it, so a check could still exhaust the remaining allowance partway through. That
+// is what produced the long-running "exactly one check fails per full run, a
+// different one each time, every check passes in isolation" pattern. The cause is
+// now removed at the source — startServer() raises OCHE_RATE_LIMIT_GLOBAL for its
+// own throwaway server — so this is back to being what its name says: a readiness
+// check for a server that is still booting.
+//
+// It is still called between checks. If the suite is ever pointed at a server it
+// did not start (the runner reuses one already listening on the port), that server
+// keeps the normal 300/60s limit and this is the only cushion there is.
 async function waitForServer({ timeoutMs = 180000 } = {}) {
   const started = Date.now();
   let lastStatus = 0;

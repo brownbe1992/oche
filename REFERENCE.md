@@ -4387,9 +4387,20 @@ documented as `[admin]` in the README use `requireAdmin`; everything else that
 mutates state uses `requireWrite`, which requires a logged-in admin by default
 even on a normal LAN deployment.
 
-**Rate-limit buckets**: see §9's table — `global` (300/60s, every request),
-`setup`/`login`/`pin` (10/60s each, their own endpoint only). SSE uses separate
-hard connection caps, not a `rateLimit()` bucket.
+**Rate-limit buckets**: see §9's table — `global` (300/60s, every request, and the
+only one that is configurable — `OCHE_RATE_LIMIT_GLOBAL`, default 300),
+`setup`/`login`/`pin` (10/60s each, their own endpoint only, deliberately fixed
+since they guard credentials). SSE uses separate hard connection caps, not a
+`rateLimit()` bucket.
+
+`OCHE_RATE_LIMIT_GLOBAL` exists because 300 is a guess about one household's
+traffic and two real cases exceed it: a large household behind a single NAT'd
+address (the same problem the `TRUST_PROXY` warning describes from the other
+side), and an automated browser suite driving dozens of full games — the
+`verify-ui` skill raises it for its own throwaway server, where the limiter
+protects nothing and only produces failures that look like application bugs.
+Raising it is an explicit opt-in; the default is unchanged, so no deployment
+behaves differently unless it sets the variable.
 
 **Public reads must bound their own work, not just their rate.** The server is a
 single process with one thread, so any request that blocks the event loop blocks
@@ -5222,7 +5233,71 @@ graded instantly against the objectively optimal route. Two sub-modes sharing
 one core mechanic: untimed **Freeform** and the 60-second **Checkout Blitz**
 sprint.
 
-**Scoring-screen UI**: the Pad-mode scoring screen hides three controls that
+**Presentation — Paper Mode, and the Pocket Card on Home.** Chosen from four
+directions via `/frontend-design` (2026-07, direction A). The whole app is the black
+dartboard bed or the slate scoreboard; this **one** game type inverts to the board's
+own wedge cream (`--cream #efe7d2`) with printed rules and dark ink, because it isn't
+the board on the wall — it's the checkout card in your back pocket. You should be able
+to tell at arm's length that this is the mode needing no board in the room.
+
+Two surfaces share the treatment:
+
+- **Paper Mode** (`GAME_TYPES.<type>.paperTheme`, `body.paper-mode`) restyles the
+  Checkout Trainer play area. Toggled in `show()` alongside `game-active`/
+  `cricket-active`, so leaving the game screen for any reason clears it. Presentation
+  only — nothing about what is scored or recorded changes.
+  - The sheet is painted on **`#screen-game`**, not `.game-play-area`. That wrapper is
+    `display:contents` and so generates no box at all: a background set there silently
+    does nothing and leaves ink-coloured text on the black board. A background on the
+    grid/flex container itself never affects layout.
+  - `.oche` (the inset input panel) is cleared to transparent, or it reads as a black
+    well in the middle of the sheet.
+  - The dark theme's red/green double/treble tints are dropped: on paper a filled slot
+    is already ink-on-cream, so they'd read as noise.
+- **The Pocket Card** (`renderPocketCard()`, `#home-pocket-card`) puts a live target on
+  Home, below Today's Challenge and above Start new game, answerable in place with no
+  navigation. Its answers are deliberately **not recorded**, and the card says so.
+  Three reasons: Home is shared, so anyone passing could otherwise dump answers into
+  somebody's Accuracy/Optimal%/streak; asking "who is this?" first would destroy the
+  two-tap immediacy that is the whole point; and this mode's darts are already excluded
+  from every physical stat (below), so a hypothetical warm-up is consistent with how it
+  already treats itself. It grades double-out (it has no player, so it cannot honour a
+  per-player single-out rule) and says "Double out" on its face. Targets and verdicts
+  come from `pickCheckoutTarget()`/`gradeCheckoutAttempt()` — the same functions the
+  real mode uses, so the card can never drift into disagreeing with it. "Play a full
+  session" starts the real, recorded mode.
+
+Both palettes are held to `docs/accessibility-roadmap.md`'s 4.5:1 text standard, checked
+by `backend/test/frontend.pocket-card.test.js`, which captures each colour out of the
+stylesheet rather than from a copied list. Two colours were caught failing while the
+theme was built (`#8a6a1f` at 4.09:1, `#aa9f80` at 2.13:1).
+
+**Scoring-screen UI — Pad only, always.** This mode never offers the dartboard
+input. `GAME_TYPES.checkout_trainer.padOnly` is `true`, `boardInputActive()`
+(`dartboardMode && !padOnlyGame()`) returns false for it, and the Pad/Dartboard
+toggle is hidden. This overrides the household's `default_scoring_input` setting
+for this game type only, and does **not** overwrite it — `dartboardMode` remains
+the stored preference, so a board-preferring household still gets the board for
+every other game (`docs/bug-roadmap.md` BUG-32).
+
+The reason is the same one behind the hidden controls below: **no dart is ever
+physically thrown here.** The player proposes a route from memory. The dartboard
+input contradicts that — it carries two miss rings (near/far, one per wedge,
+`throwDartBoard(0,1,null,<wedge>,'near'|'far')`) immediately outside the double
+ring, exactly where a thumb lands aiming for the number printed at the board's
+edge. A mistap records a genuine Miss, and a Miss turns a correct route illegal:
+on target 50, `[Miss, D16]` grades *"Not a legal finish for 50. Best route:
+Bull"* — from the player's side, indistinguishable from the app mis-grading a
+route they entered correctly.
+
+Note the toggle is hidden via the `hidden` attribute plus an explicit
+`#game-header-controls .imt-row[hidden]{display:none}` rule. `.imt-row` sets
+`display:flex`, and an author `display` declaration outranks the UA stylesheet's
+`[hidden]{display:none}` regardless of selector strength — without that rule
+setting `.hidden = true` does nothing at all. Same trap as the scoring screen's
+`.rail-play`/`.oche`/`.slots` (§1).
+
+**Hidden controls**: the Pad-mode scoring screen hides three controls that
 every other game type shows — the "Bounce Out" button, the inline "Miss"
 button, and "Undo Last Turn" (`renderGameShell()`/`renderPad()`,
 `frontend/index.html`, gated on `game.gameType === 'checkout_trainer'`). A

@@ -6,7 +6,7 @@
 
 A self-hosted, per-dart darts scorer with real-time scoreboard, lifetime player statistics, and no external dependencies.
 
-**v0.20.1**
+**v0.20.2**
 
 You enter every dart individually — multiplier first, then the number — and Oche tracks everything: 501 / 301 / 170 / 101 games in any legs-and-sets format, per-player double-out or single-out rules, 3-dart averages, checkout suggestions, a [172-badge achievement system](#achievements--badges) with a per-player Badge Case, a Wordle-style [Daily Challenge](#daily-challenge), and years' worth of per-player history. A second game type, [Cricket](#new-game) (classic or fully customizable targets), is now playable alongside X01 with full stats parity — its own dedicated scoring screen, live scoreboard, stat bubbles/Personal Bests/achievements, and Home page leaderboards. A [👻 Ghost mode](#new-game) lets you race a dart-by-dart replay of one of your own past won legs. A solo [Doubles Practice mode](#new-game) lets you drill any double(s) you choose, with its own stat bubbles and Personal Bests. A solo [Just Chuckin' It mode](#new-game) is completely freeform, unscored practice — just throwing dart after dart, with heatmap-heavy stats and 18 laddered milestone achievements. A solo [Checkout Trainer mode](#new-game) is a no-dartboard mental drill — given a target score, tap out the fewest-darts checkout from memory and get graded instantly — with an untimed Freeform mode and a 60-second Checkout Blitz sprint with its own leaderboard. Two guided practice drills, [🧭 Around the Clock and 🗺️ Around the World](#new-game), turn the app's existing completion tracking into active solo sessions with live progress feedback. All data lives in a SQLite database on your own server.
 
@@ -112,6 +112,15 @@ Open `http://localhost:8046`. The database is created at the path in the `DARTS_
 ### Home
 
 The landing page shows a live snapshot of all-time activity:
+
+**🃏 Pocket Card** — a live checkout question you can answer without leaving Home, and
+without a dartboard: "What do you leave on 167?", three dart slots, and an instant
+verdict against the objectively shortest route. It's the one cream, paper-textured card
+on an otherwise black screen, because it's the only thing here you can play with no
+board in the room — the checkout card in your back pocket rather than the board on the
+wall. Answers here are a warm-up and **aren't recorded** (Home is shared by the whole
+household, and no player is picked); *Play a full session* opens the recorded
+[Checkout Trainer](#new-game), whose own scoring screen uses the same paper treatment.
 
 **Hero stats:** Total darts thrown · 180s · Big Fish · 9-Darters *(shown even at zero, with an empty-state prompt, since it's the rarest feat in the game)*
 

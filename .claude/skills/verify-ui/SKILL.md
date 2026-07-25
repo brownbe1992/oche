@@ -141,13 +141,23 @@ selector, so an element can carry `hidden` and be fully on screen. That is
 exactly how a "hidden" dartboard stayed visible behind a results card. Use
 `getComputedStyle(el).display === 'none'`, or measure the rect.
 
-**Rate limiting is the trap that wastes the most time.** `backend/server.js`
-allows 300 requests per 60s per IP. Driving a few full games burns that, and
-once tripped the server 429s *everything* — including the next check's initial
-page load, which then fails in a way that looks nothing like rate limiting.
-`lib.waitForServer()` blocks until a real 200 and the runner calls it between
-checks; keep fixtures small (three legs is plenty) and never run checks
-concurrently.
+**Rate limiting used to be the trap that wasted the most time**, and the fix is
+worth understanding because the symptom was so misleading. `backend/server.js`
+allows 300 requests per 60s per IP; driving a dozen full games burns that, and
+once tripped the server 429s *everything* — including the next check's page
+load, which then fails in a way that looks nothing like rate limiting. The
+original defence, `waitForServer()`, blocked until a real 200 — but a 200 only
+proves the window has **rolled**, not that there is budget left in it, so a
+check could still exhaust the remainder partway through. That produced a
+maddening pattern: exactly one check failing per full run, a different one each
+time, every check passing in isolation.
+
+`startServer()` now sets `OCHE_RATE_LIMIT_GLOBAL` high for its own throwaway
+server, so the limiter is out of the picture entirely. Keep fixtures small
+(three legs is plenty) and never run checks concurrently anyway — both still
+make the suite faster and easier to reason about. If you point the suite at a
+server you started yourself, it keeps the normal 300/60s limit and the old trap
+is back.
 
 **Top-level `let` is not on `window`.** `homeData`, `setup`, `roster` and
 friends are top-level `let`/`const` in a classic script, so `window.homeData = x`

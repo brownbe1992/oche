@@ -91,6 +91,29 @@ const batch = names => fetch(`${base}/api/players/personal-bests-batch?names=${n
     return r.json();
   });
 
+describe('the global rate limit is configurable, and still defaults to 300', () => {
+  test('OCHE_RATE_LIMIT_GLOBAL is read, bounded, and falls back to 300', () => {
+    // The verify-ui browser suite raises this for its own throwaway server, where
+    // the limiter protects nothing and only produced failures that looked like app
+    // bugs. The DEFAULT is what matters here: a typo or a hostile value must not
+    // quietly disable SEC-3's budget for a real deployment.
+    const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    const decl = src.match(/const GLOBAL_RATE_LIMIT = \(\(\) => \{[\s\S]*?\}\)\(\);/);
+    assert.ok(decl, 'GLOBAL_RATE_LIMIT not found');
+    assert.match(decl[0], /Number\.isInteger\(n\) && n > 0 \? n : 300/,
+      'a non-integer or non-positive value must fall back to 300, never disable the limit');
+    assert.match(src, /rateLimit\('global', ip, GLOBAL_RATE_LIMIT, 60000\)/,
+      'the global bucket must actually use the configured value');
+
+    // The credential buckets stay fixed on purpose — they are brute-force guards,
+    // not throughput guards.
+    for (const bucket of ['setup', 'login', 'pin']) {
+      assert.match(src, new RegExp(`rateLimit\\('${bucket}', ip, 10, 60000\\)`),
+        `the ${bucket} bucket must stay hardcoded at 10/60s`);
+    }
+  });
+});
+
 describe('SEC-27 — personal-bests-batch bounds the work one request can demand', () => {
   test('a huge repeated list is answered promptly and does not block the server', async () => {
     await withServer(async () => {
