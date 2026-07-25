@@ -4515,21 +4515,31 @@ function renderGhostLegPicker(){
     box._loaded = false;     // this player's list hasn't been fetched yet
     setup.ghostLeg = null;   // a different player's picked leg can never carry over
   }
+  // A pending deep-link target needs the player's whole history in one
+  // unfiltered page — the Race button points at their BEST leg while the
+  // picker's default page is their 10 most RECENT wins, and the active
+  // category filter could exclude the target outright. Setting that as REAL
+  // picker state here, at the point the intent is known, keeps the request a
+  // plain function of picker state: loadGhostLegPage() needs no special mode,
+  // and the toolbar can't advertise a page size the fetch didn't use. (100 is
+  // already one of the offered page sizes.)
+  if(_ghostLegTarget){
+    ghostLegSort = 'recent'; ghostLegCategory = ''; ghostLegPage = 0;
+    ghostLegPageSize = GHOST_LEG_TARGET_LOOKUP_LIMIT;
+  }
   // Reload only when something actually changed. renderPlayers() calls this on
   // EVERY slot mutation — including a loadout change, which can't affect the
   // leg list at all — and this used to unconditionally null setup.ghostLeg and
-  // refetch, silently throwing away a leg the player had already picked. It
-  // also meant two loads could be in flight for the same player at once, and
-  // whichever landed first consumed _ghostLegTarget, so "Race this leg" /
-  // "Repeat this leg" would quietly race legs[0] instead of the leg asked for.
+  // refetch, silently throwing away a leg the player had already picked.
   //
-  // Keyed on "has a load for this player finished?" rather than on "is a leg
+  // Keyed on "has a load for this player started?" rather than on "is a leg
   // currently selected?": having NOTHING selected is a legitimate settled state
   // (a deep-linked leg that couldn't be found, or a filter that matched none),
   // and treating it as "needs reloading" re-fetched on every subsequent
   // renderPlayers() and re-armed legs[0] — silently undoing the very selection
-  // clearing that stops a mis-targeted race.
-  if(playerChanged || _ghostLegTarget || !box._loaded) loadGhostLegPage();
+  // clearing that stops a mis-targeted race. playerChanged needs no term of its
+  // own: its branch above resets _loaded.
+  if(_ghostLegTarget || !box._loaded) loadGhostLegPage();
 }
 // How many legs a deep-linked "Race this leg" / "Repeat this leg" request may
 // pull in one go while hunting for its exact target. The picker's own paging is
@@ -4550,31 +4560,26 @@ function loadGhostLegPage(){
   if(!name) return;
   box.innerHTML = `<p class="pp-meta">Loading…</p>`;
   const seq = ++_ghostLegReqSeq;
-  // A pending deep-link target overrides the picker's own paging/filtering for
-  // this one fetch: the target could be any leg in the player's history, and
-  // the active category filter could exclude it outright.
-  const hunting = !!_ghostLegTarget;
-  const limit  = hunting ? GHOST_LEG_TARGET_LOOKUP_LIMIT : ghostLegPageSize;
-  const offset = hunting ? 0 : ghostLegPage * ghostLegPageSize;
-  const category = hunting ? '' : ghostLegCategory;
-  Backend.get(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=${limit}&offset=${offset}&sort=${ghostLegSort}&category=${encodeURIComponent(category)}`).then(data=>{
+  // Consumed HERE, at request time, not in the response. renderGhostLegPicker()
+  // runs more than once per "Race this leg" entry (setMode() renders, then
+  // show('setup')'s own raceLeg branch renders again), and while the target
+  // stayed armed until the response landed, each of those started another
+  // identical 100-row fetch that _ghostLegReqSeq then threw away. Marking the
+  // load started in the same breath is what makes the reload guard settle.
+  const target = _ghostLegTarget;
+  _ghostLegTarget = null;
+  box._loaded = true;
+  const offset = ghostLegPage * ghostLegPageSize;
+  Backend.get(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=${ghostLegPageSize}&offset=${offset}&sort=${ghostLegSort}&category=${encodeURIComponent(ghostLegCategory)}`).then(data=>{
     // A newer request has superseded this one. The player check below only ever
     // rejected a DIFFERENT player, so two overlapping loads for the SAME player
-    // both applied their results (and both tried to consume _ghostLegTarget).
+    // both applied their results.
     if(seq !== _ghostLegReqSeq) return;
     if(setup.mode !== 'ghost' || setup.slots[0] !== name) return; // a newer selection took over
     const legs = (data && data.legs) || [];
     const total = (data && data.total) || 0;
     box._legs = legs;
     box._total = total;
-    // One-shot intent: consume it on EVERY path that gets this far, including
-    // the empty-result one below. Leaving it set meant renderGhostLegPicker()'s
-    // `|| _ghostLegTarget` reload guard refetched on every renderPlayers(), and
-    // a much later Ghost setup could still silently preselect this stale leg.
-    const target = _ghostLegTarget;
-    _ghostLegTarget = null;
-    box._loaded = true;   // a load for this player has now settled, whatever it found
-    if(hunting){ ghostLegCategory = ''; ghostLegPage = 0; }   // reflect what was actually fetched
     if(!total){
       // Whatever was picked before can't survive a list that no longer contains
       // it — otherwise the picker reads "No won legs in 301 yet" while a
@@ -4590,21 +4595,18 @@ function loadGhostLegPage(){
       box.innerHTML = ghostLegCategory ? (ghostLegToolbarHtml() + `<p class="pp-meta">${emptyMsg}</p>`) : `<p class="pp-meta">${emptyMsg}</p>`;
       return;
     }
-    let idx = legs.length ? 0 : -1;
-    let targetMissing = false;
-    if(target){
-      const m = legs.findIndex(l=>l.gameId===target.gameId && l.setNo===target.setNo && l.legNo===target.legNo);
-      // Only honour the deep link when the exact leg is actually present, and
-      // select NOTHING when it isn't. Falling through to legs[0] here is what
-      // silently raced the wrong leg: the Race button links to the player's
-      // BEST leg while legs[0] is merely their most RECENT one, so anyone whose
-      // best leg sat outside the fetched window quietly raced a different leg
-      // than the one they clicked.
-      if(m>=0) idx = m; else { idx = -1; targetMissing = true; }
-    }
+    // With a deep-link target, ONLY that exact leg will do — selecting nothing
+    // when it's absent is deliberate. Falling through to legs[0] is what
+    // silently raced the wrong leg: the Race button points at the player's BEST
+    // leg while legs[0] is merely their most RECENT, so anyone whose best leg
+    // sat outside the fetched window raced a different leg than they clicked.
+    // Without a target, first row wins as usual.
+    const idx = target
+      ? legs.findIndex(l=>l.gameId===target.gameId && l.setNo===target.setNo && l.legNo===target.legNo)
+      : (legs.length ? 0 : -1);
     setup.ghostLeg = idx>=0 ? legs[idx] : null;
     renderGhostLegList(legs, total);
-    if(targetMissing){
+    if(target && idx<0){
       const note = document.createElement('p');
       note.className = 'pp-meta';
       note.style.cssText = 'margin:0 0 8px;color:var(--bust)';
@@ -4613,12 +4615,11 @@ function loadGhostLegPage(){
     }
   }).catch(()=>{
     if(seq !== _ghostLegReqSeq) return;
-    _ghostLegTarget = null;   // never leave a failed hunt armed for a later setup
     setup.ghostLeg = null;    // nothing is selectable, so nothing may stay selected
-    // Settled, even though it failed — otherwise every later renderPlayers()
-    // would retry, turning one dead backend into a request storm. Changing
-    // player, sort, page or filter all re-enter loadGhostLegPage() directly.
-    box._loaded = true;
+    // _ghostLegTarget and box._loaded were both settled at request time, so a
+    // failed load stays settled: every later renderPlayers() would otherwise
+    // retry, turning one dead backend into a request storm. Changing player,
+    // sort, page or filter all re-enter loadGhostLegPage() directly.
     box.innerHTML = `<p class="pp-meta">Couldn't load past legs.</p>`;
   });
 }
@@ -5965,6 +5966,31 @@ function setupOpenCategoryKey(){
   const found = GAME_LEDGER_CATEGORIES.find(c=>c.keys.includes(key));
   return found ? found.key : 'traditional';
 }
+// The selected game's options panel on Step 1 — the ONE definition of what that
+// panel contains. Three places render it (the selected ledger row, the fallback
+// block shown when that row's category is collapsed, and the Daily Challenge
+// spotlight card), and each previously spelled it out in its own template
+// string. Two ids in here are hard contracts with code elsewhere —
+// #setup-inline-options-anchor is the only thing mountSetupInlineOptions() will
+// move the real options pool into, and #setup-step1-continue is what
+// show('setup') enables/disables — so a hand-copied instance that omitted one
+// silently broke that contract (the fallback shipped without the anchor once,
+// leaving every per-game option unreachable). Only placement legitimately
+// differs between the three sites; content does not.
+//   withAnchor: false for the Daily Challenge, which has no per-mode options
+//   heading:    shown only by the fallback, which sits outside the named row
+function setupGamePanelHtml({ rulesText = '', withAnchor = true, heading = '', style = '' } = {}){
+  return `<div class="setup-ledger-options"${style ? ` style="${style}"` : ''}>
+      ${heading ? `<div class="setup-ledger-name" style="margin-bottom:4px">${escapeHtml(heading)}</div>` : ''}
+      ${withAnchor ? `<div id="setup-inline-options-anchor"></div>` : ''}
+      ${rulesText ? `<button type="button" class="setup-ledger-rules-toggle" aria-expanded="${setupRulesOpen}" onclick="event.stopPropagation();toggleSetupRules()">
+        <span class="chev">▸</span> How to play &amp; win</button>
+      <div class="setup-ledger-rules-body" id="setup-ledger-rules-body" ${setupRulesOpen?'':'hidden'}>${escapeHtml(rulesText)}</div>` : ''}
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue</button>
+      </div>
+    </div>`;
+}
 // Enter/Space activation for a role="button" CONTAINER that has real focusable
 // controls nested inside it (the game ledger rows and the Daily Challenge
 // spotlight card both do). The nested control's own keydown bubbles up to the
@@ -6001,7 +6027,7 @@ function renderSetupGameLedger(){
   const pool = document.getElementById('setup-inline-options-pool');
   const holdingPen = document.getElementById('setup-inline-options-holding');
   if(pool && holdingPen && pool.parentNode !== holdingPen) holdingPen.appendChild(pool);
-  el.innerHTML = GAME_LEDGER_CATEGORIES.map(cat=>{
+  const categoriesHtml = GAME_LEDGER_CATEGORIES.map(cat=>{
     const isOpen = cat.key === openKey;
     const rows = cat.keys.map(k=>{
       const sel = k === currentKey;
@@ -6020,15 +6046,7 @@ function renderSetupGameLedger(){
       // The options anchor only exists for the selected row — there's only
       // ever one selection at a time, so one anchor is all mountSetupInlineOptions()
       // needs to find.
-      const expanded = sel ? `<div class="setup-ledger-options">
-          <div id="setup-inline-options-anchor"></div>
-          ${rulesText ? `<button type="button" class="setup-ledger-rules-toggle" aria-expanded="${setupRulesOpen}" onclick="event.stopPropagation();toggleSetupRules()">
-            <span class="chev">▸</span> How to play &amp; win</button>
-          <div class="setup-ledger-rules-body" id="setup-ledger-rules-body" ${setupRulesOpen?'':'hidden'}>${escapeHtml(rulesText)}</div>` : ''}
-          <div class="btn-row" style="margin-top:14px">
-            <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue</button>
-          </div>
-        </div>` : '';
+      const expanded = sel ? setupGamePanelHtml({ rulesText }) : '';
       return `<div class="setup-ledger-row${sel?' sel':''}" role="button" tabindex="0" aria-pressed="${sel}"
           onclick="selectSetupGame('${k}')" onkeydown="containerKeyActivate(event, ()=>selectSetupGame('${k}'))">
         <div class="setup-ledger-medal">${ledgerCategoryIcon(cat.key, cat.accent)}</div>
@@ -6061,23 +6079,24 @@ function renderSetupGameLedger(){
   // screen with its own Continue.
   const selectedRowRendered = GAME_LEDGER_CATEGORIES
     .some(c => c.key === openKey && c.keys.includes(currentKey));
-  if(currentKey && currentKey !== 'challenge' && !selectedRowRendered){
-    // Carries its OWN #setup-inline-options-anchor, not just the button. That
-    // anchor is the only thing mountSetupInlineOptions() will move the real
-    // options pool into, and the pool's holding pen is `hidden` — so a
-    // button-only fallback let the player advance to Step 2 with starting
-    // score, legs/sets and every per-mode option silently unreachable, quietly
-    // starting the game on stale defaults. Rendering the anchor here makes
-    // this block a genuine stand-in for the collapsed row rather than a
-    // partial one.
-    el.innerHTML += `<div class="setup-ledger-options" style="margin-top:10px">
-      <div class="setup-ledger-name" style="margin-bottom:4px">${escapeHtml(GAME_LEDGER_NAMES[currentKey]||'Selected game')}</div>
-      <div id="setup-inline-options-anchor"></div>
-      <div class="btn-row" style="margin-top:14px">
-        <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue with ${escapeHtml(GAME_LEDGER_NAMES[currentKey]||'this game')}</button>
-      </div>
-    </div>`;
-  }
+  // Same panel as the selected row's, just placed below the ledger instead of
+  // inside a row — so it goes through setupGamePanelHtml() rather than being
+  // written out again, which is how it previously ended up missing the options
+  // anchor. Only the heading is extra: outside the row, nothing else names
+  // which game the panel belongs to.
+  const fallbackHtml = (currentKey && currentKey !== 'challenge' && !selectedRowRendered)
+    ? setupGamePanelHtml({
+        rulesText: (NEW_GAME_MODE_OPTIONS.find(o=>o.key===currentKey) || {}).blurb || '',
+        heading: GAME_LEDGER_NAMES[currentKey] || 'Selected game',
+        style: 'margin-top:10px',
+      })
+    : '';
+  // One assignment for the whole ledger. `el.innerHTML += fallback` would
+  // serialise the categories back out and reparse them, rebuilding every row
+  // and SVG that was just created — and it sits one refactor away from a real
+  // bug, since the relocated #setup-inline-options-pool would be replaced by a
+  // parsed clone if it were ever inside `el` at that point.
+  el.innerHTML = categoriesHtml + fallbackHtml;
   mountSetupInlineOptions();
 }
 // Physically moves the real #setup-inline-options-pool element (with all its
@@ -6193,14 +6212,12 @@ function renderSetupDailyChallengeSection(){
   // border/glow (there regardless of selection, to keep it eye-catching as
   // today's featured item) made the old, subtler "extra inset shadow"
   // treatment nearly invisible against it.
-  const expanded = selected ? `<div class="setup-ledger-options" style="margin-top:10px">
-      <button type="button" class="setup-ledger-rules-toggle" aria-expanded="${setupRulesOpen}" onclick="event.stopPropagation();toggleSetupRules()">
-        <span class="chev">▸</span> How to play &amp; win</button>
-      <div class="setup-ledger-rules-body" id="setup-ledger-rules-body" ${setupRulesOpen?'':'hidden'}>${escapeHtml(DAILY_CHALLENGE_RULES)}</div>
-      <div class="btn-row" style="margin-top:14px">
-        <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue</button>
-      </div>
-    </div>` : '';
+  // withAnchor:false — the Daily Challenge is always plain X01 under the hood
+  // and exposes no per-mode options, so it's the one panel with nothing for
+  // mountSetupInlineOptions() to mount.
+  const expanded = selected
+    ? setupGamePanelHtml({ rulesText: DAILY_CHALLENGE_RULES, withAnchor: false, style: 'margin-top:10px' })
+    : '';
   el.innerHTML = `<div class="card challenge-spotlight setup-dc" role="button" tabindex="0" aria-pressed="${selected}"
       onclick="selectSetupGame('challenge')" onkeydown="containerKeyActivate(event, ()=>selectSetupGame('challenge'))">
     <div class="setup-dc-selectcheck${selected?' on':''}" aria-hidden="true">${selected?'✓':''}</div>
@@ -13827,7 +13844,7 @@ function finishUnit(kind, winner, opts){
   // replace of .game-play-area: #scoreboard lives in there too, and the banner
   // prepended into it a few lines above would be destroyed in the same tick it
   // was built — see #screen-game's skeleton comment and showGameResult().
-  const oche=showGameResult('');
+  const resultHost=showGameResult();
   const isCricket = game.gameType === 'cricket';
   const isBaseball = game.gameType === 'baseball';
   const isShanghai = game.gameType === 'shanghai';
@@ -13966,7 +13983,7 @@ function finishUnit(kind, winner, opts){
     const heading = opts.heading || 'GAME OVER';
     const subtext = opts.subtext || `${escapeHtml(winner)} takes the match. Stats saved.`;
     game.doneHeading = opts.heading || null; // mirrored to /display via liveSnapshot()
-    oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
+    resultHost.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${heading}</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${subtext}</p>
       <div id="elo-delta-banner"></div>
@@ -14015,7 +14032,7 @@ function finishUnit(kind, winner, opts){
          <button class="btn btn-ghost" onclick="setMode('h2h'); show('setup')">New Game</button>`
       : `<button class="btn btn-primary" onclick="${fn}">${next}</button>
          <button class="btn btn-ghost" onclick="askEndGame()">End game</button>`;
-    oche.innerHTML=`<div style="text-align:center;padding:14px 4px">
+    resultHost.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${heading}</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${subtext}</p>
       ${lastLegWasChallenge ? buildChallengeResultPanel() : ''}
@@ -14155,13 +14172,29 @@ function renderGameShell(){
 // #scoreboard (and the "X wins the leg" banner finishUnit() prepends into it)
 // survive the takeover — see the #screen-game skeleton's own comment. Returns
 // the host so callers can keep wiring up buttons inside the card they passed.
-function showGameResult(html){
+// opts.wholeSession — true for a screen that ends the SESSION rather than a
+// unit within it (Marathon's analysis screen, Checkout Blitz's TIME'S UP).
+// Those additionally clear #scoreboard: keeping it is right for a leg/game
+// finish, where it's the match state the card reports on, but a session
+// summary would otherwise leave the last (possibly unfinished) leg's live
+// scoreboard sitting above it. Making that an argument rather than a line each
+// caller remembers to write is the point — this helper owns all three regions
+// the takeover touches, so a future results screen can't inherit the wrong
+// default silently.
+function showGameResult(opts){
   const host = document.getElementById('game-result');
   const railPlay = document.getElementById('rail-play');
   const oche = document.querySelector('.oche');
   if(railPlay) railPlay.hidden = true;
   if(oche) oche.hidden = true;
-  if(host){ host.innerHTML = html; host.hidden = false; }
+  if(opts && opts.wholeSession){
+    const sb = document.getElementById('scoreboard');
+    if(sb) sb.innerHTML = '';
+  }
+  // Emptied, not filled: callers write their card through the returned host.
+  // Taking an `html` argument as well gave the helper two ways to do the same
+  // job, and every call site used the other one.
+  if(host){ host.innerHTML = ''; host.hidden = false; }
   return host;
 }
 // "Start the next round" dispatcher — Doubles Practice is the only per-dart
@@ -16230,8 +16263,10 @@ async function finishMarathonLeg(){
   const elapsedMs = Date.now() - marathonSession.startedAtMs;
   const timeUp = elapsedMs >= marathonSession.durationMinutes*60000;
   if(timeUp){ endMarathonMode(true); return; }
-  const oche = showGameResult('');
-  if(oche) oche.innerHTML = `<div style="text-align:center;padding:40px 4px">
+  // Not wholeSession: this is the pause BETWEEN marathon legs, so the
+  // just-finished leg's scoreboard is exactly what should stay on screen.
+  const resultHost = showGameResult();
+  if(resultHost) resultHost.innerHTML = `<div style="text-align:center;padding:40px 4px">
     <div style="font-family:'Bebas Neue';font-size:28px;color:var(--gold)">Leg ${marathonSession.legOrder} complete — ${dartsThisLeg} darts</div>
     <p class="pp-meta" style="margin:10px 0 0">Starting the next leg…</p>
   </div>`;
@@ -16267,18 +16302,14 @@ const MARATHON_TREND_DESC = {
 function renderMarathonAnalysisScreen(detail, fullDistance){
   const completed = detail.legs.filter(l=>l.completedAt!=null);
   const rows = completed.map(l=>`<div class="dart-count-row"><span class="dart-count-val">${l.dartCount}</span><span class="dart-count-lbl">Leg ${l.legOrder}</span></div>`).join('');
-  // Clear the scoreboard first, the same way the Checkout Blitz results screen
-  // does. showGameResult() deliberately KEEPS #scoreboard alive — right for a
-  // leg/game finish, where it's the match state the card is reporting on — but
-  // this is a whole-SESSION summary, and "End Marathon" mid-leg would otherwise
-  // leave the unfinished leg's live X01 scoreboard sitting above
-  // "🏁 MARATHON COMPLETE".
-  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
-  const oche=showGameResult('');
+  // wholeSession: ends the whole marathon, so the scoreboard is cleared too —
+  // "End Marathon" mid-leg would otherwise leave the unfinished leg's live X01
+  // scoreboard sitting above "🏁 MARATHON COMPLETE".
+  const resultHost=showGameResult({ wholeSession:true });
   const legPanel = `<div class="summary-grid" style="margin-top:14px">
     <button class="btn btn-ghost" onclick="show('setup')">New game</button>
   </div>`;
-  if(oche) oche.innerHTML = `<div style="text-align:center;padding:14px 4px">
+  if(resultHost) resultHost.innerHTML = `<div style="text-align:center;padding:14px 4px">
     <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream)">🏁 MARATHON COMPLETE</div>
     <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${completed.length} leg${completed.length===1?'':'s'} completed${fullDistance ? ' · Full 45 minutes' : ''}</p>
     <div class="summary-grid">
@@ -17213,9 +17244,10 @@ function renderBlitzResults(){
   const legalNotOptimal = rounds.filter(r=>r.legal && !r.optimal).length;
   const illegalCount = rounds.filter(r=>!r.legal).length;
   const score = optimalCount*2 + legalNotOptimal*1;
-  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
-  const oche = showGameResult('');
-  if(oche) oche.innerHTML = `<div style="text-align:center;padding:14px 4px">
+  // wholeSession: the 60-second sprint is over, so the live per-round
+  // scoreboard goes with it rather than sitting above the final score.
+  const resultHost = showGameResult({ wholeSession:true });
+  if(resultHost) resultHost.innerHTML = `<div style="text-align:center;padding:14px 4px">
     <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">TIME'S UP!</div>
     <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">Checkout Blitz — final score</p>
     <div class="stat-block" style="margin:0 auto 18px"><div class="stat-val" style="font-size:40px">${score}</div><div class="stat-label">points</div></div>
