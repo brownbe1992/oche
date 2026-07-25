@@ -1250,7 +1250,30 @@ can only ever be built from legs the requesting player genuinely won themselves:
   (`ghostLegToolbarHtml()`, shared between the populated and empty-result
   render paths) — a mode-aware empty message ("No won legs in 170 yet — try
   a different mode, or 'All modes'.") rather than losing the control that
-  would let the player switch back.
+  would let the player switch back. A zero-result list also clears
+  `setup.ghostLeg`, so the picker can never read "no won legs in 301" while a
+  previously-picked 501 leg is still armed for Play Now.
+
+  **Deep-linked targets (`_ghostLegTarget`, set by `raceLeg()`/`repeatGhostLeg()`).**
+  The Player Profile's 👻 button links to the player's **best** leg, but the
+  picker's own default page is the 10 most **recent** wins — so a normal paged
+  fetch frequently wouldn't contain the requested leg at all. While a target is
+  pending, `loadGhostLegPage()` therefore overrides the picker's paging for that
+  one request: `limit=100` (the server's own hard ceiling for this public route,
+  `getGhostCandidateLegs()`, SEC-23) and no category filter, since the active
+  filter could exclude the target outright. If the exact leg is still not in the
+  response, **nothing** is selected and the picker says so — falling back to
+  `legs[0]` is what previously raced a different leg than the one clicked, with
+  no indication anything had gone wrong. The target is consumed on every path
+  that completes (including empty results and fetch failures), so a stale one
+  can't re-arm itself in a later Ghost setup.
+
+  `renderGhostLegPicker()` reloads only when the player changed, a target is
+  pending, or no load has settled yet for this player (`box._loaded`) — **not**
+  when simply nothing is selected. Having nothing selected is a legitimate
+  settled state (an unfound deep link, or a filter matching none), and treating
+  it as "needs reloading" re-fetched on every `renderPlayers()` and re-armed
+  `legs[0]`, silently undoing the clearing that prevents a mis-targeted race.
 - **`getGhostLegScript(gameId, setNo, legNo, playerName)`**: that leg's turns in
   playback order, each with its raw `{sector, multiplier}` darts, plus `category`,
   `config`, and the leg's actual recorded `outMode` (double/single-out) — returns
@@ -3360,6 +3383,14 @@ genuinely narrower than the old full-width scoring screen:
   `flex-direction:column` — in a flex row that content had squeezed the
   outcome grid down to almost no width, wrapping it into dozens of rows and
   ballooning the card's height; stacked, the grid gets the rail's full width.
+
+**Whole-session summaries clear the scoreboard first.** Keeping `#scoreboard`
+alive is right for a leg/game finish — it's the match state the card reports on
+— but wrong for a summary that ends the whole session, where the scoreboard
+would show a leg that may not even be finished. `renderMarathonAnalysisScreen()`
+and the Checkout Blitz results screen both blank it before calling
+`showGameResult()`; without that, "End Marathon" mid-leg left the unfinished
+leg's live X01 scoreboard sitting directly above "🏁 MARATHON COMPLETE".
 
 **Results takeover — `showGameResult(html)`.** GAME OVER/LEG COMPLETE/MARATHON
 COMPLETE/Checkout Blitz "TIME'S UP" all go through this one helper

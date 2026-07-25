@@ -4512,6 +4512,7 @@ function renderGhostLegPicker(){
   if(playerChanged){
     ghostLegSort = 'recent'; ghostLegPageSize = 10; ghostLegPage = 0; ghostLegCategory = '';
     box._lastPlayer = name;
+    box._loaded = false;     // this player's list hasn't been fetched yet
     setup.ghostLeg = null;   // a different player's picked leg can never carry over
   }
   // Reload only when something actually changed. renderPlayers() calls this on
@@ -4521,8 +4522,27 @@ function renderGhostLegPicker(){
   // also meant two loads could be in flight for the same player at once, and
   // whichever landed first consumed _ghostLegTarget, so "Race this leg" /
   // "Repeat this leg" would quietly race legs[0] instead of the leg asked for.
-  if(playerChanged || _ghostLegTarget || !setup.ghostLeg) loadGhostLegPage();
+  //
+  // Keyed on "has a load for this player finished?" rather than on "is a leg
+  // currently selected?": having NOTHING selected is a legitimate settled state
+  // (a deep-linked leg that couldn't be found, or a filter that matched none),
+  // and treating it as "needs reloading" re-fetched on every subsequent
+  // renderPlayers() and re-armed legs[0] — silently undoing the very selection
+  // clearing that stops a mis-targeted race.
+  if(playerChanged || _ghostLegTarget || !box._loaded) loadGhostLegPage();
 }
+// How many legs a deep-linked "Race this leg" / "Repeat this leg" request may
+// pull in one go while hunting for its exact target. The picker's own paging is
+// deliberately small (10 by default), but the Player Profile's Race button
+// links to the player's BEST leg, which for anyone with a long history is very
+// unlikely to sit inside the 10 most RECENT wins — so a target-hunting fetch
+// asks for a much wider window instead of silently settling for legs[0].
+// 100 is the server's own hard ceiling for this route (getGhostCandidateLegs()
+// clamps there, docs/security-audit-roadmap.md SEC-23, since it's a public
+// unauthenticated endpoint) — asking for more would just be silently clamped,
+// so the not-found path below stays a genuine possibility and is handled
+// explicitly rather than falling back to the wrong leg.
+const GHOST_LEG_TARGET_LOOKUP_LIMIT = 100;
 function loadGhostLegPage(){
   const box = document.getElementById('ghost-leg-picker-body');
   if(!box) return;
@@ -4530,8 +4550,14 @@ function loadGhostLegPage(){
   if(!name) return;
   box.innerHTML = `<p class="pp-meta">Loading…</p>`;
   const seq = ++_ghostLegReqSeq;
-  const offset = ghostLegPage * ghostLegPageSize;
-  Backend.get(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=${ghostLegPageSize}&offset=${offset}&sort=${ghostLegSort}&category=${encodeURIComponent(ghostLegCategory)}`).then(data=>{
+  // A pending deep-link target overrides the picker's own paging/filtering for
+  // this one fetch: the target could be any leg in the player's history, and
+  // the active category filter could exclude it outright.
+  const hunting = !!_ghostLegTarget;
+  const limit  = hunting ? GHOST_LEG_TARGET_LOOKUP_LIMIT : ghostLegPageSize;
+  const offset = hunting ? 0 : ghostLegPage * ghostLegPageSize;
+  const category = hunting ? '' : ghostLegCategory;
+  Backend.get(`/api/players/ghost-legs?name=${encodeURIComponent(name)}&limit=${limit}&offset=${offset}&sort=${ghostLegSort}&category=${encodeURIComponent(category)}`).then(data=>{
     // A newer request has superseded this one. The player check below only ever
     // rejected a DIFFERENT player, so two overlapping loads for the SAME player
     // both applied their results (and both tried to consume _ghostLegTarget).
@@ -4541,7 +4567,19 @@ function loadGhostLegPage(){
     const total = (data && data.total) || 0;
     box._legs = legs;
     box._total = total;
+    // One-shot intent: consume it on EVERY path that gets this far, including
+    // the empty-result one below. Leaving it set meant renderGhostLegPicker()'s
+    // `|| _ghostLegTarget` reload guard refetched on every renderPlayers(), and
+    // a much later Ghost setup could still silently preselect this stale leg.
+    const target = _ghostLegTarget;
+    _ghostLegTarget = null;
+    box._loaded = true;   // a load for this player has now settled, whatever it found
+    if(hunting){ ghostLegCategory = ''; ghostLegPage = 0; }   // reflect what was actually fetched
     if(!total){
+      // Whatever was picked before can't survive a list that no longer contains
+      // it — otherwise the picker reads "No won legs in 301 yet" while a
+      // previously-chosen 501 leg is still armed for Play Now.
+      setup.ghostLeg = null;
       // Keep the toolbar visible even with zero results so a mode filter that
       // came up empty can be changed back without losing the picker entirely —
       // only the fully-unfiltered case gets the plain "you've never won a leg"
@@ -4553,14 +4591,36 @@ function loadGhostLegPage(){
       return;
     }
     let idx = legs.length ? 0 : -1;
-    if(_ghostLegTarget){
-      const m = legs.findIndex(l=>l.gameId===_ghostLegTarget.gameId && l.setNo===_ghostLegTarget.setNo && l.legNo===_ghostLegTarget.legNo);
-      if(m>=0) idx = m;
-      _ghostLegTarget = null;
+    let targetMissing = false;
+    if(target){
+      const m = legs.findIndex(l=>l.gameId===target.gameId && l.setNo===target.setNo && l.legNo===target.legNo);
+      // Only honour the deep link when the exact leg is actually present, and
+      // select NOTHING when it isn't. Falling through to legs[0] here is what
+      // silently raced the wrong leg: the Race button links to the player's
+      // BEST leg while legs[0] is merely their most RECENT one, so anyone whose
+      // best leg sat outside the fetched window quietly raced a different leg
+      // than the one they clicked.
+      if(m>=0) idx = m; else { idx = -1; targetMissing = true; }
     }
     setup.ghostLeg = idx>=0 ? legs[idx] : null;
     renderGhostLegList(legs, total);
-  }).catch(()=>{ box.innerHTML = `<p class="pp-meta">Couldn't load past legs.</p>`; });
+    if(targetMissing){
+      const note = document.createElement('p');
+      note.className = 'pp-meta';
+      note.style.cssText = 'margin:0 0 8px;color:var(--bust)';
+      note.textContent = "Couldn't find that exact leg in this player's recent history — pick one below instead.";
+      box.prepend(note);
+    }
+  }).catch(()=>{
+    if(seq !== _ghostLegReqSeq) return;
+    _ghostLegTarget = null;   // never leave a failed hunt armed for a later setup
+    setup.ghostLeg = null;    // nothing is selectable, so nothing may stay selected
+    // Settled, even though it failed — otherwise every later renderPlayers()
+    // would retry, turning one dead backend into a request storm. Changing
+    // player, sort, page or filter all re-enter loadGhostLegPage() directly.
+    box._loaded = true;
+    box.innerHTML = `<p class="pp-meta">Couldn't load past legs.</p>`;
+  });
 }
 function setGhostLegSort(sort){
   ghostLegSort = sort;
@@ -6002,8 +6062,20 @@ function renderSetupGameLedger(){
   const selectedRowRendered = GAME_LEDGER_CATEGORIES
     .some(c => c.key === openKey && c.keys.includes(currentKey));
   if(currentKey && currentKey !== 'challenge' && !selectedRowRendered){
-    el.innerHTML += `<div class="btn-row" style="margin-top:14px">
-      <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue with ${escapeHtml(GAME_LEDGER_NAMES[currentKey]||'this game')}</button>
+    // Carries its OWN #setup-inline-options-anchor, not just the button. That
+    // anchor is the only thing mountSetupInlineOptions() will move the real
+    // options pool into, and the pool's holding pen is `hidden` — so a
+    // button-only fallback let the player advance to Step 2 with starting
+    // score, legs/sets and every per-mode option silently unreachable, quietly
+    // starting the game on stale defaults. Rendering the anchor here makes
+    // this block a genuine stand-in for the collapsed row rather than a
+    // partial one.
+    el.innerHTML += `<div class="setup-ledger-options" style="margin-top:10px">
+      <div class="setup-ledger-name" style="margin-bottom:4px">${escapeHtml(GAME_LEDGER_NAMES[currentKey]||'Selected game')}</div>
+      <div id="setup-inline-options-anchor"></div>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn btn-primary" id="setup-step1-continue" style="flex:1" onclick="setupGoToStep2()">Continue with ${escapeHtml(GAME_LEDGER_NAMES[currentKey]||'this game')}</button>
+      </div>
     </div>`;
   }
   mountSetupInlineOptions();
@@ -16195,6 +16267,13 @@ const MARATHON_TREND_DESC = {
 function renderMarathonAnalysisScreen(detail, fullDistance){
   const completed = detail.legs.filter(l=>l.completedAt!=null);
   const rows = completed.map(l=>`<div class="dart-count-row"><span class="dart-count-val">${l.dartCount}</span><span class="dart-count-lbl">Leg ${l.legOrder}</span></div>`).join('');
+  // Clear the scoreboard first, the same way the Checkout Blitz results screen
+  // does. showGameResult() deliberately KEEPS #scoreboard alive — right for a
+  // leg/game finish, where it's the match state the card is reporting on — but
+  // this is a whole-SESSION summary, and "End Marathon" mid-leg would otherwise
+  // leave the unfinished leg's live X01 scoreboard sitting above
+  // "🏁 MARATHON COMPLETE".
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
   const oche=showGameResult('');
   const legPanel = `<div class="summary-grid" style="margin-top:14px">
     <button class="btn btn-ghost" onclick="show('setup')">New game</button>
