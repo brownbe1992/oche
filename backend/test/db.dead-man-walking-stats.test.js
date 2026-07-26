@@ -186,50 +186,96 @@ describe('getWeakestCheckouts', () => {
   });
 });
 
-describe('createGame — Dead Man Walking par calculation (docs/archive/dead-man-walking-roadmap.md "Par")', () => {
-  test('uses this player\'s own historical average darts-to-finish for the band, when it clears the objective floor', () => {
-    const a = 'DMWPar_A';
-    db.addPlayer(a);
-    // Weakness signal at target 40 (Low band 32-60) so it's the only entry in
-    // the candidate pool — every one of the 15 draws will be exactly 40,
-    // making the resulting par fully deterministic to assert on.
-    // Split the opening category 4/4 between 101 and 170 -- neither one's own
-    // incidental "opening remaining" pollution reaches the 8-sample floor on
-    // its own, so 40 stays the ONLY qualifying pool entry.
-    for (let i = 0; i < 8; i++) legAtRemaining(a, 40, { scored: 0, bust: true }, i < 4 ? 101 : 170);
-    // Separately, 3 WON legs whose checkout value (40) falls in the same Low
-    // band, each taking exactly 3 real darts to finish (single20+single10+D5)
-    // — average darts-to-finish = 3, comfortably above the objective floor
-    // (checkoutHint(40,true,3) is 1 dart optimal, so floor = 1+1 = 2). The
-    // par calculation reads `checkout_points` directly (stored explicitly on
-    // the checkout turn itself), not the reconstructed remaining the
-    // weakness-ranking query above uses — so these can be simple 1-turn legs
-    // regardless of what a fresh leg's own "opening remaining" would be.
-    for (let i = 0; i < 3; i++) {
-      const g = x01Game(a, 101);
-      db.addTurn(g.gameId, { player: a, set: 1, leg: 1, scored: 40, bust: false, checkout: true, checkoutPoints: 40,
-        darts: [{ dartNo: 1, sector: 20, multiplier: 1 }, { dartNo: 2, sector: 10, multiplier: 1 }, { dartNo: 3, sector: 5, multiplier: 2 }] });
-    }
+describe('createGame — Dead Man Walking difficulty (docs/archive/dead-man-walking-roadmap.md "Par")', () => {
+  // Replaces the old par-from-historical-average tests (2026-07). That mechanism
+  // averaged darts-per-LEG rather than darts spent closing the checkout, so any
+  // band with history handed out ~24 darts for a single checkout, and being an
+  // average it was fractional — "24.7 darts left this round", then
+  // "7.699999999999999" after two misses.
+  const DIFFICULTY_BUDGETS = { easy: 6, medium: 4, hard: 2, extreme: 0 };
 
-    const { config } = db.createGame({
+  function dmwGameFor(name, config) {
+    return db.createGame({
       category: 'Dead Man Walking', legsPerSet: 15, setsPerGame: 1, practice: 1,
-      gameType: 'dead_man_walking', players: [{ name: a }],
+      gameType: 'dead_man_walking', players: [{ name }], config,
     });
-    assert.ok(config.rounds.every(r => r.target === 40), 'the only qualifying pool entry is 40 -- every round draws it');
-    assert.ok(config.rounds.every(r => r.par === 3), `par should be this player's own historical average (3 darts), not the floor (2) or the cold-start default; got ${config.rounds[0].par}`);
+  }
+
+  for (const [difficulty, extra] of Object.entries(DIFFICULTY_BUDGETS)) {
+    test(`${difficulty}: every round's budget is the perfect route + ${extra}`, () => {
+      const a = `DMWDiff_${difficulty}`;
+      db.addPlayer(a);
+      const { config } = dmwGameFor(a, { difficulty });
+      assert.equal(config.difficulty, difficulty, 'the chosen difficulty is stored on the game');
+      assert.equal(config.rounds.length, 15);
+      config.rounds.forEach(r => {
+        const optimal = checkoutHint(r.target, true, 3).split(' ').length;
+        assert.equal(r.par - 1, optimal + extra,
+          `target ${r.target} on ${difficulty}: budget ${r.par - 1} should be ${optimal} + ${extra}`);
+      });
+    });
+  }
+
+  test('every par is a whole number — a dart budget is a count of darts', () => {
+    const a = 'DMWDiff_Int';
+    db.addPlayer(a);
+    for (const difficulty of Object.keys(DIFFICULTY_BUDGETS)) {
+      const { config } = dmwGameFor(a, { difficulty });
+      config.rounds.forEach(r => {
+        assert.ok(Number.isInteger(r.par), `target ${r.target} on ${difficulty}: par ${r.par} is not an integer`);
+      });
+    }
   });
 
-  test('falls back to objective-optimal + 2 when there is no history in the band yet', () => {
-    const a = 'DMWPar_Cold';
+  test('a player WITH history gets the same budgets as one without', () => {
+    // The whole point of the change: the budget is a declared difficulty now, so
+    // history can no longer make one player's rounds 6x longer than another's.
+    const withHistory = 'DMWDiff_Hist', without = 'DMWDiff_Fresh';
+    db.addPlayer(withHistory); db.addPlayer(without);
+    for (let i = 0; i < 8; i++) legAtRemaining(withHistory, 40, { scored: 0, bust: true }, i < 4 ? 101 : 170);
+    for (let i = 0; i < 3; i++) {
+      const g = x01Game(withHistory, 101);
+      db.addTurn(g.gameId, { player: withHistory, set: 1, leg: 1, scored: 40, bust: false, checkout: true, checkoutPoints: 40,
+        darts: [{ dartNo: 1, sector: 20, multiplier: 1 }, { dartNo: 2, sector: 10, multiplier: 1 }, { dartNo: 3, sector: 5, multiplier: 2 }] });
+    }
+    const hist = dmwGameFor(withHistory, { difficulty: 'medium' }).config;
+    const fresh = dmwGameFor(without, { difficulty: 'medium' }).config;
+    // History still steers the TARGETS (that is the mode) — just not the budget.
+    assert.ok(hist.rounds.every(r => r.target === 40), 'the only qualifying pool entry is 40');
+    const budgetFor = rounds => t => (rounds.find(r => r.target === t) || {}).par;
+    for (const r of fresh.rounds) {
+      const optimal = checkoutHint(r.target, true, 3).split(' ').length;
+      assert.equal(r.par - 1, optimal + 4);
+    }
+    assert.equal(budgetFor(hist.rounds)(40) - 1, checkoutHint(40, true, 3).split(' ').length + 4);
+  });
+
+  test('an absent or unknown difficulty falls back to medium rather than erroring', () => {
+    const a = 'DMWDiff_Bad';
     db.addPlayer(a);
-    // No X01 history at all -- cold start, drawing from CHALLENGE_CHECKOUTS.
-    const { config } = db.createGame({
-      category: 'Dead Man Walking', legsPerSet: 15, setsPerGame: 1, practice: 1,
-      gameType: 'dead_man_walking', players: [{ name: a }],
+    for (const config of [undefined, {}, { difficulty: 'impossible' }, { difficulty: 99 }, { difficulty: null }]) {
+      const { config: got } = dmwGameFor(a, config);
+      assert.equal(got.difficulty, 'medium', `${JSON.stringify(config)} should fall back to medium`);
+      got.rounds.forEach(r => {
+        const optimal = checkoutHint(r.target, true, 3).split(' ').length;
+        assert.equal(r.par - 1, optimal + 4);
+      });
+    }
+  });
+
+  test('the 15 targets are still server-authoritative — a client cannot supply them', () => {
+    // Difficulty became a client choice; the targets did NOT. This is the
+    // security property the roadmap doc calls out by name.
+    const a = 'DMWDiff_Hostile';
+    db.addPlayer(a);
+    const { config } = dmwGameFor(a, {
+      difficulty: 'easy',
+      rounds: Array.from({ length: 15 }, () => ({ target: 40, par: 99 })),
     });
+    assert.notEqual(config.rounds[0].par, 99, 'a client-supplied par must be ignored outright');
     config.rounds.forEach(r => {
       const optimal = checkoutHint(r.target, true, 3).split(' ').length;
-      assert.equal(r.par, optimal + 2, `target ${r.target}: no history -> par should be objective optimal (${optimal}) + 2`);
+      assert.equal(r.par - 1, optimal + 6, 'the budget comes from the validated difficulty, never the request body');
     });
   });
 });

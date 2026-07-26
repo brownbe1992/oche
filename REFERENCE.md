@@ -4084,7 +4084,7 @@ already-migrated database is a safe no-op).
 | `dnf_at` | `TEXT` | `NULL` unless the match ended without anyone reaching a real finish — set by `abandonGame()` (the "End game" early-exit) or by `forfeitPlayer()` when bowing out leaves zero active participants. Deliberately separate from `completed_at`: every `completed_at IS NOT NULL` stat query already means "this match reached a genuine finish" (e.g. `getBaseballWonLegs()`'s own comment on that invariant) — reusing it for an abandoned match would let a since-abandoned mid-leg's partial totals start counting as real results |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
 | `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'baseball'`, `'doubles_practice'`, `'chuckin'`, `'checkout_trainer'`, `'around_the_clock'`, `'around_the_world'`, `'bobs_27'`, `'checkout_ladder'`, `'gauntlet'`, `'killer'`, `'shanghai'`, `'halve_it'`, `'dead_man_walking'`, or `'pressure_chamber'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
-| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows, both guided-drill rows, and Bob's 27 rows (no config needed — Bob's 27 always plays the fixed D1-D20 ladder), `{targets: [...]}` for Halve-It rows (§32), `{rounds: [15 frozen {target, par} pairs]}` for Dead Man Walking rows — computed once server-side at creation and never client-supplied or recomputed (§33), and `{rounds: 15}` for Pressure Chamber rows (fixed, server-overridden regardless of client input — §34) |
+| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows, both guided-drill rows, and Bob's 27 rows (no config needed — Bob's 27 always plays the fixed D1-D20 ladder), `{targets: [...]}` for Halve-It rows (§32), `{difficulty, rounds: [15 frozen {target, par} pairs]}` for Dead Man Walking rows — the targets computed once server-side at creation and never client-supplied; `difficulty` is a client choice validated against a fixed four-id list (§33), and `{rounds: 15}` for Pressure Chamber rows (fixed, server-overridden regardless of client input — §34) |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 | `league_id` | `INTEGER REFERENCES leagues(id) ON DELETE SET NULL` | Nullable — set by the `onGameCreated` auto-tag hook (§18), never by `createGame()`'s own INSERT. `NULL` for every game that isn't a tagged league match (the overwhelming majority) |
 
@@ -7885,15 +7885,16 @@ target-label row headers, and the `/display` scorecard.
 `docs/archive/dead-man-walking-roadmap.md`. A solo drill that skips the warmup:
 **15 rounds** (`game_type='dead_man_walking'`, solo-only), each one dropping
 the player mid-checkout on one of *their own* historically weakest X01
-finishes, with a personalized dart budget one tighter than they'd usually
-need. Close it → **Walked Out**. Bust, or run out of darts → **Executed**.
+finishes, with a fixed dart budget set by the run's chosen **difficulty**
+(Easy/Medium/Hard/Extreme). Close it → **Walked Out**. Bust, or run out of
+darts → **Executed**.
 The count of Walked Out rounds out of 15 lands on a result tier at the end,
 Pardoned down to Executed. Structurally the closest existing precedent is
 the 121 Checkout Ladder (§26) — real X01-shaped visits from a non-501
 deficit, reusing X01's own bust/win legality — but two things are
-genuinely different: the deficit and dart budget are **personalized and
-frozen server-side at creation**, never client-supplied or recomputed
-mid-session, and a bust here is **immediately fatal to the round** (no
+genuinely different: the deficits are **personalized and frozen server-side
+at creation**, never client-supplied or recomputed mid-session, and a bust
+here is **immediately fatal to the round** (no
 second visit to retry within the same round the way the Ladder's
 up-to-3-visits shape allows).
 
@@ -7958,37 +7959,94 @@ share it, since Daily Challenge's own copy was frontend-only) — the same
 uniform random draw, not a fixed cycle — repeats are expected whenever a
 player's own weak pool is smaller than 15).
 
-### Par — `deadManWalkingParForTarget(target, historicalAverage)` (`frontend/scoring.js`)
+### Difficulty and the dart budget — `deadManWalkingParForTarget(target, difficulty)` (`frontend/scoring.js`)
 
-The pitch's "par minus one" only makes sense if par is a personalized
-standard **above** the theoretical minimum — using `checkoutHint()`'s own
-optimal dart count as par directly would make every round mathematically
-impossible (you cannot finish in fewer darts than the theoretical minimum).
-This doc's own correctness fix:
+A round's dart **budget** is:
 
 ```
-par = historicalAverage != null
-  ? max(historicalAverage, objectiveOptimal + 1)   // the floor
-  : objectiveOptimal + 2                            // no history yet in this band
+budget = deadManWalkingOptimalDarts(target) + DIFFICULTY.extraDarts
+par    = budget + 1
 ```
 
-`historicalAverage` (`_dmwHistoricalAverageDarts(playerId, band)`,
-`backend/db.js`) is this player's own **average total darts-to-finish**
-across their real won X01 double-out legs whose `checkout_points` (stored
-directly on the checkout turn — no reconstruction needed here, unlike the
-weakness query above) falls in the same **band** as this round's target:
-Low 32–60 / Mid 61–100 / High 101–170 (`DEAD_MAN_WALKING_BANDS`,
-`deadManWalkingBandFor()`, `frontend/scoring.js` — three bands is this
-build's chosen granularity, a first pass per the roadmap doc's own "Band
-granularity" open question, not confirmed against real play). "Total
-darts" already spans every visit in a won leg (including any earlier busts
-within it), the same convention `fewestDartsCheckout`/`getShanghaiWonLegs()`
-already use for "how many darts did this checkout actually take." The floor
-(`objectiveOptimal + 1`) is the one concrete, testable correctness property
-this doc adds: **the round's actual dart budget (`par - 1`) can never drop
-below the objective-optimal dart count**, verified by an exhaustive test
-across every finishable score 2–170 (`backend/test/scoring.test.js`, the
-same rigor `checkoutHint()`'s own exhaustive test already has).
+`deadManWalkingOptimalDarts()` is `checkoutHint()`'s own shortest double-out
+route length (3 for 170, 2 for 100, 1 for 40). `par` is deliberately
+`budget + 1` because **`par - 1` is what every consumer reads as the budget**
+(the frontend live state, the backend write-time guard,
+`rebuildDeadManWalkingState()`) — keeping that long-standing contract intact
+rather than changing four call sites to mean something new.
+
+| Difficulty | Margin | 170 | 100 | 40 |
+|---|---|---|---|---|
+| Easy | +6 | 9 | 8 | 7 |
+| Medium (default) | +4 | 7 | 6 | 5 |
+| Hard | +2 | 5 | 4 | 3 |
+| Extreme | +0 | 3 | 2 | 1 |
+
+The margin is "how many darts of slack beyond a perfect checkout", so a
+difficulty means the same thing on a 32 as it does on a 170 rather than being a
+number that lands differently at each end of the board. **Extreme sits exactly on
+the objective floor** — the perfect route and nothing more — which is what makes
+it the hardest setting rather than an impossible one. That floor is the concrete
+correctness property here: *the budget can never drop below the objective-optimal
+dart count*, verified exhaustively across every finishable score 2–170 on every
+difficulty (`backend/test/scoring.test.js`, the same rigor `checkoutHint()`'s own
+exhaustive test has).
+
+**This replaced a par derived from the player's own historical average** (2026-07,
+from a live bug report). That mechanism was broken twice over:
+
+1. `_dmwHistoricalAverageDarts()` averaged **darts per whole LEG** (~25 for a 501
+   leg), not darts spent closing that checkout — so any band with history behind
+   it handed out ~24 darts to hit one checkout, while a band with none fell back
+   to `objectiveOptimal + 2` par, i.e. a **4-dart budget on a 170**. The same run
+   could contain both.
+2. Being an average, it was **fractional**. That is what put "24.7 darts left this
+   round" on screen, and then "7.699999999999999" after two misses — floating-point
+   drift on top of a quantity that is a count of darts and can only be an integer.
+
+Both symptoms are now covered: an exhaustive test asserts `par` is a whole number
+on every finishable score and difficulty, and another walks a budget down to zero
+one dart at a time asserting it stays integral at every step. `DEAD_MAN_WALKING_BANDS`,
+`deadManWalkingBandFor()` and `_dmwHistoricalAverageDarts()` are gone.
+
+**Difficulty is the one client-supplied field this mode has.** It is validated in
+`createGame()` against the fixed four-id list (`normaliseDeadManWalkingDifficulty()`,
+shared by both ends), falling back to `medium`. The 15 **targets** remain entirely
+server-authoritative — see the next section, which is the security property that
+actually matters and is unchanged. The worst a hostile client can do is select
+`easy`, which any honest one can select from the New Game screen anyway. It is
+stored on `games.config.difficulty` so a resumed run, the scoreboard's own label,
+and Play Again all report what is actually being played.
+
+### Per-visit achievements — `awardVisitAchievements(p, ev, snap)` (`frontend/index.html`)
+
+A Dead Man Walking visit is an ordinary "throw at a remaining score, maybe check
+out" visit, so every per-visit achievement applies: Big Fish (170 **is** in the
+target pool), Hat Trick, Bullseye Gauntlet, Double Trouble, Madhouse, Staircase
+Finish, Triple Bull, Bullseye Finish, Bed & Breakfast, Shanghai visit, No Cigar,
+Busted Maximum, the first-100-checkout milestone, and Around the Clock/World
+progress.
+
+None of it fired here until 2026-07 (reported from live play). The cause was
+structural rather than a wrong condition: that whole block had grown up **inline
+inside `enterTurn()`**, X01's own commit path. Dead Man Walking commits through
+its own `enterTurnDeadManWalking()`, so the code was simply unreachable — the only
+badge it ever awarded was the time-of-day pair, which it called itself.
+
+The block is now `awardVisitAchievements(p, ev, snap)`, called by both. It
+**awards only** — turn recording and progression stay with each caller, because
+the two record differently (Dead Man Walking records only the darts actually
+reached before the round settled, via `ev.dartsConsumed`). It reads `game.darts`
+for the visit's dart pattern, so it must be called **before** that array is
+cleared; `backend/test/frontend.visit-achievements-shared.test.js` asserts the
+ordering along with both call sites.
+
+`newMatchPlayerDeadManWalking()` also had to gain the per-visit tracking fields
+`newMatchPlayer()` already carried (`legVisits`, `legVisitScores`,
+`metronomeFired`, `pendingIceInTheVeins`, `singlesHit`, `atwHitSet`,
+`atwBaselineHitSet`, `sessionOneEighties`, `lifetimeOneEightiesBase`) — without
+them the first committed visit threw on `p.legVisitScores.push`, which is how the
+gap was caught when the change was driven in a real browser.
 
 ### `config.rounds` — frozen, server-authoritative, never client-supplied
 

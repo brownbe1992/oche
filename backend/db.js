@@ -31,7 +31,8 @@ const { checkoutHint, dartLabel,
   computeFatigueSplit, classifyMarathonTrend,
   shanghaiRoundTarget, evaluateVisitShanghai, rebuildShanghaiState,
   HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, rebuildHalveItState,
-  deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
+  deadManWalkingParForTarget, pickDeadManWalkingTargets,
+  normaliseDeadManWalkingDifficulty, DEAD_MAN_WALKING_DEFAULT_DIFFICULTY,
   rebuildDeadManWalkingState, deadManWalkingResultTier, CHALLENGE_CHECKOUTS,
   makeDartCore, PRESSURE_ROUNDS, generatePressureCard, computePressureRoundResult,
   pressureMissPenaltyForCard, pressureComposureRating, rebuildPressureChamberState,
@@ -1067,19 +1068,28 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   }
   // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Data model" /
   // "Server-authoritative round generation"): config.rounds — the frozen
-  // array of 15 {target, par} pairs — is computed HERE, server-side, from a
-  // live snapshot of this specific player's own X01 history, and NEVER
-  // accepted from the client at all (unlike killerConfig above, there isn't
-  // even a client-supplied field to validate against; any config the request
-  // body carries for this game type is simply ignored). A hostile client
-  // choosing its own easy targets/generous pars for itself is exactly what
-  // this closes off — the real security requirement this doc calls out by
-  // name, not just tidiness.
+  // array of 15 {target, par} pairs — is computed HERE, server-side. The
+  // TARGETS come from a live snapshot of this specific player's own X01
+  // history and are never accepted from the client; that is what the security
+  // requirement is about, and it is unchanged. A hostile client picking its own
+  // easy targets for itself is exactly what this closes off.
+  //
+  // `config.difficulty` IS a client choice (2026-07), because "how many darts of
+  // slack per round" is a legitimate preference rather than something to be
+  // inferred — see deadManWalkingParForTarget(). It is validated against a fixed
+  // four-id list, so the worst a hostile client can do is select 'easy', which
+  // any honest one can select from the New Game screen anyway.
   let dmwConfig = null;
   if (resolvedGameType === 'dead_man_walking') {
     const names = _uniquePlayerNames(players);
     if (names.length !== 1) throw httpError(400, 'Dead Man Walking is solo only');
-    dmwConfig = { rounds: _buildDeadManWalkingRounds(names[0]) };
+    // The one thing a client DOES get to choose here. Validated against the
+    // fixed four-id list rather than trusted — an unknown value falls back to
+    // the default instead of reaching deadManWalkingParForTarget(), which would
+    // silently do the same thing less visibly.
+    const difficulty = normaliseDeadManWalkingDifficulty(config && config.difficulty)
+      || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY;
+    dmwConfig = { difficulty, rounds: _buildDeadManWalkingRounds(names[0], difficulty) };
   }
   // The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md): rounds is fixed
   // at 15, never a client choice — overridden server-side the same way
@@ -6702,31 +6712,6 @@ function getWeakestCheckouts(playerName, count) {
     .slice(0, count);
 }
 
-// Historical average total darts-to-finish for the player's OWN won X01
-// double-out legs whose checkout value falls in the given band -- the raw
-// ingredient deadManWalkingParForTarget() (frontend/scoring.js) turns into a
-// round's actual par. turns.checkout_points already IS the deficit that
-// checkout turn closed (see getCoachingInsights()'s own checkout-route
-// insight above, which reads it the same way) -- no window-function
-// reconstruction needed here, unlike getWeakestCheckouts() above, since a WON
-// leg's checkout_points is stored directly. "Total darts" spans every visit
-// in that leg (including any earlier busts within it), matching how
-// fewestDartsCheckout/getShanghaiWonLegs() etc. already count a real
-// multi-visit checkout -- just averaged instead of minimum-ed.
-function _dmwHistoricalAverageDarts(playerId, band) {
-  const row = db.prepare(`
-    SELECT AVG(leg_darts) AS avg FROM (
-      SELECT COUNT(d.id) AS leg_darts
-      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
-      JOIN game_players gp ON gp.game_id=t.game_id AND gp.player_id=t.player_id
-      WHERE t.player_id=? AND g.game_type='x01' AND gp.out_mode='double'
-      GROUP BY t.game_id, t.set_no, t.leg_no
-      HAVING SUM(t.checkout)>0 AND MAX(t.checkout_points) BETWEEN ? AND ?
-    )
-  `).get(playerId, band.low, band.high);
-  return row && row.avg != null ? row.avg : null;
-}
-
 // Server-authoritative round generation (docs/archive/dead-man-walking-roadmap.md
 // "Data model": "config.rounds is computed once, server-side, at game
 // creation... never accepted from the client") -- the whole security point of
@@ -6736,17 +6721,16 @@ function _dmwHistoricalAverageDarts(playerId, band) {
 // double-out X01 checkout history for a confident weakness ranking falls back
 // to CHALLENGE_CHECKOUTS (frontend/scoring.js, shared with Daily Challenge)
 // rather than inventing a second curated list.
-function _buildDeadManWalkingRounds(playerName) {
-  const p = getPlayer(playerName);
+function _buildDeadManWalkingRounds(playerName, difficulty) {
   let pool = getWeakestCheckouts(playerName, 15).map(c => c.target);
   if (!pool.length) pool = CHALLENGE_CHECKOUTS.slice();
   const targets = pickDeadManWalkingTargets(pool, 15, Math.random);
-  return targets.map(target => {
-    const band = deadManWalkingBandFor(target);
-    const historicalAverage = p ? _dmwHistoricalAverageDarts(p.id, band) : null;
-    const par = deadManWalkingParForTarget(target, historicalAverage);
-    return { target, par };
-  });
+  // Par is a pure function of the target and the chosen difficulty now — the
+  // TARGETS are still the server-authoritative part (drawn from this player's
+  // own weakest checkouts, never client-supplied), which is what that security
+  // requirement was actually about. The difficulty is a declared preference from
+  // a fixed list of four, validated by the caller.
+  return targets.map(target => ({ target, par: deadManWalkingParForTarget(target, difficulty) }));
 }
 
 function resetStats() {

@@ -2606,6 +2606,121 @@ that every hint site routes through the helper. Confirmed live in a browser: a C
 game in board mode reads "Tap the board to score. No score, no pressure — just throw."
 both at start and after an undo.
 
+### BUG-34 — Dead Man Walking awarded no achievements at all, because every per-visit check lived inside X01's own commit function  **(MED, user-facing / a whole mode silently missing a feature)**
+
+**Status: ✅ Fixed (2026-07).** Reported from live play: "the achievements aren't
+firing during Dead Man Walking mode."
+
+**Root cause is structural, not a wrong condition.** Every per-visit achievement,
+counter and Home Assistant webhook — the 180 counter, Big Fish, nine-darter, the
+whole `CHAIN_CHECKS` list (Hat Trick, Bullseye Gauntlet, Double Trouble, Madhouse,
+Staircase Finish, Triple Bull, Bullseye Finish, Bed & Breakfast, Shanghai visit,
+No Cigar, Busted Maximum), Metronome, Cruise Control, Ice in the Veins, Around the
+Clock/World progress and the first-100-checkout milestone — had grown up **inline
+inside `enterTurn()`**, X01's own commit path. Dead Man Walking commits through
+`enterTurnDeadManWalking()`, so none of it was reachable. The only badge the mode
+ever awarded was the time-of-day pair, which it called itself.
+
+This is worth recording as a *class* of bug rather than one miss: the same shape
+applies to any future mode whose visits are ordinary X01-shaped visits but whose
+commit path is its own function. Nothing failed loudly; the feature was just
+absent.
+
+**Fix.** Extract the block verbatim into `awardVisitAchievements(p, ev, snap)` and
+call it from both paths. It **awards only** — turn recording and progression stay
+with each caller, since the two record differently (Dead Man Walking records only
+the darts actually reached before the round settled, via `ev.dartsConsumed`).
+
+**A second gap found by driving it.** `newMatchPlayerDeadManWalking()` is its own
+player factory and lacked the per-visit tracking fields `newMatchPlayer()` carries
+(`legVisits`, `legVisitScores`, `metronomeFired`, `pendingIceInTheVeins`,
+`singlesHit`, `atwHitSet`, `atwBaselineHitSet`, `sessionOneEighties`,
+`lifetimeOneEightiesBase`), so the very first committed visit threw on
+`p.legVisitScores.push`. Caught by running a real round in a browser rather than
+by the source-level test, which is the argument for doing both.
+
+**Verification.** `backend/test/frontend.visit-achievements-shared.test.js` — both
+call sites, the block no longer duplicated inline, the achievements that matter in
+a checkout drill all present in the shared block, awarding-only (no `DB.recordTurn`
+/ progression leaked in), and the ordering requirement that it runs before
+`game.darts` is cleared. Confirmed live: a 170 round checked out with T20 T20 Bull
+queued both `bigfish` and `bullseyefinish`, and `game.gameBigFish` incremented.
+
+### BUG-35 — Dead Man Walking's dart budget was a fractional average, showing "24.7 darts left" and then "7.699999999999999"  **(MED, user-facing / nonsensical on screen)**
+
+**Status: ✅ Fixed (2026-07).** Reported from live play: "it starts by saying I
+have 24.7 darts left. I can't throw .7 of a dart", and then "I had 9.7 darts left
+and entered two misses. It says I have 7.69999999999999999999 darts left this
+round."
+
+**Root cause: par was an average, and it averaged the wrong thing.**
+`deadManWalkingParForTarget(target, historicalAverage)` took
+`_dmwHistoricalAverageDarts(playerId, band)` — the player's average **total darts
+per whole won LEG** whose checkout fell in that band. A 501 leg takes ~25 darts,
+so par came out ~25.7 and the budget (`par - 1`) ~24.7 darts **to hit a single
+checkout**. Two separate defects in one value:
+
+1. **It measured the wrong quantity.** "Darts to finish the leg" is not "darts
+   spent closing this checkout".
+2. **It was fractional**, so it could never be right for a count of darts, and
+   subtracting from it accumulated floating-point error — `9.7 - 2` is
+   `7.699999999999999` in IEEE 754, which is exactly what reached the screen.
+
+A band with *no* history fell back to `objectiveOptimal + 2` par instead — a
+**4-dart budget on a 170** — so the same run could hand out 24 darts for one
+target and 4 for another. That inconsistency is also what made the mode feel
+arbitrarily punishing (see BUG-36).
+
+**Fix.** Replaced with an explicit difficulty (BUG-36). `par` is now
+`optimalDarts(target) + difficulty.extraDarts + 1`, integer by construction.
+`DEAD_MAN_WALKING_BANDS`, `deadManWalkingBandFor()` and
+`_dmwHistoricalAverageDarts()` are deleted.
+
+**Verification.** An exhaustive test asserts `par` is a whole number for every
+finishable score 2–170 on every difficulty, and a second walks a budget down to
+zero one dart at a time asserting it stays integral at each step
+(`backend/test/scoring.test.js`). `backend/test/db.dead-man-walking-stats.test.js`
+asserts every generated `par` is an integer, and that a player *with* history now
+gets the same budgets as one without. Confirmed live: two misses on a 7-dart round
+now reads "5 darts left this round".
+
+### BUG-36 — Dead Man Walking was arbitrarily punishing: a 170 in four darts, with no way to choose a difficulty  **(MED, game-design / user-facing)**
+
+**Status: ✅ Fixed (2026-07).** Reported from live play: "Dead Man Walking is way
+too hard. I should not have to check out 170 in four darts. There should be
+different levels of difficulty — easy, medium, hard, and extreme."
+
+**Confirmed exactly.** With no history in a target's band, par fell back to
+`objectiveOptimal + 2`, so a 170 (optimal `T20 T20 Bull` = 3 darts) got a budget
+of **4**. There was no setting of any kind.
+
+**Fix.** Four difficulties, each expressed as *darts of slack beyond a perfect
+checkout*, so the setting means the same thing on a 32 as on a 170:
+
+| Difficulty | Margin | 170 | 100 | 40 |
+|---|---|---|---|---|
+| Easy | +6 | 9 | 8 | 7 |
+| Medium (default) | +4 | 7 | 6 | 5 |
+| Hard | +2 | 5 | 4 | 3 |
+| Extreme | +0 | 3 | 2 | 1 |
+
+Extreme sits exactly on the objective floor — the perfect route and nothing more —
+which is what makes it the hardest setting rather than an impossible one. The
+reported case, a 170, now gives 7 darts on the default.
+
+Chosen on the New Game screen (a registry-built picker, so the four options and
+their blurbs come from one place), stored on `games.config.difficulty`, shown on
+the scoreboard during play, and kept by Play Again. It is the **one** client-supplied
+field this mode has, validated in `createGame()` against the fixed four-id list;
+the 15 targets remain entirely server-authoritative, which is the security property
+the roadmap doc calls out by name and is unchanged.
+
+**Verification.** Per-difficulty budget tests in `backend/test/scoring.test.js` and
+`backend/test/db.dead-man-walking-stats.test.js`, including that an absent or
+unknown difficulty falls back to medium, that a client-supplied `config.rounds` is
+still ignored outright, and an exhaustive check that no difficulty can ever push a
+budget below the perfect route. Confirmed live across all four settings.
+
 ## Standing practice
 
 When a functional bug is found: add it here with a repro and a fix outline before fixing,

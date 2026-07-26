@@ -1596,6 +1596,18 @@
           <!-- Shanghai options (Shanghai game type only, docs/archive/shanghai-roadmap.md) —
                a fixed round sequence 1..rounds; each round's 3 darts only score
                against that round's own number. -->
+          <!-- Dead Man Walking difficulty. The dart budget for a round is the
+               target's own perfect-route length plus this margin, so the choice
+               means the same thing on a 32 as it does on a 170. -->
+          <div class="setup-section" id="dead-man-walking-options-section" hidden>
+            <div class="setup-label">Dead Man Walking difficulty</div>
+            <p class="pp-meta" style="margin:0 0 8px">Each round gives you a fixed number of darts to check out a score you're historically weak on. Difficulty sets how much slack you get beyond a perfect checkout.</p>
+            <div class="opts" style="margin:0">
+              <div class="seg seg-wrap" role="group" aria-label="Dead Man Walking difficulty" id="dmw-difficulty-seg"></div>
+            </div>
+            <p class="pp-meta" style="margin:8px 0 0" id="dmw-difficulty-blurb"></p>
+          </div>
+
           <div class="setup-section" id="shanghai-options-section" hidden>
             <div class="setup-label">Shanghai options</div>
             <p class="pp-meta" style="margin:0 0 8px">Round 1 targets the number 1, round 2 the number 2, and so on. A single, double, AND treble of the round's own number in one visit — a Shanghai — wins instantly.</p>
@@ -2786,6 +2798,7 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   // Shanghai (docs/archive/shanghai-roadmap.md): how many rounds the fixed sequence
   // runs — default 7 (the common pub format), with a 1-20 long-form option.
   shanghaiRounds:7,
+  dmwDifficulty: DEAD_MAN_WALKING_DEFAULT_DIFFICULTY,   // Dead Man Walking: darts of slack per round
   // Halve-It (docs/archive/halve-it-roadmap.md "Custom target editor", item 19): the target
   // sequence — 'classic' plays HALVE_IT_DEFAULT_TARGETS, 'custom' plays the editable
   // halveItCustomTargets list below (an ordered array of {sector, ring?}).
@@ -6310,6 +6323,36 @@ function setGameType(type){
 // setCheckoutTrainerDifficulty().
 // Shanghai round count (docs/archive/shanghai-roadmap.md) — a 2-way segmented control,
 // same aria-pressed toggle pattern as setKillerLives().
+// Dead Man Walking difficulty picker. Built from the registry rather than four
+// hand-written buttons, so the four options and their blurbs can only ever come
+// from one place (same discipline as items 39/41/46).
+function renderDmwDifficultyPicker(){
+  const seg = document.getElementById('dmw-difficulty-seg');
+  if(!seg) return;
+  if(!seg.children.length){
+    seg.innerHTML = DEAD_MAN_WALKING_DIFFICULTY_IDS.map(id => {
+      const d = DEAD_MAN_WALKING_DIFFICULTIES[id];
+      return `<button id="dmw-diff-${id}" aria-pressed="false" onclick="setDmwDifficulty('${id}')">${escapeHtml(d.label)}</button>`;
+    }).join('');
+  }
+  setDmwDifficulty(setup.dmwDifficulty || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY);
+}
+function setDmwDifficulty(id){
+  setup.dmwDifficulty = normaliseDeadManWalkingDifficulty(id) || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY;
+  const map = {};
+  DEAD_MAN_WALKING_DIFFICULTY_IDS.forEach(k => { map[k] = `dmw-diff-${k}`; });
+  setPressed(map, setup.dmwDifficulty);
+  const blurb = document.getElementById('dmw-difficulty-blurb');
+  if(blurb){
+    const d = DEAD_MAN_WALKING_DIFFICULTIES[setup.dmwDifficulty];
+    // A concrete example beats the abstract margin: "+4 darts" means nothing
+    // until you know what it buys you on the hardest target in the pool.
+    const t170 = deadManWalkingParForTarget(170, setup.dmwDifficulty) - 1;
+    const t40  = deadManWalkingParForTarget(40,  setup.dmwDifficulty) - 1;
+    blurb.textContent = `${d.blurb} A 170 gives you ${t170} dart${t170===1?'':'s'}; a 40 gives you ${t40}.`;
+  }
+  saveSetup();
+}
 function setShanghaiRounds(n){
   setup.shanghaiRounds = n;
   setPressed({7:'shanghai-rounds-7', 20:'shanghai-rounds-20'}, n);
@@ -7508,7 +7551,11 @@ async function startGame(){
     // config.rounds itself, server-side, from a live snapshot of this
     // player's own history. Sending {} rather than omitting config keeps this
     // branch's shape consistent with every sibling drill above.
-    : gameType === 'dead_man_walking' ? {}
+    // difficulty (2026-07) is the ONE client-supplied field this mode has — the
+    // 15 targets are still computed server-side from this player's own weakest
+    // checkouts and are never sent from here. createGame() validates the id
+    // against its fixed four-value list.
+    : gameType === 'dead_man_walking' ? { difficulty: setup.dmwDifficulty || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY }
     : { startingScore: startScore };
   // Registry member (item 41, docs/code-quality-roadmap.md) — every real
   // GAME_TYPES entry (including x01) declares its own category(setup, config,
@@ -12886,103 +12933,23 @@ function noDartsThrown(){
   document.getElementById('status').textContent='Throw at least one dart, or use Miss.';
   return true;
 }
-function enterTurn(){
-  if(game.gameType === 'cricket') return enterTurnCricket();
-  if(game.gameType === 'baseball') return enterTurnBaseball();
-  if(game.gameType === 'shanghai') return enterTurnShanghai();
-  if(game.gameType === 'halve_it') return enterTurnHalveIt();
-  if(game.gameType === 'pressure_chamber') return enterTurnPressureChamber();
-  if(game.gameType === 'bobs_27') return enterTurnBobs27();
-  if(game.gameType === 'checkout_ladder') return enterTurnCheckoutLadder();
-  if(game.gameType === 'gauntlet') return enterTurnGauntlet();
-  if(game.gameType === 'dead_man_walking') return enterTurnDeadManWalking();
-  if(game.gameType === 'checkout_trainer') return submitCheckoutAttempt();
-  if(noDartsThrown()) return;
-  const p = game.players[game.current];
-  const ev = GAME_TYPES[game.gameType].evaluateVisit(p, game.darts, game);
-
-  // Screen-reader announcement of the committed turn result (docs/accessibility-roadmap.md
-  // gap 1) — deliberately just the turn outcome, not per-dart. Leg/set/game-win detail
-  // is handled separately by the achievement queue and onLegWon()'s own UI, which
-  // isn't duplicated here to avoid two announcements for the same winning visit.
-  if(ev.bust) announce(`${p.name} busts, stays on ${p.score}.`);
-  else if(ev.win) announce(`${p.name} checks out with ${ev.pointsThisVisit}. Leg won.`);
-  else announce(`${p.name} scores ${ev.scored}, ${ev.newScore} remaining.`);
-
-  // snapshot state before mutations so undoLastTurn() can restore it
-  const _snap = { pi:game.current, score:p.score,
-    legPoints:p.legPoints, legVisits:p.legVisits, legDarts:p.legDarts, legBusts:p.legBusts,
-    legAvgDarts:p.legAvgDarts, gameAvgDarts:p.gameAvgDarts,
-    setDarts:p.setDarts, gameDarts:p.gameDarts,
-    gamePoints:p.gamePoints, gameVisits:p.gameVisits,
-    oe:game.gameOneEighties, bf:game.gameBigFish, bu:game.gameBusts,
-    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
-    // achievement/challenge tracking state — restored on undo so a mis-entered dart
-    // that's undone can't leave a stale badge/streak trace behind
-    legVisitScores:p.legVisitScores.slice(), metronomeFired:p.metronomeFired,
-    pendingIceInTheVeins:p.pendingIceInTheVeins, legWorstDeficit:p.legWorstDeficit,
-    singlesHit:new Set(p.singlesHit), legVisitLogsLen:game.legVisitLogs.length,
-    // badges awarded/incremented while processing this turn — revoked on undo.
-    // voided flips true once undo actually runs, so an award response that's
-    // still in flight at that point revokes itself instead of registering here.
-    badgeReverts:[], voided:false,
-    // Ghost Opponent: captured BEFORE this round's auto-played ghost reply below,
-    // so undo rolls the ghost back to its state entering this round too — otherwise
-    // undoing a human turn would leave the ghost one scripted visit further ahead.
-    ghost: game.hasGhost ? { score:game.players[1].score, legPoints:game.players[1].legPoints,
-      legVisits:game.players[1].legVisits, legDarts:game.players[1].legDarts, legBusts:game.players[1].legBusts,
-      legAvgDarts:game.players[1].legAvgDarts, gameDarts:game.players[1].gameDarts, gameAvgDarts:game.players[1].gameAvgDarts,
-      gamePoints:game.players[1].gamePoints, gameVisits:game.players[1].gameVisits,
-      ghostTurnIndex:game.players[1].ghostTurnIndex } : null };
-  pushTurnSnapshot(_snap);
-
-  // per-leg and per-game scope (shown live on the scoreboard — both modes)
-  const _adj = ev.bust ? 3 : game.darts.length;  // darts counted for the 3-dart average
-  p.legPoints  += ev.scored; p.legVisits  += 1;
-  p.legDarts   += game.darts.length;
-  p.legAvgDarts  += _adj;
-  p.setDarts   += game.darts.length;
-  p.gameDarts  += game.darts.length;
-  p.gameAvgDarts += _adj;
-  if(ev.bust) p.legBusts += 1;
-  p.gamePoints += ev.scored; p.gameVisits += 1;
-
-  // Comeback Kid tracking: the worst remaining-score deficit seen at any point this
-  // leg (needs an opponent to trail behind — H2H or a 2-player practice match).
-  // Sampled BEFORE this visit reduces p.score, because the deepest a player is behind
-  // is as they step up to throw (right after the opponent's last visit) — sampling
-  // after their own visit would understate the true peak by up to this visit's score
-  // and miss real >=100 comebacks (deficits in [100, 100+visitScore)).
-  // A ghost isn't a real opponent for Comeback Kid purposes (see onLegWon()'s
-  // matching guard) — racing your own past leg shouldn't earn a badge framed
-  // around beating another player.
-  // Active-player count, not game.players.length — matches onLegWon()'s own
-  // active-count check for this exact badge: a departed (bowed-out) player
-  // stays IN game.players (only `dnf` is set), so without this a 3+ player
-  // match that's shrunk to a genuine 2-player decider via bow-outs would
-  // freeze this sampling forever at its pre-bow-out value, while onLegWon()'s
-  // awarding check (correctly active-count-based) evaluates that stale number.
-  const _activeForDeficit = game.players.filter(x=>!x.dnf);
-  if(_activeForDeficit.length===2 && !game.hasGhost){
-    const _opp = _activeForDeficit.find(x=>x!==p);
-    if(_opp) p.legWorstDeficit = Math.max(p.legWorstDeficit, p.score - _opp.score);
-  }
-  if(!ev.bust) p.score = ev.newScore;
-
-  // persist the turn to the database
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:ev.scored, bust:ev.bust,
-    checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
-    darts: mapDartsForRecord(game.darts) });
-  // one-shot record of this turn's outcome, for voice announcements on the scoreboard
-  game.lastTurnEvent = { ts: Date.now(), player: p.name, scored: ev.scored, bust: !!ev.bust,
-    win: !!ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null };
-  // Stable copy of the winning-visit checkout points for onLegWon()'s Big Fish (170)
-  // check: onLegWon reads this instead of game.lastTurnEvent.checkoutPoints, because
-  // the badge queue below calls pushLive() synchronously (when the queue is idle),
-  // which nulls lastTurnEvent before onLegWon runs — so the /display Big Fish splash
-  // would otherwise never fire on a 170 finish.
-  game.lastWinCheckoutPoints = ev.win ? ev.pointsThisVisit : null;
+// Every per-visit achievement, counter and Home Assistant webhook, for any game
+// type whose visits are ordinary "throw at a remaining score, maybe check out"
+// visits. Extracted verbatim from enterTurn() (2026-07) — it had grown up inline
+// there, which meant Dead Man Walking, whose visits are exactly that shape,
+// fired NONE of it: no Big Fish on a 170 round, no Hat Trick, no Madhouse, no
+// Bullseye Finish, no first-100-checkout, no Around the World progress. The only
+// badge it ever awarded was the time-of-day pair, which it called itself.
+//
+// `snap` is this visit's turn snapshot; its `.score` is the PRE-visit remaining,
+// which Staircase Finish needs (p.score has already been mutated to 0 by the
+// time this runs on a checkout).
+//
+// Callers are responsible for their own turn RECORDING and progression — this
+// function only awards. It reads `game.darts` for the visit's darts, so it must
+// be called before that array is cleared.
+function awardVisitAchievements(p, ev, snap){
+  const _snap = snap;
   // achievement flashes + in-game counters + Home Assistant webhooks
   if(ev.bust){
     game.gameBusts += 1;
@@ -13166,6 +13133,106 @@ function enterTurn(){
     awardOnceBadge(p.name, 'first_100_checkout', 'first100checkout', game.lastTurnSnapshot,
       { icon:'🥇', headline:'FIRST 100+ CHECKOUT', statLine:`${ev.pointsThisVisit} checkout` });
   }
+}
+
+function enterTurn(){
+  if(game.gameType === 'cricket') return enterTurnCricket();
+  if(game.gameType === 'baseball') return enterTurnBaseball();
+  if(game.gameType === 'shanghai') return enterTurnShanghai();
+  if(game.gameType === 'halve_it') return enterTurnHalveIt();
+  if(game.gameType === 'pressure_chamber') return enterTurnPressureChamber();
+  if(game.gameType === 'bobs_27') return enterTurnBobs27();
+  if(game.gameType === 'checkout_ladder') return enterTurnCheckoutLadder();
+  if(game.gameType === 'gauntlet') return enterTurnGauntlet();
+  if(game.gameType === 'dead_man_walking') return enterTurnDeadManWalking();
+  if(game.gameType === 'checkout_trainer') return submitCheckoutAttempt();
+  if(noDartsThrown()) return;
+  const p = game.players[game.current];
+  const ev = GAME_TYPES[game.gameType].evaluateVisit(p, game.darts, game);
+
+  // Screen-reader announcement of the committed turn result (docs/accessibility-roadmap.md
+  // gap 1) — deliberately just the turn outcome, not per-dart. Leg/set/game-win detail
+  // is handled separately by the achievement queue and onLegWon()'s own UI, which
+  // isn't duplicated here to avoid two announcements for the same winning visit.
+  if(ev.bust) announce(`${p.name} busts, stays on ${p.score}.`);
+  else if(ev.win) announce(`${p.name} checks out with ${ev.pointsThisVisit}. Leg won.`);
+  else announce(`${p.name} scores ${ev.scored}, ${ev.newScore} remaining.`);
+
+  // snapshot state before mutations so undoLastTurn() can restore it
+  const _snap = { pi:game.current, score:p.score,
+    legPoints:p.legPoints, legVisits:p.legVisits, legDarts:p.legDarts, legBusts:p.legBusts,
+    legAvgDarts:p.legAvgDarts, gameAvgDarts:p.gameAvgDarts,
+    setDarts:p.setDarts, gameDarts:p.gameDarts,
+    gamePoints:p.gamePoints, gameVisits:p.gameVisits,
+    oe:game.gameOneEighties, bf:game.gameBigFish, bu:game.gameBusts,
+    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    // achievement/challenge tracking state — restored on undo so a mis-entered dart
+    // that's undone can't leave a stale badge/streak trace behind
+    legVisitScores:p.legVisitScores.slice(), metronomeFired:p.metronomeFired,
+    pendingIceInTheVeins:p.pendingIceInTheVeins, legWorstDeficit:p.legWorstDeficit,
+    singlesHit:new Set(p.singlesHit), legVisitLogsLen:game.legVisitLogs.length,
+    // badges awarded/incremented while processing this turn — revoked on undo.
+    // voided flips true once undo actually runs, so an award response that's
+    // still in flight at that point revokes itself instead of registering here.
+    badgeReverts:[], voided:false,
+    // Ghost Opponent: captured BEFORE this round's auto-played ghost reply below,
+    // so undo rolls the ghost back to its state entering this round too — otherwise
+    // undoing a human turn would leave the ghost one scripted visit further ahead.
+    ghost: game.hasGhost ? { score:game.players[1].score, legPoints:game.players[1].legPoints,
+      legVisits:game.players[1].legVisits, legDarts:game.players[1].legDarts, legBusts:game.players[1].legBusts,
+      legAvgDarts:game.players[1].legAvgDarts, gameDarts:game.players[1].gameDarts, gameAvgDarts:game.players[1].gameAvgDarts,
+      gamePoints:game.players[1].gamePoints, gameVisits:game.players[1].gameVisits,
+      ghostTurnIndex:game.players[1].ghostTurnIndex } : null };
+  pushTurnSnapshot(_snap);
+
+  // per-leg and per-game scope (shown live on the scoreboard — both modes)
+  const _adj = ev.bust ? 3 : game.darts.length;  // darts counted for the 3-dart average
+  p.legPoints  += ev.scored; p.legVisits  += 1;
+  p.legDarts   += game.darts.length;
+  p.legAvgDarts  += _adj;
+  p.setDarts   += game.darts.length;
+  p.gameDarts  += game.darts.length;
+  p.gameAvgDarts += _adj;
+  if(ev.bust) p.legBusts += 1;
+  p.gamePoints += ev.scored; p.gameVisits += 1;
+
+  // Comeback Kid tracking: the worst remaining-score deficit seen at any point this
+  // leg (needs an opponent to trail behind — H2H or a 2-player practice match).
+  // Sampled BEFORE this visit reduces p.score, because the deepest a player is behind
+  // is as they step up to throw (right after the opponent's last visit) — sampling
+  // after their own visit would understate the true peak by up to this visit's score
+  // and miss real >=100 comebacks (deficits in [100, 100+visitScore)).
+  // A ghost isn't a real opponent for Comeback Kid purposes (see onLegWon()'s
+  // matching guard) — racing your own past leg shouldn't earn a badge framed
+  // around beating another player.
+  // Active-player count, not game.players.length — matches onLegWon()'s own
+  // active-count check for this exact badge: a departed (bowed-out) player
+  // stays IN game.players (only `dnf` is set), so without this a 3+ player
+  // match that's shrunk to a genuine 2-player decider via bow-outs would
+  // freeze this sampling forever at its pre-bow-out value, while onLegWon()'s
+  // awarding check (correctly active-count-based) evaluates that stale number.
+  const _activeForDeficit = game.players.filter(x=>!x.dnf);
+  if(_activeForDeficit.length===2 && !game.hasGhost){
+    const _opp = _activeForDeficit.find(x=>x!==p);
+    if(_opp) p.legWorstDeficit = Math.max(p.legWorstDeficit, p.score - _opp.score);
+  }
+  if(!ev.bust) p.score = ev.newScore;
+
+  // persist the turn to the database
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:ev.scored, bust:ev.bust,
+    checkout:ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
+    darts: mapDartsForRecord(game.darts) });
+  // one-shot record of this turn's outcome, for voice announcements on the scoreboard
+  game.lastTurnEvent = { ts: Date.now(), player: p.name, scored: ev.scored, bust: !!ev.bust,
+    win: !!ev.win, checkoutPoints: ev.win ? ev.pointsThisVisit : null };
+  // Stable copy of the winning-visit checkout points for onLegWon()'s Big Fish (170)
+  // check: onLegWon reads this instead of game.lastTurnEvent.checkoutPoints, because
+  // the badge queue below calls pushLive() synchronously (when the queue is idle),
+  // which nulls lastTurnEvent before onLegWon runs — so the /display Big Fish splash
+  // would otherwise never fire on a 170 finish.
+  game.lastWinCheckoutPoints = ev.win ? ev.pointsThisVisit : null;
+  awardVisitAchievements(p, ev, _snap);
 
   // record turn for practice session stats display
   { const _t = { scored:ev.scored, trebleLess:!!ev.trebleLess, bust:!!ev.bust,
@@ -14763,6 +14830,11 @@ function playAgain(){
     setup.halveItCustomTargets = cfg.targets ? cfg.targets.slice() : [];
   } else if(finished.gameType === 'killer'){
     setup.killerLives = cfg.lives || KILLER_DEFAULT_LIVES;
+  } else if(finished.gameType === 'dead_man_walking'){
+    // Play Again keeps the difficulty you just played. The 15 TARGETS are
+    // re-drawn server-side from your current weakest checkouts, deliberately —
+    // this mode is about your live weak spots, not a fixed set to memorise.
+    setup.dmwDifficulty = normaliseDeadManWalkingDifficulty(cfg.difficulty) || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY;
   }
   startGame();
 }
@@ -15748,6 +15820,7 @@ const GAME_TYPES = {
     id: 'dead_man_walking',
     legSummary: (game) => [{ name:game.players[0].name, walkedOut:game.dmwWalkedOutCount, won:true }],
     label: 'Dead Man Walking',
+    optionsSectionId: 'dead-man-walking-options-section',
     category: () => 'Dead Man Walking',
     newMatchPlayer: newMatchPlayerDeadManWalking,
     // Per-dart evaluation (evaluateVisitDeadManWalking(), a real function —
@@ -16371,7 +16444,17 @@ function renderGameGauntlet(){
    legsPerSet/setsPerGame machinery (which this mode never actually checks). */
 function newMatchPlayerDeadManWalking(name){
   const p = { name, score:0, doubleOut:true, legDarts:0, setDarts:0, gameDarts:0,
-    lifetimeRunsBase:0, lifetimeWalkedOutBase:0 };
+    lifetimeRunsBase:0, lifetimeWalkedOutBase:0,
+    // Per-visit achievement tracking, the same fields newMatchPlayer() carries.
+    // Needed since enterTurnDeadManWalking() started calling the shared
+    // awardVisitAchievements() (2026-07) — a Dead Man Walking visit is an
+    // ordinary "throw at a remaining score" visit, so Big Fish, Hat Trick,
+    // Madhouse, the first-100-checkout milestone and Around the Clock/World
+    // progress all apply here. Without them the very first committed visit threw
+    // on `p.legVisitScores.push`, which is exactly how this was caught.
+    legVisits:0, legVisitScores:[], metronomeFired:false, pendingIceInTheVeins:false,
+    singlesHit: new Set(), atwHitSet: new Set(), atwBaselineHitSet: new Set(),
+    sessionOneEighties:0, lifetimeOneEightiesBase:0 };
   // Fetched once at game start, the same Gauntlet/Chuckin precedent (a run
   // takes several minutes, so there's no meaningful race with the one lifetime
   // check that happens at the very end, in onDeadManWalkingComplete()).
@@ -16470,7 +16553,13 @@ function enterTurnDeadManWalking(){
   game.currentLegTurns.push(turnRecord);
   game.sessionTurns.push(turnRecord);
 
-  awardTimeOfDayBadges(p);
+  // Every per-visit achievement, same as X01 — a Dead Man Walking visit IS an
+  // ordinary "throw at a remaining score, maybe check out" visit, so Big Fish on
+  // a 170 round, Hat Trick, Madhouse, Bullseye Finish, the first-100-checkout
+  // milestone and Around the World progress all apply. Before this call the mode
+  // awarded only the time-of-day pair (which awardVisitAchievements() now makes
+  // for it), so in practice no achievement ever fired here at all.
+  awardVisitAchievements(p, ev, _snap);
 
   const roundOver = ev.win || ev.bust || ev.outOfDarts;
   if(roundOver){
@@ -16604,6 +16693,14 @@ function onDeadManWalkingComplete(){
 // "a screen-reader user can't infer this from a highlighted dartboard region
 // alone"), with the darts-remaining line also aria-live so it's announced as
 // the budget runs low, not just visually updated.
+// The difficulty this run was created with, read off the frozen game config so
+// it reports what is actually being played rather than whatever the setup screen
+// happens to show now.
+function dmwDifficultyLabel(){
+  const id = normaliseDeadManWalkingDifficulty(game && game.config && game.config.difficulty)
+    || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY;
+  return DEAD_MAN_WALKING_DIFFICULTIES[id].label;
+}
 function renderGameDeadManWalking(){
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
   renderSlots();
@@ -16618,7 +16715,7 @@ function renderGameDeadManWalking(){
     </div>
     <div class="meta">
       <div class="avgs" aria-live="polite">${dartsLeft} dart${dartsLeft===1?'':'s'} left this round</div>
-      <div class="standing">Walked Out: ${game.dmwWalkedOutCount} / ${game.legNo - 1}</div>
+      <div class="standing">Walked Out: ${game.dmwWalkedOutCount} / ${game.legNo - 1} · ${escapeHtml(dmwDifficultyLabel())}</div>
     </div>
     <div class="rem-wrap">
       <div class="rem">${p.score}</div>
@@ -17148,6 +17245,10 @@ function updateGameTypeOptionSections(gameType){
     const el = document.getElementById(gt.optionsSectionId);
     if(el) el.hidden = (gameType !== gt.id);
   });
+  // Dead Man Walking's picker is built from the difficulty registry rather than
+  // written out as static markup, so it has to be populated the first time its
+  // section is revealed — the section itself is toggled by the generic loop above.
+  if(gameType === 'dead_man_walking') renderDmwDifficultyPicker();
 }
 // Derives a game key's practice/h2h validity from the registry's own
 // soloOnly/h2hOnly flags instead of a hand-duplicated third list (item 46) —

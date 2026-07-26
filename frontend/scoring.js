@@ -2077,40 +2077,54 @@ function classifyMarathonTrend(dartCountsPerLeg){
    Doubles Practice precedent for live per-dart evaluation) rather than a
    reuse of evaluateVisit()'s own per-VISIT bust logic. */
 
-// Difficulty bands for the par calculation (docs/archive/dead-man-walking-roadmap.md
-// "Par" — "bands: roughly Low 32-60 / Mid 61-100 / High 101-170, continuous
-// banding is a fine alternative, not load-bearing"). Three bands is this
-// build's chosen granularity — a first pass, not confirmed against real play,
-// per the roadmap doc's own "Band granularity" open question.
-const DEAD_MAN_WALKING_BANDS = [
-  { low: 32,  high: 60,  name: 'low'  },
-  { low: 61,  high: 100, name: 'mid'  },
-  { low: 101, high: 170, name: 'high' },
-];
-function deadManWalkingBandFor(target){
-  return DEAD_MAN_WALKING_BANDS.find(b => target >= b.low && target <= b.high) || DEAD_MAN_WALKING_BANDS[DEAD_MAN_WALKING_BANDS.length - 1];
+// Difficulty (docs/archive/dead-man-walking-roadmap.md "Par" — the doc's own
+// open question "band granularity ... not confirmed against real play" is what
+// this replaces).
+//
+// A round's dart budget is `objectiveOptimal + extraDarts`, where
+// objectiveOptimal is checkoutHint()'s own shortest route for that target (3 for
+// 170, 2 for 60, 1 for 40) and extraDarts is the chosen difficulty's margin. So
+// the difficulty is "how many darts of slack you get beyond a perfect
+// checkout" — the same meaning on every target, whether it's a 32 or a 170,
+// rather than a number that means something different at each end of the board.
+//
+// This REPLACED a par derived from the player's own historical average, which
+// was broken twice over. It measured darts-per-LEG (~25 for a 501 leg) rather
+// than darts spent closing that checkout, so a band with any history at all
+// handed out ~24 darts for one checkout; and being an average it was fractional,
+// which is what put "24.7 darts left this round" on screen and then
+// "7.699999999999999" after two misses. A budget is a count of darts. It is an
+// integer here by construction.
+const DEAD_MAN_WALKING_DIFFICULTIES = {
+  easy:    { label: 'Easy',    extraDarts: 6, blurb: 'A comfortable cushion — room to miss and recover.' },
+  medium:  { label: 'Medium',  extraDarts: 4, blurb: 'A miss or two is survivable. The default.' },
+  hard:    { label: 'Hard',    extraDarts: 2, blurb: 'Near-perfect: one wasted dart is usually fatal.' },
+  extreme: { label: 'Extreme', extraDarts: 0, blurb: 'The perfect route, exactly. No margin at all.' },
+};
+const DEAD_MAN_WALKING_DIFFICULTY_IDS = ['easy', 'medium', 'hard', 'extreme'];
+const DEAD_MAN_WALKING_DEFAULT_DIFFICULTY = 'medium';
+function normaliseDeadManWalkingDifficulty(v){
+  return DEAD_MAN_WALKING_DIFFICULTY_IDS.includes(v) ? v : null;
 }
 
-// Par = the player's own historical average total darts-to-finish for
-// checkouts in the same band (historicalAverage, null if no history in that
-// band — the caller, backend/db.js, computes it from real X01 legs), floored
-// at the objective-optimal dart count (checkoutHint()) plus 1 so `par - 1`
-// (the round's actual dart budget) can never drop below the theoretical
-// minimum — the one concrete correctness fix this doc's own design makes over
-// the original pitch's literal "par minus one" wording (see the roadmap doc's
-// "Par" section: using the objective optimal AS par directly would make every
-// round mathematically impossible). With no history yet in this band, par
-// defaults to objectiveOptimal + 2 — a generous grace amount so the mode is
-// playable session one without inventing a fake historical average.
-// `target` must be a genuinely finishable double-out score (checkoutHint()
-// returns a non-empty route) — every real caller (getWeakestCheckouts()'s
-// pool, the CHALLENGE_CHECKOUTS cold-start fallback) already guarantees this.
-function deadManWalkingParForTarget(target, historicalAverage){
+// The objective-optimal dart count for a target — checkoutHint()'s shortest
+// double-out route. `target` must be genuinely finishable; every real caller
+// (getWeakestCheckouts()'s pool, the CHALLENGE_CHECKOUTS cold-start fallback)
+// already guarantees this, and an unfinishable one falls back to 1 rather than
+// throwing.
+function deadManWalkingOptimalDarts(target){
   const hint = checkoutHint(target, true, 3);
-  const objectiveOptimal = hint ? hint.split(' ').length : 1;
-  const floor = objectiveOptimal + 1;
-  if(historicalAverage != null) return Math.max(historicalAverage, floor);
-  return objectiveOptimal + 2;
+  return hint ? hint.split(' ').length : 1;
+}
+
+// The stored `par` for a round. The round's actual dart BUDGET is `par - 1`
+// everywhere it is consumed (frontend live state, backend write-time guard,
+// rebuildDeadManWalkingState()), so par is deliberately budget + 1 — keeping
+// that long-standing contract intact rather than changing four call sites to
+// mean something new. Always an integer.
+function deadManWalkingParForTarget(target, difficulty){
+  const id = normaliseDeadManWalkingDifficulty(difficulty) || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY;
+  return deadManWalkingOptimalDarts(target) + DEAD_MAN_WALKING_DIFFICULTIES[id].extraDarts + 1;
 }
 
 // Draws `n` targets from `pool` WITH REPLACEMENT (docs/dead-man-walking-
@@ -2351,7 +2365,9 @@ if (typeof module !== 'undefined' && module.exports) {
     MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
     shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai, rebuildShanghaiState,
     HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt, rebuildHalveItState,
-    DEAD_MAN_WALKING_BANDS, deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
+    DEAD_MAN_WALKING_DIFFICULTIES, DEAD_MAN_WALKING_DIFFICULTY_IDS, DEAD_MAN_WALKING_DEFAULT_DIFFICULTY,
+    normaliseDeadManWalkingDifficulty, deadManWalkingOptimalDarts,
+    deadManWalkingParForTarget, pickDeadManWalkingTargets,
     evaluateDeadManDart, resolveDeadManDart, DEAD_MAN_WALKING_RESULT_TIERS, deadManWalkingResultTier,
     rebuildDeadManWalkingState, CHALLENGE_CHECKOUTS,
     distinctDoubleSectors, countTonPlusVisits, aroundTheHornProgress,

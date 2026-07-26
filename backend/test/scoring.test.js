@@ -27,7 +27,9 @@ const { evaluateVisit, evaluateVisitCricket, makeDartCore, checkoutHint, CRICKET
   MARATHON_FATIGUE_TIERS, computeFatigueSplit, MARATHON_TREND_MIN_LEGS, MARATHON_TREND_TOLERANCE, classifyMarathonTrend,
   shanghaiRoundTarget, isShanghaiWin, evaluateVisitShanghai, rebuildShanghaiState,
   HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, evaluateVisitHalveIt, rebuildHalveItState,
-  DEAD_MAN_WALKING_BANDS, deadManWalkingBandFor, deadManWalkingParForTarget, pickDeadManWalkingTargets,
+  DEAD_MAN_WALKING_DIFFICULTIES, DEAD_MAN_WALKING_DIFFICULTY_IDS, DEAD_MAN_WALKING_DEFAULT_DIFFICULTY,
+  normaliseDeadManWalkingDifficulty, deadManWalkingOptimalDarts,
+  deadManWalkingParForTarget, pickDeadManWalkingTargets,
   evaluateDeadManDart, resolveDeadManDart, DEAD_MAN_WALKING_RESULT_TIERS, deadManWalkingResultTier,
   rebuildDeadManWalkingState, CHALLENGE_CHECKOUTS,
   distinctDoubleSectors, countTonPlusVisits, aroundTheHornProgress,
@@ -2465,50 +2467,108 @@ describe('rebuildShanghaiState (docs/archive/shanghai-roadmap.md, resume reconst
 });
 
 describe('Dead Man Walking (docs/archive/dead-man-walking-roadmap.md)', () => {
-  describe('deadManWalkingBandFor', () => {
-    test('band boundaries: 32/60 low, 61/100 mid, 101/170 high', () => {
-      assert.equal(deadManWalkingBandFor(32).name, 'low');
-      assert.equal(deadManWalkingBandFor(60).name, 'low');
-      assert.equal(deadManWalkingBandFor(61).name, 'mid');
-      assert.equal(deadManWalkingBandFor(100).name, 'mid');
-      assert.equal(deadManWalkingBandFor(101).name, 'high');
-      assert.equal(deadManWalkingBandFor(170).name, 'high');
+  // Difficulty replaced a par derived from the player's own historical average
+  // (2026-07). That mechanism was broken twice over and both symptoms were
+  // reported from real play: it averaged darts-per-LEG (~25 for a 501 leg)
+  // rather than darts spent closing that checkout, so any band with history
+  // handed out ~24 darts for a single checkout; and being an average it was
+  // fractional, which put "24.7 darts left this round" on screen and then
+  // "7.699999999999999" after two misses. A dart budget is a count of darts.
+  describe('deadManWalkingOptimalDarts', () => {
+    test('it is checkoutHint()\'s own shortest route length', () => {
+      assert.equal(deadManWalkingOptimalDarts(40), 1);    // D20
+      assert.equal(deadManWalkingOptimalDarts(100), 2);   // T20 D20
+      assert.equal(deadManWalkingOptimalDarts(170), 3);   // T20 T20 Bull
+    });
+  });
+
+  describe('normaliseDeadManWalkingDifficulty', () => {
+    test('it accepts the four ids and rejects everything else', () => {
+      for (const id of DEAD_MAN_WALKING_DIFFICULTY_IDS) assert.equal(normaliseDeadManWalkingDifficulty(id), id);
+      for (const v of ['', 'EASY', 'impossible', null, undefined, 0, 4, {}, ['easy']]) {
+        assert.equal(normaliseDeadManWalkingDifficulty(v), null, `${JSON.stringify(v)} must be rejected`);
+      }
+    });
+    test('the four ids are ordered easiest to hardest, with strictly shrinking margins', () => {
+      const margins = DEAD_MAN_WALKING_DIFFICULTY_IDS.map(id => DEAD_MAN_WALKING_DIFFICULTIES[id].extraDarts);
+      assert.deepEqual(margins, [...margins].sort((a, b) => b - a));
+      assert.equal(new Set(margins).size, margins.length, 'two difficulties that play identically are not two difficulties');
     });
   });
 
   describe('deadManWalkingParForTarget', () => {
-    test('with no historical average, defaults to objective-optimal + 2', () => {
-      // 40 finishes optimally in 1 dart (D20).
-      assert.equal(deadManWalkingParForTarget(40, null), 1 + 2);
-      // 170 (T20 T20 Bull) finishes optimally in 3 darts.
-      assert.equal(deadManWalkingParForTarget(170, null), 3 + 2);
+    test('the budget is the perfect route plus the difficulty margin', () => {
+      // par is deliberately budget + 1, because `par - 1` is what every consumer
+      // reads as the budget (frontend live state, the backend write-time guard,
+      // rebuildDeadManWalkingState()).
+      const budget = (t, d) => deadManWalkingParForTarget(t, d) - 1;
+      assert.equal(budget(170, 'extreme'), 3, 'T20 T20 Bull, exactly');
+      assert.equal(budget(170, 'hard'), 5);
+      assert.equal(budget(170, 'medium'), 7);
+      assert.equal(budget(170, 'easy'), 9);
+      assert.equal(budget(40, 'extreme'), 1, 'D20, first dart');
+      assert.equal(budget(40, 'easy'), 7);
     });
-    test('with a historical average above the floor, par is the historical average', () => {
-      assert.equal(deadManWalkingParForTarget(40, 4.5), 4.5, 'D20 is 1 dart optimally, but this player usually needs 4.5');
+
+    test('the reported bug: 170 is no longer a 4-dart round', () => {
+      // The old no-history default was optimal + 2 par, i.e. a 4-dart budget on
+      // a 170 — "I should not have to check out 170 in four darts", and the
+      // reason difficulty exists at all.
+      assert.ok(deadManWalkingParForTarget(170, 'medium') - 1 >= 6);
     });
-    test('with a historical average BELOW the objective floor, the floor wins -- par can never make the round unachievable', () => {
-      // 40 -> D20, 1 dart optimal, floor = 2. A (bogus/optimistic) historical
-      // average of 1 must still be floored up to 2.
-      assert.equal(deadManWalkingParForTarget(40, 1), 2);
+
+    test('an unknown or missing difficulty falls back to the default, never to a fraction', () => {
+      const fallback = deadManWalkingParForTarget(100, DEAD_MAN_WALKING_DEFAULT_DIFFICULTY);
+      for (const v of [undefined, null, '', 'nonsense', 4.5, {}]) {
+        assert.equal(deadManWalkingParForTarget(100, v), fallback, `${JSON.stringify(v)} should fall back`);
+      }
     });
-    test('exhaustive: for every finishable score 2-170, par-1 (the actual dart budget) is never below the objective-optimal dart count, regardless of historicalAverage', () => {
-      // Mirrors checkoutHint()'s own exhaustive-range verification (backend/test/
-      // scoring.test.js's "checkoutHint" describe block) -- this is the one
-      // concrete, testable correctness property the roadmap doc calls out by name.
+
+    test('exhaustive: par is always a whole number, on every finishable score and difficulty', () => {
+      // The regression guard for "24.7 darts left this round". A budget that is
+      // not an integer also cannot be subtracted from without floating-point
+      // drift — 9.7 - 2 came out as 7.699999999999999 in real play.
       let checked = 0;
       for (let score = 2; score <= 170; score++) {
         const hint = checkoutHint(score, true, 3);
-        if (!hint) continue; // bogey/unfinishable -- Dead Man Walking never serves these
-        const optimal = hint.split(' ').length;
-        for (const historicalAverage of [null, 0, 1, optimal - 1, optimal, optimal + 5, 20]) {
-          const par = deadManWalkingParForTarget(score, historicalAverage);
-          const budget = par - 1;
-          assert.ok(budget >= optimal,
-            `score ${score}: optimal=${optimal}, historicalAverage=${historicalAverage} -> par=${par}, budget=${budget} must be >= ${optimal}`);
+        if (!hint) continue;   // bogey/unfinishable — Dead Man Walking never serves these
+        for (const difficulty of DEAD_MAN_WALKING_DIFFICULTY_IDS) {
+          const par = deadManWalkingParForTarget(score, difficulty);
+          assert.ok(Number.isInteger(par), `score ${score} on ${difficulty}: par ${par} is not an integer`);
           checked++;
         }
       }
-      assert.ok(checked > 900, `sanity: exercised a real range of finishable scores (got ${checked} checks)`);
+      assert.ok(checked > 600, `sanity: exercised a real range of finishable scores (got ${checked} checks)`);
+    });
+
+    test('exhaustive: the budget is never below the perfect route, on any difficulty', () => {
+      // The one concrete correctness property the roadmap doc calls out by name:
+      // a round must never be mathematically impossible. Extreme sits exactly ON
+      // that floor by design, which is what makes it the hardest setting rather
+      // than an unwinnable one.
+      for (let score = 2; score <= 170; score++) {
+        const hint = checkoutHint(score, true, 3);
+        if (!hint) continue;
+        const optimal = hint.split(' ').length;
+        for (const difficulty of DEAD_MAN_WALKING_DIFFICULTY_IDS) {
+          const budget = deadManWalkingParForTarget(score, difficulty) - 1;
+          assert.ok(budget >= optimal,
+            `score ${score} on ${difficulty}: budget ${budget} < optimal ${optimal} — unwinnable`);
+        }
+      }
+    });
+
+    test('a whole round of misses never lands on a fractional remaining budget', () => {
+      // Replays the exact reported sequence shape: a budget, minus darts, one at
+      // a time. With an integer budget this is exact arithmetic at every step.
+      for (const difficulty of DEAD_MAN_WALKING_DIFFICULTY_IDS) {
+        let left = deadManWalkingParForTarget(170, difficulty) - 1;
+        while (left > 0) {
+          left -= 1;
+          assert.ok(Number.isInteger(left), `${difficulty}: darts left became ${left}`);
+        }
+        assert.equal(left, 0);
+      }
     });
   });
 
