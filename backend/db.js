@@ -7622,29 +7622,16 @@ function getHeatmapNumberStyle() {
   const style = row ? row.value : 'original';
   return { style: ['original','molten_seam','chalk_ledger'].includes(style) ? style : 'original' };
 }
-// Public (no-auth) read of the dartboard's colour schemes — every device that
+// Public (no-auth) read of which colour scheme sector 20 has — every device that
 // renders the scoring board needs it, not just an admin's browser, exactly like
 // the heatmap style above.
 //
-// resolveBoardColors() re-validates every stored value on the way OUT, not just
-// on the way in. The colours are interpolated into an SVG `fill="..."` attribute
-// client-side, so a string written straight into the settings table (a restored
-// backup, a hand-edited database, a future write path that forgets to check)
-// must still be unable to reach a browser.
+// One stored value, validated against a fixed list of two ids. The colours
+// themselves are constants in scoring.js, so nothing an admin can store ever
+// becomes an SVG fill value.
 function getBoardColors() {
-  const keys = {
-    sector20: 'board_sector20_scheme',
-    red_black_single: 'board_red_black_single',
-    red_black_ring: 'board_red_black_ring',
-    green_white_single: 'board_green_white_single',
-    green_white_ring: 'board_green_white_ring',
-  };
-  const stored = {};
-  for (const [field, key] of Object.entries(keys)) {
-    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
-    if (row) stored[field] = row.value;
-  }
-  return resolveBoardColors(stored);
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'board_sector20_scheme'").get();
+  return resolveBoardColors({ sector20: row ? row.value : null });
 }
 
 // Public (no-auth) read of WHETHER each HA webhook event is configured (never the

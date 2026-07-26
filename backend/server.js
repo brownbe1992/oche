@@ -210,19 +210,13 @@ const db = require('./db.js');
 const auth = require('./auth.js');
 const netguard = require('./netguard.js');
 const backupLib = require('./backup-lib.js');
-const { normaliseBoardColor, normaliseSchemeId, BOARD_SCHEME_IDS } = require('../frontend/scoring.js');
+const { normaliseSchemeId, BOARD_SCHEME_IDS } = require('../frontend/scoring.js');
 
-// Settings -> Board colours. A dartboard has two zone schemes, each a
-// (single bed, double/treble ring) PAIR; the only structural choice is which one
-// sector 20 gets. The pair colours stay editable, and are stored per field so one
-// bad value can never discard the admin's other choices.
-//
-// Validated with the SAME normaliseBoardColor()/normaliseSchemeId() the client
-// uses, so the accepted format can't drift between the two ends. The colours
-// reach a browser as an SVG `fill="..."` attribute, which is why the format is
-// enforced here on write, again in db.getBoardColors() on read, and again at the
-// sink in buildDartboard().
-const BOARD_COLOR_KEYS = BOARD_SCHEME_IDS.flatMap(id => [`board_${id}_single`, `board_${id}_ring`]);
+// Settings -> Board colours. A physical board gets rotated to spread wear, which
+// flips which of the two zone schemes sector 20 sits on; this is how the
+// on-screen board is kept matching the one on the wall. One stored value, one of
+// two known ids — the colours are constants in scoring.js, deliberately not
+// configurable, so no admin input ever reaches an SVG fill attribute.
 const BOARD_SCHEME_KEY = 'board_sector20_scheme';
 
 const PORT = process.env.PORT || 8046;
@@ -973,7 +967,7 @@ const server = http.createServer(async (req, res) => {
         'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold',
         'admin_lockout_grace','admin_lockout_base_seconds','admin_lockout_max_seconds','scoreboard_layout',
         'default_scoring_input','card_tagline','heatmap_style','heatmap_number_style',
-        ...BOARD_COLOR_KEYS, BOARD_SCHEME_KEY, ...boolKeys];
+        BOARD_SCHEME_KEY, ...boolKeys];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
@@ -996,15 +990,8 @@ const server = http.createServer(async (req, res) => {
       if ('card_tagline' in safe && safe.card_tagline.length > 140) {
         return send(res, 400, { error: 'card_tagline must be 140 characters or fewer' });
       }
-      // Rejecting rather than silently coercing, so an admin whose picker sent
-      // something unexpected is told, not quietly ignored — and so a payload can
-      // never be half-applied with one colour silently dropped.
-      for (const k of BOARD_COLOR_KEYS) {
-        if (!(k in safe)) continue;
-        const ok = normaliseBoardColor(safe[k]);
-        if (!ok) return send(res, 400, { error: `${k} must be a #rrggbb colour` });
-        safe[k] = ok;
-      }
+      // Rejected rather than silently coerced to the default, so a client sending
+      // something unexpected is told instead of quietly getting the wrong board.
       if (BOARD_SCHEME_KEY in safe && !normaliseSchemeId(safe[BOARD_SCHEME_KEY])) {
         return send(res, 400, { error: `${BOARD_SCHEME_KEY} must be one of: ${BOARD_SCHEME_IDS.join(', ')}` });
       }

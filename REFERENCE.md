@@ -4324,8 +4324,7 @@ the linked game's `completed_at IS NULL` → `in_progress`; else `fulfilled`.
 `admin_lockout_grace`, `admin_lockout_base_seconds`, `admin_lockout_max_seconds`,
 `scoreboard_layout`, `default_scoring_input`,
 `card_tagline`, `heatmap_style`, `heatmap_number_style`,
-`board_sector20_scheme`, `board_red_black_single`, `board_red_black_ring`,
-`board_green_white_single`, `board_green_white_ring` (see §17's "Board colours").
+`board_sector20_scheme` (see §17's "Board colours").
 
 ### `admins`
 | Column | Type | Notes |
@@ -4899,105 +4898,99 @@ purely a data-granularity and heatmap-visualization feature. Backend:
 
 ### Board colours (Settings → Board colours, 2026-07)
 
-A dartboard has exactly **two zone schemes**, and each one is a **pair** — the
-single bed and its double/treble ring always go together:
+A dartboard has exactly **two zone schemes**, and each is a **pair** — the single
+bed and its double/treble ring always go together:
 
 | Scheme | Single bed | Double & treble |
 |---|---|---|
 | Red & black | `#1c1e1a` | `#c8102e` |
 | Green & white | `#cbbf96` | `#17752f` |
 
-Sectors strictly alternate between the two, so the only structural choice is
-**which scheme sector 20 gets** (`DB_SECTORS[0]` is 20). The other scheme then
-takes every alternate sector automatically. Each scheme's two colours stay
-editable, but only *as a pair*.
+Sectors strictly alternate, so there is exactly **one** thing to configure: which
+scheme sector 20 sits on (`DB_SECTORS[0]` is 20, so it is the `even` side).
+
+**Why it is configurable.** A physical board is rotated periodically to spread the
+wear — 20 and its treble take the most punishment — and the number ring is moved
+to match. Rotate by an **odd** number of sectors and the 20 now sits on a white
+bed with green rings; rotate by an **even** number and it is back on black and
+red. This setting keeps the on-screen board looking like the one on the wall.
+**The colours themselves are not configurable**: they are what a dartboard is,
+not a preference.
 
 **This fixed a rendering bug.** `buildDartboard()` used to pick the bed and the
 ring from two independent alternating lists — `i%2 ? tan : black` for the bed and
 `i%2 ? red : green` for the ring — which paired the **tan bed with the red ring**.
 No real board has that combination: a red ring always sits on a black bed. The
-singles were effectively offset by one sector from the rings. Modelling a scheme
-as a pair makes the mismatch *unrepresentable* rather than merely corrected, and
-`board-colors.test.js`'s "a bed is never separated from its own ring" test sweeps
-valid, invalid and hostile inputs to keep it that way.
+beds were effectively offset one sector from the rings. Treating a scheme as an
+indivisible pair makes the mismatch *unrepresentable* rather than merely
+corrected, and `board-colors.test.js`'s "a bed is never separated from its own
+ring" test sweeps valid, invalid and hostile inputs to keep it that way.
 
-**Two deliberate visual changes to the default board**, both consequences of
-getting the model right:
+**Two deliberate changes to the default board**, both consequences of getting the
+model right:
 1. Sector 20 now has a **black bed with red rings** (it used to have the tan bed
-   with red rings). This is what a real dartboard looks like.
+   with red rings). That is an unrotated real board.
 2. The green is `#17752f`, a shade darker than the `#1b8a3a` used before. The
-   inner bull takes **sector 20's** ring colour, so choosing "Green & white" for
-   20 puts the 12px "Bull" label on green — and no label colour cleared 4.5:1
-   there (the best of cream/near-black managed 4.10:1). `#17752f` takes that to
-   4.70:1 *and* improves the ring against its own white bed (2.41:1 → 3.16:1), so
-   it is a strict improvement on both counts rather than a trade.
+   inner bull takes **sector 20's** ring colour, so a rotated board puts the 12px
+   "Bull" label on green — and no label colour cleared 4.5:1 there (the best of
+   cream/near-black managed 4.10:1). `#17752f` takes that to 4.70:1 *and* improves
+   the ring against its own white bed (2.41:1 → 3.16:1), so it is a strict
+   improvement on both counts rather than a trade.
 
 **Where the logic lives.** `frontend/scoring.js` — `BOARD_SCHEMES`,
-`BOARD_SCHEME_IDS`, `BOARD_SECTOR20_SCHEME_DEFAULT`, `normaliseBoardColor()`,
-`normaliseSchemeId()`, `relativeLuminance()`/`contrastRatio()`/`boardLabelColor()`,
-`resolveBoardColors()`. Pure functions, so they carry committed tests
-(`backend/test/board-colors.test.js`), and `server.js` validates stored values
-with the *same* functions the client uses, so the accepted format cannot drift
-between the two ends.
+`BOARD_SCHEME_IDS`, `BOARD_SECTOR20_SCHEME_DEFAULT`, `normaliseSchemeId()`,
+`relativeLuminance()`/`contrastRatio()`/`boardLabelColor()`,
+`resolveBoardColors()`. Pure, so they carry committed tests
+(`backend/test/board-colors.test.js`), and `server.js` validates the stored value
+with the *same* `normaliseSchemeId()` the client uses, so the accepted set cannot
+drift between the two ends.
 
-**`resolveBoardColors(stored)` returns both shapes its callers need**, so neither
-has to re-derive the other's:
-- `schemes` — the two editable pairs, for the Settings form.
-- `sector20` — which scheme id sector 20 uses.
-- `even` / `odd` — the resolved pair per sector parity. `even` **is** sector 20's
-  scheme, and it is all `buildDartboard()` wants: no renderer needs to know the
-  alternation rule to draw a board.
+`resolveBoardColors(stored)` returns `{sector20, even, odd}` — the resolved pair
+per sector parity is all `buildDartboard()` wants, so no renderer needs to know
+the alternation rule to draw a board.
 
-**Storage and transport.** Five `settings` keys — `board_sector20_scheme` plus
-`board_<scheme>_single` / `board_<scheme>_ring` for each scheme — written via
-`PUT /api/settings` (admin) and read by every device via the public
+**Storage and transport.** One `settings` key, `board_sector20_scheme`, written
+via `PUT /api/settings` (admin) and read by every device via the public
 `GET /api/settings/board-colors` (`db.getBoardColors()`), the same "public read,
-admin write" split as `colorblind_mode`/`heatmap_style`. The read always answers
-a **fully resolved** object. `server.js` derives `BOARD_COLOR_KEYS` from
-`BOARD_SCHEME_IDS` rather than hand-listing them, so a third scheme cannot be
-added with its keys silently missing from the PUT allowlist — which would make
-saving it appear to work and do nothing. The Settings form is likewise *built*
-from `BOARD_SCHEMES` rather than written out twice, the same
-derive-from-the-registry discipline as items 39/41/46.
+admin write" split as `colorblind_mode`/`heatmap_style`. An unknown id is
+**rejected** with a 400 on write rather than silently defaulted, and falls back to
+the default on read. The Settings form's two options are *built* from
+`BOARD_SCHEMES` rather than written out twice, the same derive-from-the-registry
+discipline as items 39/41/46.
 
-**Security: these values reach an SVG `fill="…"` attribute.** An unvalidated
-string is an attribute-injection sink, so `normaliseBoardColor()` enforces an
-exact `#rrggbb` (shorthand `#abc` deliberately refused — one format keeps the
-check trivial to audit) and `normaliseSchemeId()` an exact known id, at **three**
-independent points: `server.js` on write (400, and the whole payload is rejected
-rather than partially applied), `db.getBoardColors()` on read (so a restored
-backup or hand-edited row still can't reach a browser), and `resolveBoardColors()`
-again client-side at the sink. Same defence-in-depth as §9's two-context escaping
-rule.
+**Security: there is no injection surface here, by construction.** The values
+`buildDartboard()` interpolates into SVG `fill="…"` attributes are constants in
+`scoring.js`. The only thing an admin can store is one of two known ids. An
+earlier draft made the colours themselves configurable, which *did* create an
+attribute-injection sink and needed `#rrggbb` validation at three separate
+points; removing the capability removed the sink outright. A committed test
+asserts stored colour-ish keys are ignored entirely.
 
-**Colorblind mode still wins over the chosen ring colours.** `buildDartboard()`
-applies `body.colorblind`'s orange/blue substitutes on top of whatever scheme is
-in force. It is an accessibility setting, and a household that needs it must not
-have it silently switched off because somebody chose a nicer red; the Settings
-panel says so where the pickers are, and the live preview shows the substituted
-colours so it never promises a board that won't be rendered. The **beds** are not
-remapped by colorblind mode (they never were — that pair is a lightness contrast,
-not a hue one), so a custom bed applies in both modes.
+**Colorblind mode still wins over the ring colours.** `buildDartboard()` applies
+`body.colorblind`'s orange/blue substitutes on top of whichever scheme is in
+force, and the Settings preview shows the substituted colours so it never
+promises a board that won't be rendered. The **beds** are not remapped by that
+mode (they never were — that pair is a lightness contrast, not a hue one).
 
 **The "Bull" label colour is computed, not fixed.** It sits on the inner-bull
-circle, which is sector 20's ring colour. `boardLabelColor()` picks whichever of
-cream (`#efe7d2`) / near-black (`#151613`) contrasts better against the actual
-fill. This *replaces* the previous hardcoded colorblind special case (cream
-normally, near-black in colorblind mode, because that mode's lighter orange
-measured 2.58:1 against cream) with the general rule that case was one instance
-of — and reproduces both of its answers exactly, which the tests assert.
+circle, which is sector 20's ring colour — red on an unrotated board, green on a
+rotated one. `boardLabelColor()` picks whichever of cream (`#efe7d2`) /
+near-black (`#151613`) contrasts better against the actual fill. This *replaces*
+the previous hardcoded colorblind special case (cream normally, near-black in
+colorblind mode, because that mode's lighter orange measured 2.58:1 against
+cream) with the general rule that case was one instance of — and reproduces both
+of its answers exactly, which the tests assert.
 
 **Applying a change mid-game.** `applyDartMode()` builds the board SVG once and
 then leaves it alone (~100 paths; rebuilding per dart was a real cost). That
-cache is exactly what would make a colour change appear not to work — the new
-colours would otherwise only reach a screen on the next `renderGameShell()`,
-which mid-game is the next *leg*. `invalidateDartboard()` drops the cached SVG
-after a save and lets `applyDartMode()` rebuild it on the spot.
+cache is exactly what would make a change appear not to work — it would otherwise
+only reach a screen on the next `renderGameShell()`, which mid-game is the next
+*leg*. `invalidateDartboard()` drops the cached SVG after a save and lets
+`applyDartMode()` rebuild it on the spot.
 
 **Scope: the scoring board only.** The Player Profile heatmap keeps its own heat
-scale — its colours encode hit frequency, not board identity, so recolouring it
-would break what it means — and the live scoreboard's Around the Clock board
-keeps its own look.
+scale — its colours encode hit frequency, not board identity — and the live
+scoreboard's Around the Clock board keeps its own look.
 
 ### Zone tracking — inner vs. outer single
 

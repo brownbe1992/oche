@@ -18,78 +18,61 @@
    ============================================================================= */
 
 /* ---------------------------------------------------------------------------
-   Dartboard colour schemes (admin-configurable, Settings -> Board colours)
+   Dartboard colour schemes (Settings -> Board colours)
    ---------------------------------------------------------------------------
-   A dartboard has exactly TWO zone colour schemes, and each is a PAIR — the
-   single bed and its double/treble ring always go together:
+   A dartboard has exactly TWO zone schemes, and each is a PAIR — the single bed
+   and its double/treble ring always go together:
 
-     "Red & black"   black single (#1c1e1a) + red rings   (#c8102e)
-     "Green & white" white single (#cbbf96) + green rings (#17752f)
+     "Red & black"   black bed (#1c1e1a) + red rings   (#c8102e)
+     "Green & white" white bed (#cbbf96) + green rings (#17752f)
 
-   Every sector uses one scheme or the other, strictly alternating, so the only
-   real choice is WHICH SCHEME SECTOR 20 GETS. The other scheme then takes every
-   alternate sector automatically. That is one decision, not four colours.
+   Sectors strictly alternate, so the ONLY thing there is to configure is which
+   scheme sector 20 has. The other scheme takes every alternate sector.
 
-   Note what this fixes. buildDartboard() used to pick the single and the ring
-   from two independent lists — `i%2 ? tan : black` for the bed and
-   `i%2 ? red : green` for the ring — which paired the TAN single with the RED
-   ring. That is not either scheme: on a real board a red ring always sits on a
-   black bed. The singles were effectively offset by one sector from the rings.
-   Modelling a scheme as a pair makes that mismatch unrepresentable rather than
-   merely fixed.
+   Why that is configurable at all: a physical board gets rotated periodically to
+   spread the wear around (20 and its treble take the most punishment), and the
+   number ring is moved to match. Rotate by an ODD number of sectors and the 20
+   now sits on a white bed with green rings; rotate by an even number and it is
+   back on black and red. This setting is how the on-screen board is kept looking
+   like the one on the wall. The colours themselves are fixed — they are what a
+   dartboard is, not a preference.
 
-   The colours of each scheme stay editable (an admin who wants a blue/gold board
-   should have one), but they are edited AS PAIRS, so no combination of settings
-   can put a ring on the wrong bed.
-
-   These live here rather than in index.html for two reasons: they are pure
-   (so they carry committed tests, per CLAUDE.md), and server.js validates stored
-   values with the SAME normaliseBoardColor() the client uses, so the accepted
-   format cannot drift between the two ends.
+   Note what the pair model fixes. buildDartboard() used to pick the bed and the
+   ring from two independent lists — `i%2 ? tan : black` for the bed and
+   `i%2 ? red : green` for the ring — which paired the TAN bed with the RED ring.
+   That is not either scheme: on a real board a red ring always sits on a black
+   bed. The beds were effectively offset one sector from the rings. Treating a
+   scheme as an indivisible pair makes that mismatch unrepresentable.
    --------------------------------------------------------------------------- */
 
 const BOARD_SCHEMES = {
-  red_black:   { label: 'Red & black',   single: '#1c1e1a', ring: '#c8102e' },
-  // The green is a shade darker than the #1b8a3a this board used to draw. That
-  // was never a problem while the inner bull was always red, but the inner bull
-  // takes SECTOR 20's ring colour, so choosing "Green & white" for 20 puts the
-  // 12px "Bull" label on green — and no label colour cleared 4.5:1 there (the
-  // best of cream/near-black managed 4.10:1). Darkening to #17752f takes that to
-  // 4.70:1 AND improves the ring against its own white bed (2.41:1 -> 3.16:1),
-  // so it is a strict improvement on both counts rather than a trade.
-  green_white: { label: 'Green & white', single: '#cbbf96', ring: '#17752f' },
+  red_black:   { label: 'Red & black',   bed: 'black bed', single: '#1c1e1a', ring: '#c8102e' },
+  // The green is a shade darker than the #1b8a3a this board used to draw. The
+  // inner bull takes SECTOR 20's ring colour, so with this scheme on 20 the 12px
+  // "Bull" label sits on green — and no label colour cleared 4.5:1 there (the
+  // best of cream/near-black managed 4.10:1). #17752f takes that to 4.70:1 AND
+  // improves the ring against its own white bed (2.41:1 -> 3.16:1), so it is a
+  // strict improvement on both counts rather than a trade.
+  green_white: { label: 'Green & white', bed: 'white bed', single: '#cbbf96', ring: '#17752f' },
 };
 const BOARD_SCHEME_IDS = ['red_black', 'green_white'];
-// A real board's 20 is a black bed with red doubles and trebles.
+// An unrotated board's 20 is a black bed with red doubles and trebles.
 const BOARD_SECTOR20_SCHEME_DEFAULT = 'red_black';
 
-// Strict `#rrggbb`, lowercased. Anything else returns null.
-//
-// This is a SECURITY boundary as much as a formatting one: the value is
-// interpolated straight into an SVG `fill="..."` attribute by buildDartboard(),
-// so an unvalidated string is an attribute-injection sink. Enforced server-side
-// on write (PUT /api/settings), again server-side on read (so a value written
-// directly into the database still can't reach a client), and again at the sink
-// itself — the same defence-in-depth the two-context escaping rule already
-// applies elsewhere. Shorthand #abc is deliberately NOT accepted: one exact
-// format keeps the check trivial to audit.
-function normaliseBoardColor(v){
-  return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : null;
-}
 function normaliseSchemeId(v){
   return BOARD_SCHEME_IDS.includes(v) ? v : null;
 }
 
 function hexToRgb(hex){
-  const h = normaliseBoardColor(hex) || '#000000';
-  return [1,3,5].map(i => parseInt(h.slice(i, i+2), 16));
+  return [1,3,5].map(i => parseInt(hex.slice(i, i+2), 16));
 }
 
 // WCAG relative luminance, and the label colour to sit on a given fill.
-// buildDartboard() prints "Bull" on the inner-bull circle, which is whatever the
-// sector-20 scheme's ring colour happens to be — so the label can't be a fixed
-// cream any more. This replaces the previous hardcoded colorblind-mode special
-// case with the general rule that case was one instance of.
+// buildDartboard() prints "Bull" on the inner-bull circle, which is whatever
+// SECTOR 20's ring colour is — red on an unrotated board, green on a rotated
+// one. So the label colour has to follow it rather than be a fixed cream. This
+// also replaces a hardcoded colorblind-mode special case with the general rule
+// that case was one instance of.
 function relativeLuminance(hex){
   const [r,g,b] = hexToRgb(hex).map(v => {
     const c = v/255;
@@ -108,37 +91,21 @@ function boardLabelColor(bgHex){
     ? BOARD_LABEL_LIGHT : BOARD_LABEL_DARK;
 }
 
-// The board's full colour state from whatever is stored.
+// Which scheme lands on which sectors, from the one stored setting.
 //
-// Returns both halves of the answer, because two different callers need
-// different shapes and neither should have to re-derive the other's:
-//   `schemes`  — the two editable pairs, for the Settings form.
-//   `sector20` — which scheme id sector 20 uses.
-//   `even`/`odd` — the resolved pair per sector parity, which is all
-//                  buildDartboard() wants (DB_SECTORS[0] is 20, so `even` IS
-//                  sector 20's scheme). No caller needs to know the alternation
-//                  rule to draw a board.
+// `even`/`odd` is the resolved pair per sector parity, which is all
+// buildDartboard() wants — DB_SECTORS[0] is 20, so `even` IS sector 20's scheme
+// and no renderer has to know the alternation rule to draw a board.
 //
-// Every colour is validated independently, so one bad value falls back on its
-// own rather than discarding the admin's other choices.
+// Nothing here is a user-supplied colour: `sector20` is validated against a
+// fixed list of two ids and every colour is a constant in this file. That is
+// what keeps the SVG `fill="..."` attributes buildDartboard() writes free of any
+// injection surface — there is no path from stored data to a fill value.
 function resolveBoardColors(stored){
-  const src = stored || {};
-  const schemes = {};
-  for (const id of BOARD_SCHEME_IDS) {
-    schemes[id] = {
-      label: BOARD_SCHEMES[id].label,
-      single: normaliseBoardColor(src[`${id}_single`]) || BOARD_SCHEMES[id].single,
-      ring:   normaliseBoardColor(src[`${id}_ring`])   || BOARD_SCHEMES[id].ring,
-    };
-  }
-  const sector20 = normaliseSchemeId(src.sector20) || BOARD_SECTOR20_SCHEME_DEFAULT;
+  const sector20 = normaliseSchemeId((stored || {}).sector20) || BOARD_SECTOR20_SCHEME_DEFAULT;
   const other = BOARD_SCHEME_IDS.find(id => id !== sector20);
-  return {
-    sector20,
-    schemes,
-    even: { single: schemes[sector20].single, ring: schemes[sector20].ring },
-    odd:  { single: schemes[other].single,    ring: schemes[other].ring },
-  };
+  const pair = id => ({ single: BOARD_SCHEMES[id].single, ring: BOARD_SCHEMES[id].ring });
+  return { sector20, even: pair(sector20), odd: pair(other) };
 }
 
 function dartValue(sector, mult){
@@ -2360,8 +2327,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
     BOARD_SCHEMES, BOARD_SCHEME_IDS, BOARD_SECTOR20_SCHEME_DEFAULT,
-    normaliseBoardColor, normaliseSchemeId, hexToRgb,
-    relativeLuminance, contrastRatio, boardLabelColor,
+    normaliseSchemeId, hexToRgb, relativeLuminance, contrastRatio, boardLabelColor,
     resolveBoardColors, BOARD_LABEL_LIGHT, BOARD_LABEL_DARK,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS, CRICKET_ALL_NUMBERS,
     evaluateVisitBaseball, baseballInningTarget, isBaseballCycle, parseSqliteTimestamp,

@@ -10,11 +10,12 @@
  */
 const L = require('../lib');
 
-// Settings -> Board colours. A dartboard has two zone schemes, each a
-// (single bed, double/treble ring) PAIR; the choice is which one sector 20 gets.
-// The model is unit-tested in backend/test/board-colors.test.js; this covers the
-// wiring — the radios exist, picking one repaints the preview, and the saved
-// choice actually reaches the SVG the player taps, with the pair intact.
+// Settings -> Board colours. One setting: which of the two zone schemes sector 20
+// sits on, so the on-screen board can be matched to a physical board that has
+// been rotated to spread its wear. The model is unit-tested in
+// backend/test/board-colors.test.js; this covers the wiring — the two options
+// exist, picking one repaints the preview with the WHOLE pair, and the saved
+// choice reaches the SVG the player actually taps.
 async function boardColors(rep) {
   await L.withPage(L.LANDSCAPE, async (page, pageErrors) => {
     await page.evaluate(async () => {
@@ -34,16 +35,21 @@ async function boardColors(rep) {
       const checked = document.querySelector('#board-scheme-choice input:checked');
       return { options: [...document.querySelectorAll('#board-scheme-choice input')].map(i => i.value),
                chosen: checked && checked.value,
-               tile: (document.getElementById('tile-state-board-colors') || {}).textContent };
+               tile: (document.getElementById('tile-state-board-colors') || {}).textContent,
+               // There must be no colour inputs anywhere in this tile — the
+               // colours are constants, not a preference.
+               colourInputs: document.querySelectorAll('#board-colors-body input[type="color"]').length };
     });
-    rep.ok('board colours: both schemes are offered',
+    rep.ok('board colours: exactly the two schemes are offered',
       start.options.join() === 'red_black,green_white', start.options.join());
-    rep.ok('board colours: a fresh household gets a real board (20 is red & black)',
+    rep.ok('board colours: an unrotated board is the default',
       start.chosen === 'red_black', String(start.chosen));
-    rep.ok('board colours: the tile names the scheme sector 20 uses',
+    rep.ok('board colours: the tile names the scheme sector 20 sits on',
       /Red & black/.test(start.tile || ''), start.tile);
+    rep.ok('board colours: no individual colour pickers are exposed',
+      start.colourInputs === 0, `${start.colourInputs} colour inputs found`);
 
-    // Switching the scheme must repaint the preview, both halves together.
+    // Switching must repaint the preview, moving the whole pair.
     const before = await page.evaluate(() =>
       [...document.querySelectorAll('#board-color-preview path')].slice(0, 4).map(p => p.getAttribute('fill')));
     // Click the LABEL, not the input: the radio is visually hidden (kept
@@ -61,19 +67,10 @@ async function boardColors(rep) {
     rep.ok('board colours: sector 20 takes the whole pair, bed and ring together',
       after[0] === '#cbbf96' && after[1] === '#17752f', after.slice(0, 2).join());
 
-    // Recolour a scheme, then confirm the pair stays together when saved.
-    await page.evaluate(() => {
-      document.getElementById('board-red_black-ring').value = '#f2c14e';
-      syncBoardColorInputs();
-      saveSettings();
-    });
+    await page.evaluate(() => saveSettings());
     await page.waitForTimeout(1200);
     const stored = await page.evaluate(() => fetch('/api/settings/board-colors').then(r => r.json()));
-    rep.ok('board colours: the recoloured pair persists intact',
-      stored.schemes.red_black.ring === '#f2c14e' && stored.schemes.red_black.single === '#1c1e1a',
-      JSON.stringify(stored.schemes.red_black));
-    rep.ok('board colours: the scheme choice persists',
-      stored.sector20 === 'green_white', stored.sector20);
+    rep.ok('board colours: the choice persists', stored.sector20 === 'green_white', stored.sector20);
 
     await page.evaluate(() => { const m = document.querySelector('.modal-backdrop'); if (m) m.remove(); });
     await L.startX01(page, { names: [L.uniqueName('BcA'), L.uniqueName('BcB')], startScore: 501 });
@@ -83,13 +80,10 @@ async function boardColors(rep) {
       const fills = [...document.querySelectorAll('#dart-board-wrap path')].map(p => p.getAttribute('fill'));
       const texts = [...document.querySelectorAll('#dart-board-wrap text')];
       return { fills: fills.slice(0, 4),
-               // Every fill must be a plain hex literal — the values are
-               // interpolated into an SVG attribute, so anything else means the
-               // guard chain leaked.
                allSafe: fills.every(f => /^#[0-9a-f]{6}$/i.test(f)),
                bullLabel: texts.length ? texts[texts.length - 1].getAttribute('fill') : null };
     });
-    rep.ok('board colours: the saved scheme reaches the board you actually tap',
+    rep.ok('board colours: the saved choice reaches the board you actually tap',
       board.fills[0] === '#cbbf96' && board.fills[1] === '#17752f', board.fills.join());
     rep.ok('board colours: every fill on the board is a plain hex literal', board.allSafe);
     // Sector 20 now carries the green ring, so the inner bull is green and the

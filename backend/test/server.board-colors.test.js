@@ -1,18 +1,11 @@
 'use strict';
 // The server end of Settings -> Board colours.
 //
-// board-colors.test.js covers the pure derivation. This covers the two things
-// only a real server can show: that the public read route exists and answers a
-// fully-resolved scheme without a session (the board is drawn on a shared
-// household tablet long before anyone logs in as admin), and that the write path
-// refuses anything that isn't an exact #rrggbb.
-//
-// The write path matters because the value's destination is an SVG
-// `fill="..."` attribute. A stored `#c8102e" onload="alert(1)` would break out of
-// that attribute on every device that renders the board — a stored XSS reachable
-// from one admin PUT. There are three independent guards (server on write, db on
-// read, the sink itself); this asserts the first, and board-colors.test.js
-// asserts the other two.
+// board-colors.test.js covers the pure model. This covers the two things only a
+// real server can show: that the public read route exists and answers a fully
+// resolved scheme WITHOUT a session (the board is drawn on a shared household
+// tablet long before anyone logs in as admin), and that the write path stores the
+// choice and refuses an unknown one.
 //
 // server.js isn't require()-able (it .listen()s at load and exports nothing), so
 // this spawns it as a real child process, the same shape as
@@ -86,7 +79,7 @@ const putSettings = body => fetch(`${base}/api/settings`, {
 });
 
 describe('GET /api/settings/board-colors is public and always fully resolved', () => {
-  test('a fresh install answers a real board — 20 is a black bed with red rings', async () => {
+  test('a fresh install answers an unrotated board — 20 on black with red rings', async () => {
     await withServer(async () => {
       const c = await getColors();
       assert.equal(c.sector20, 'red_black');
@@ -99,7 +92,7 @@ describe('GET /api/settings/board-colors is public and always fully resolved', (
     await withServer(async () => {
       const r = await fetch(`${base}/api/settings/board-colors`);   // no Cookie header
       assert.equal(r.status, 200);
-      assert.deepEqual(Object.keys(await r.json()).sort(), ['even','odd','schemes','sector20']);
+      assert.deepEqual(Object.keys(await r.json()).sort(), ['even','odd','sector20']);
     });
   });
 
@@ -113,51 +106,17 @@ describe('GET /api/settings/board-colors is public and always fully resolved', (
     });
   });
 
-  test('a recoloured scheme stays a pair, on whichever side it lands', async () => {
+  test('switching back restores the original board', async () => {
     await withServer(async () => {
-      await putSettings({ board_red_black_single: '#101820', board_red_black_ring: '#f2c14e' });
-      assert.deepEqual((await getColors()).even, { single: '#101820', ring: '#f2c14e' });
-
+      const before = await getColors();
       await putSettings({ board_sector20_scheme: 'green_white' });
-      assert.deepEqual((await getColors()).odd, { single: '#101820', ring: '#f2c14e' },
-        'the same pair, now on the alternate sectors — still together');
-    });
-  });
-
-  test('an uppercase colour is normalised on the way in', async () => {
-    await withServer(async () => {
-      await putSettings({ board_red_black_ring: '#AABBCC' });
-      assert.equal((await getColors()).schemes.red_black.ring, '#aabbcc');
+      await putSettings({ board_sector20_scheme: 'red_black' });
+      assert.deepEqual(await getColors(), before);
     });
   });
 });
 
-describe('the write path refuses anything that is not an exact #rrggbb', () => {
-  const hostile = [
-    ['attribute break-out', '#c8102e" onload="alert(1)'],
-    ['tag break-out', '#c8102e"/><script>alert(1)</script>'],
-    ['a CSS colour name', 'red'],
-    ['a url() reference', 'url(#x)'],
-    ['shorthand hex', '#c81'],
-    ['trailing space', '#c8102e '],
-    ['not hex at all', '#gggggg'],
-    ['an empty string', ''],
-  ];
-
-  for (const [label, value] of hostile) {
-    test(`${label} is rejected with 400, and nothing is stored`, async () => {
-      await withServer(async () => {
-        const r = await putSettings({ board_red_black_ring: value });
-        assert.equal(r.status, 400, `${label} should be refused`);
-        const body = await r.json();
-        assert.match(body.error || '', /board_red_black_ring must be a #rrggbb colour/);
-        // The rejection must be atomic: a refused request must not have written
-        // the other fields in the same payload either.
-        assert.equal((await getColors()).schemes.red_black.ring, '#c8102e');
-      });
-    });
-  }
-
+describe('the write path takes a known scheme id and nothing else', () => {
   test('an unknown scheme id is rejected rather than silently defaulted', async () => {
     await withServer(async () => {
       const r = await putSettings({ board_sector20_scheme: 'purple_gold' });
@@ -167,26 +126,42 @@ describe('the write path refuses anything that is not an exact #rrggbb', () => {
     });
   });
 
-  test('a rejected colour does not partially apply the rest of the payload', async () => {
+  test('a rejected id does not partially apply the rest of the payload', async () => {
     await withServer(async () => {
-      const r = await putSettings({ board_sector20_scheme: 'green_white', board_red_black_ring: 'red' });
+      const r = await putSettings({ card_tagline: 'changed', board_sector20_scheme: 'nope' });
       assert.equal(r.status, 400);
-      assert.equal((await getColors()).sector20, 'red_black',
+      const tagline = await fetch(`${base}/api/settings/card-tagline`).then(x => x.json());
+      assert.notEqual(tagline.tagline, 'changed',
         'the valid field in a rejected payload must not have been written');
     });
   });
 
-  test('the server validates with the same functions the client does', async () => {
-    // Two independent copies of "what is a valid colour"/"what is a valid
-    // scheme" is how the two ends drift until one accepts something the other
-    // renders wrong.
+  test('colours are not settable at all', async () => {
+    await withServer(async () => {
+      // The keys simply are not in the PUT allowlist any more. The request
+      // succeeds (unknown keys are filtered, as for every other unrecognised
+      // field) and the board is unchanged — which is the property that matters:
+      // there is no path from stored data to an SVG fill attribute.
+      const r = await putSettings({
+        board_red_black_single: '#ff0000',
+        board_red_black_ring: '#c8102e" onload="alert(1)',
+        board_single_a: '#123456',
+      });
+      assert.equal(r.status, 200);
+      assert.deepEqual(await getColors(), S.resolveBoardColors({}));
+    });
+  });
+
+  test('the server validates with the same function the client does', async () => {
+    // Two independent copies of "what is a valid scheme" is how the two ends
+    // drift until one accepts something the other renders wrong.
     const src = fs.readFileSync(SERVER_PATH, 'utf8');
-    assert.match(src, /const \{ normaliseBoardColor, normaliseSchemeId, BOARD_SCHEME_IDS \} = require\('\.\.\/frontend\/scoring\.js'\)/);
-    // The key list is DERIVED from the scheme registry, not hand-written — so a
-    // third scheme can't be added with its keys silently missing from the
-    // allowlist, which would make saving it look like it worked and do nothing.
-    assert.match(src, /const BOARD_COLOR_KEYS = BOARD_SCHEME_IDS\.flatMap/);
-    assert.match(src, /\.\.\.BOARD_COLOR_KEYS, BOARD_SCHEME_KEY/,
-      'the keys must be in the PUT allowlist, or saving silently does nothing');
+    assert.match(src, /const \{ normaliseSchemeId, BOARD_SCHEME_IDS \} = require\('\.\.\/frontend\/scoring\.js'\)/);
+    assert.match(src, /const BOARD_SCHEME_KEY = 'board_sector20_scheme'/);
+    assert.match(src, /BOARD_SCHEME_KEY, \.\.\.boolKeys\]/,
+      'the key must be in the PUT allowlist, or saving silently does nothing');
+    // And no colour key sneaked back in.
+    assert.doesNotMatch(src, /board_red_black_single|board_single_a|normaliseBoardColor/,
+      'the board colours are constants; no colour key belongs in the settings surface');
   });
 });

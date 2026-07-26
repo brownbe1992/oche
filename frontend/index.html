@@ -576,10 +576,10 @@
   .hidden{display:none!important}
 
   /* ---- Settings -> Board colours ---- */
-  /* The scheme choice is the primary control, so it reads as two real options
-     you pick between, each showing the pair it stands for — not a dropdown of
-     words. Radio inputs underneath (visually hidden, not display:none, so they
-     stay focusable and keyboard-operable as a real radiogroup). */
+  /* Two options you pick between, each showing the pair it stands for — not a
+     dropdown of words, because the task is "look at your board, find the one
+     that matches". Radio inputs underneath (visually hidden, not display:none,
+     so the group stays focusable and keyboard-operable). */
   .bc-schemes{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
   .bc-scheme{position:relative;flex:1;min-width:132px;display:flex;align-items:center;gap:10px;
     background:var(--surface);border:1px solid var(--wire);border-radius:11px;
@@ -589,29 +589,10 @@
   .bc-scheme:has(input:checked){border-color:var(--gold);background:var(--surface-2)}
   .bc-scheme:has(input:focus-visible){outline:2px solid var(--gold);outline-offset:2px}
   /* The pair, drawn as a bed with its ring sitting on it — the relationship the
-     whole feature is about. Decorative; the label text carries the meaning. */
-  .bc-chip{flex:none;width:34px;height:34px;border-radius:50%;border:2px solid var(--wire)}
+     scheme IS. Decorative; the label text carries the meaning. */
+  .bc-chip{flex:none;width:34px;height:34px;border-radius:50%;border:3px solid var(--wire)}
   .bc-scheme-name{font-size:13px;font-weight:700;line-height:1.25}
   .bc-scheme-sub{font-size:11px;color:var(--muted)}
-
-  .bc-advanced{margin-bottom:12px}
-  .bc-advanced > summary{cursor:pointer;font-size:12px;color:var(--muted);
-    text-transform:uppercase;letter-spacing:.06em;font-weight:600}
-  .bc-advanced > summary:hover{color:var(--ink)}
-  .bc-grid{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
-  .bc-col{display:flex;flex-direction:column;gap:2px;min-width:150px;flex:1}
-  .bc-col-head{font-size:11px;text-transform:uppercase;letter-spacing:.07em;
-    color:var(--muted);font-weight:600;margin-bottom:6px}
-  /* A native <input type="color"> so the platform's own picker (and its
-     accessibility behaviour) is what opens — this is not a place to hand-roll a
-     colour wheel. The UA chrome around the swatch is stripped so it reads as a
-     tile rather than a button with a stripe in it. */
-  .bc-swatch{width:100%;height:38px;padding:0;margin-bottom:10px;cursor:pointer;
-    background:none;border:1px solid var(--wire);border-radius:9px;color-scheme:dark}
-  .bc-swatch::-webkit-color-swatch-wrapper{padding:3px}
-  .bc-swatch::-webkit-color-swatch{border:none;border-radius:6px}
-  .bc-swatch::-moz-color-swatch{border:none;border-radius:6px}
-  .bc-swatch:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
   .bc-preview{width:100%;max-width:240px;aspect-ratio:1;margin:0 auto;
     background:var(--board);border:1px solid var(--wire);border-radius:12px;padding:6px}
   .bc-preview svg{width:100%;height:100%;display:block}
@@ -2147,28 +2128,17 @@
         </div>
         <div id="board-colors-body" hidden>
           <p class="settings-intro">
-            A dartboard has two zone schemes, and each one is a pair — the single
-            bed and its double/treble ring always go together. Pick which scheme
-            sector 20 uses; every other sector alternates to the other one.
+            Rotating a board to spread the wear moves sector 20 onto the other
+            colour scheme. Match the on-screen board to the one on your wall:
+            look at your 20 and pick the bed colour it sits on.
           </p>
-          <label class="field">Sector 20 uses</label>
+          <label class="field">Sector 20 sits on</label>
           <div class="bc-schemes" id="board-scheme-choice" role="radiogroup" aria-label="Colour scheme for sector 20"></div>
-          <details class="bc-advanced">
-            <summary>Change what each scheme looks like</summary>
-            <p class="settings-intro" style="margin-top:10px">
-              Edited as pairs, so a ring can never end up on the wrong bed.
-            </p>
-            <div class="bc-grid" id="board-scheme-editors"></div>
-            <div class="btn-row" style="margin-top:10px">
-              <button class="btn btn-ghost" type="button" onclick="resetBoardColors()">Reset to the classic colours</button>
-            </div>
-          </details>
           <div class="bc-preview" id="board-color-preview" aria-hidden="true"></div>
           <p class="settings-intro" id="board-colors-cb-note" hidden>
             Colorblind mode is on, so the doubles and trebles render in its orange
-            and blue on the real board — an accessibility setting isn't overridden
-            by a colour choice. The single beds still apply, and the preview above
-            shows exactly what will be drawn.
+            and blue on the real board. The preview above shows exactly what will
+            be drawn.
           </p>
         </div>
       </div>
@@ -5588,14 +5558,9 @@ const SETTINGS_TILE_STATES = [
       const v = (document.getElementById('scoreboard-layout')||{}).value;
       return v === 'compact' ? 'Compact' : v === 'minimal' ? 'Minimal' : 'Full';
     } },
-  { id:'tile-state-board-colors', compute: () => {
-      const c = settingsBoardColors();
-      const stock = BOARD_SCHEME_IDS.every(id =>
-        c.schemes[id].single === BOARD_SCHEMES[id].single && c.schemes[id].ring === BOARD_SCHEMES[id].ring);
-      // The summary answers "what does 20 look like", because that is the choice
-      // this tile is actually about; a recoloured scheme is the footnote.
-      return c.schemes[c.sector20].label + (stock ? '' : ', recoloured');
-    } },
+  // The summary answers "what does 20 look like", which is the whole setting.
+  { id:'tile-state-board-colors',
+    compute: () => BOARD_SCHEMES[settingsBoardColors().sector20].label },
   { id:'tile-state-heatmap', compute: () => (document.getElementById('heatmap-style')||{}).value === 'scorched' ? 'Scorched' : 'Classic' },
   { id:'tile-state-smart-home', compute: () => (document.getElementById('ha-url')||{}).value ? 'URL set' : 'Not set' },
 ];
@@ -5944,106 +5909,47 @@ function toggleVoiceSubOptions(){
   sub.querySelectorAll('input[type=checkbox]').forEach(el=>el.disabled = !on);
 }
 /* ---------- Settings -> Board colours ----------
-   A dartboard has two zone schemes, each a (single bed, double/treble ring)
-   PAIR. The only structural choice is which scheme sector 20 gets; the other
-   takes every alternate sector. The pair colours stay editable, but always as
-   pairs, so no combination of settings can put a ring on the wrong bed.
+   One setting: which of the two zone schemes sector 20 has. A physical board is
+   rotated periodically to spread the wear, which flips that; this is how the
+   on-screen board is kept matching the one on the wall. The colours are fixed
+   constants in scoring.js — they are what a dartboard is, not a preference.
 
-   The form is BUILT from BOARD_SCHEMES rather than hand-written twice — a
-   third scheme (or a rename) then needs no new markup, the same
-   derive-from-the-registry discipline items 39/41/46 applied elsewhere. */
+   The two options are BUILT from BOARD_SCHEMES rather than written out twice, so
+   a rename needs no new markup — the same derive-from-the-registry discipline
+   items 39/41/46 applied elsewhere. */
 
-// Which scheme sector 20 currently has, in the form. Read straight off the
-// radios so there is no second copy of the answer to fall out of sync.
-function settingsSector20Scheme(){
-  const checked = document.querySelector('#board-scheme-choice input:checked');
-  return (checked && normaliseSchemeId(checked.value)) || BOARD_SECTOR20_SCHEME_DEFAULT;
-}
-
-// The board's full colour state as the form currently describes it.
+// Read straight off the radios, so there is no second copy of the answer to fall
+// out of sync with what the admin can see.
 function settingsBoardColors(){
-  const stored = { sector20: settingsSector20Scheme() };
-  for(const id of BOARD_SCHEME_IDS){
-    const single = document.getElementById(`board-${id}-single`);
-    const ring   = document.getElementById(`board-${id}-ring`);
-    if(single) stored[`${id}_single`] = single.value;
-    if(ring)   stored[`${id}_ring`]   = ring.value;
-  }
-  return resolveBoardColors(stored);
+  const checked = document.querySelector('#board-scheme-choice input:checked');
+  return resolveBoardColors({ sector20: checked && checked.value });
 }
 
-// Builds the scheme radios and the pair editors once, then keeps them in sync.
-// `cfg` is the settings payload on first load; omitted on later refreshes.
 function renderBoardColorControls(cfg){
   const choice = document.getElementById('board-scheme-choice');
-  const editors = document.getElementById('board-scheme-editors');
-  if(!choice || !editors) return;
-
-  const stored = {};
-  if(cfg){
-    stored.sector20 = cfg.board_sector20_scheme;
-    for(const id of BOARD_SCHEME_IDS){
-      stored[`${id}_single`] = cfg[`board_${id}_single`];
-      stored[`${id}_ring`]   = cfg[`board_${id}_ring`];
-    }
-  }
-  const c = cfg ? resolveBoardColors(stored) : settingsBoardColors();
-
+  if(!choice) return;
   if(!choice.children.length){
     choice.innerHTML = BOARD_SCHEME_IDS.map(id => `
       <label class="bc-scheme">
         <input type="radio" name="board-sector20-scheme" value="${id}" onchange="syncBoardColorInputs()">
-        <span class="bc-chip" id="board-chip-${id}" aria-hidden="true"></span>
+        <span class="bc-chip" style="background:${BOARD_SCHEMES[id].single};border-color:${BOARD_SCHEMES[id].ring}" aria-hidden="true"></span>
         <span>
-          <span class="bc-scheme-name">${escapeHtml(c.schemes[id].label)}</span><br>
-          <span class="bc-scheme-sub">bed &amp; ring</span>
+          <span class="bc-scheme-name">${escapeHtml(BOARD_SCHEMES[id].bed)}</span><br>
+          <span class="bc-scheme-sub">${escapeHtml(BOARD_SCHEMES[id].label)}</span>
         </span>
       </label>`).join('');
-    editors.innerHTML = BOARD_SCHEME_IDS.map(id => `
-      <div class="bc-col">
-        <div class="bc-col-head">${escapeHtml(c.schemes[id].label)}</div>
-        <label class="field" for="board-${id}-single">Single bed</label>
-        <input type="color" class="bc-swatch" id="board-${id}-single" oninput="syncBoardColorInputs()">
-        <label class="field" for="board-${id}-ring">Double &amp; treble</label>
-        <input type="color" class="bc-swatch" id="board-${id}-ring" oninput="syncBoardColorInputs()">
-      </div>`).join('');
   }
-
-  const radio = choice.querySelector(`input[value="${c.sector20}"]`);
+  const chosen = (cfg && normaliseSchemeId(cfg.board_sector20_scheme)) || BOARD_SECTOR20_SCHEME_DEFAULT;
+  const radio = choice.querySelector(`input[value="${chosen}"]`);
   if(radio) radio.checked = true;
-  for(const id of BOARD_SCHEME_IDS){
-    const single = document.getElementById(`board-${id}-single`);
-    const ring   = document.getElementById(`board-${id}-ring`);
-    if(single) single.value = c.schemes[id].single;
-    if(ring)   ring.value   = c.schemes[id].ring;
-  }
   syncBoardColorInputs();
 }
 
 function syncBoardColorInputs(){
-  const c = settingsBoardColors();
-  // Each chip shows the PAIR: the bed as the fill, the ring as the border.
-  for(const id of BOARD_SCHEME_IDS){
-    const chip = document.getElementById(`board-chip-${id}`);
-    if(chip){
-      chip.style.background = c.schemes[id].single;
-      chip.style.borderColor = c.schemes[id].ring;
-    }
-  }
   const cbNote = document.getElementById('board-colors-cb-note');
   if(cbNote) cbNote.hidden = !(document.getElementById('colorblind-mode')||{}).checked;
   renderBoardColorPreview();
   refreshSettingsTileStates();
-}
-
-function resetBoardColors(){
-  for(const id of BOARD_SCHEME_IDS){
-    const single = document.getElementById(`board-${id}-single`);
-    const ring   = document.getElementById(`board-${id}-ring`);
-    if(single) single.value = BOARD_SCHEMES[id].single;
-    if(ring)   ring.value   = BOARD_SCHEMES[id].ring;
-  }
-  syncBoardColorInputs();
 }
 
 // A miniature of the real board: same BOARD_GEOM, same alternation, no hit areas
@@ -6107,13 +6013,7 @@ function saveSettings(){
 
   const payload = {};
   SETTINGS_FIELDS.forEach(f => saveSettingsField(payload, f));
-  // See renderBoardColorControls() for why these aren't SETTINGS_FIELDS entries.
-  const bc = settingsBoardColors();
-  payload.board_sector20_scheme = bc.sector20;
-  for(const id of BOARD_SCHEME_IDS){
-    payload[`board_${id}_single`] = bc.schemes[id].single;
-    payload[`board_${id}_ring`]   = bc.schemes[id].ring;
-  }
+  payload.board_sector20_scheme = settingsBoardColors().sector20;
   Backend.send('PUT','/api/settings', payload).then(()=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
     cardTagline = (document.getElementById('card-tagline')||{}).value || DEFAULT_CARD_TAGLINE;
@@ -19498,19 +19398,10 @@ function showBackendErrorScreen(){
     Backend.get('/api/settings/ha-webhook-status').then(hw => { haWebhookStatus = { enabled: !!hw.enabled, events: hw.events || {} }; }).catch(()=>{}),
     Backend.get('/api/settings/heatmap-style').then(hs => { heatmapStyle = hs.style === 'scorched' ? 'scorched' : 'classic'; }).catch(()=>{}),
     Backend.get('/api/settings/heatmap-number-style').then(ns => { heatmapNumberStyle = ['molten_seam','chalk_ledger'].includes(ns.style) ? ns.style : 'original'; }).catch(()=>{}),
-    // Re-resolved rather than trusted: the server already validated these, but the
-    // sink is an SVG fill attribute, so this end validates too. The response is
-    // already resolved, so it is flattened back to the stored-key shape first.
-    Backend.get('/api/settings/board-colors').then(bc => {
-      const flat = { sector20: bc.sector20 };
-      for(const id of BOARD_SCHEME_IDS){
-        if(bc.schemes && bc.schemes[id]){
-          flat[`${id}_single`] = bc.schemes[id].single;
-          flat[`${id}_ring`]   = bc.schemes[id].ring;
-        }
-      }
-      boardColors = resolveBoardColors(flat);
-    }).catch(()=>{}),
+    // Re-resolved rather than trusted: an unknown id from anywhere falls back to
+    // the default here too, and the colours come from this file's own constants.
+    Backend.get('/api/settings/board-colors')
+      .then(bc => { boardColors = resolveBoardColors({ sector20: bc.sector20 }); }).catch(()=>{}),
   ]);
   document.body.classList.toggle('colorblind', colorblindMode);
   // Settings tiles (2026-07 modular-dashboard redesign) show a live one-line
