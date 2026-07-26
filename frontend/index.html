@@ -538,6 +538,41 @@
   .coaching-tag{font-family:'Bebas Neue';font-size:11px;letter-spacing:.04em;text-transform:uppercase;flex:none;padding:2px 8px;border-radius:6px;background:var(--wire);color:var(--cream);white-space:nowrap}
   .coaching-text{color:var(--cream);line-height:1.4}
 
+  /* ---- solo practice leg-complete panel ("Trophy Cabinet", 2026-07) ----
+     Replaces two flat label/value cards in which every row carried identical
+     visual weight, so nothing was scannable and the three-dart average — the
+     single most important number in darts — wasn't on the panel at all (it was
+     11px text up in the live scoreboard). Hierarchy here is deliberate: the two
+     averages are the hero band, the session's checkouts are the trophy shelf
+     below them, and the flat rows that remain are genuinely secondary. */
+  .lc-heads{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px;text-align:left}
+  .lc-head{background:var(--surface);border:1px solid var(--wire);border-radius:12px;
+    padding:13px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  /* This leg is the one you just threw, so it leads. */
+  .lc-head.lead{border-color:#4a3f24;background:linear-gradient(180deg,#241f14,#1c1a13)}
+  .lc-head .lc-k{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700}
+  .lc-head .lc-sub{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .lc-head .lc-n{font-family:'Bebas Neue';font-size:52px;line-height:.85;color:var(--gold)}
+  .lc-head.alt .lc-n{color:var(--cream)}
+  .lc-sect{margin-top:14px;text-align:left}
+  .lc-eyebrow{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.14em;
+    color:var(--muted);font-weight:700;margin-bottom:9px}
+  .lc-cos{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+  .lc-co{font-family:'Bebas Neue';font-size:23px;color:var(--cream);background:var(--surface);
+    border:1px solid var(--wire);border-radius:9px;padding:4px 11px;line-height:1.15}
+  .lc-co.best{font-size:31px;color:var(--gold);border-color:#4a3f24;background:#241f14;padding:4px 14px}
+  .lc-tally{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .lc-t{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--wire);
+    border-radius:10px;padding:8px 12px}
+  .lc-t .lc-em{font-size:16px;line-height:1}
+  .lc-t .lc-n2{font-family:'Bebas Neue';font-size:23px;color:var(--cream);line-height:1}
+  .lc-t .lc-l2{font-size:11.5px;color:var(--muted)}
+  /* A zero is information (no 180s today), so it stays on screen — just dimmed
+     so it never competes with a real number. */
+  .lc-t.zero .lc-n2{color:#4d514a}
+  .lc-split{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;text-align:left}
+  @media(max-width:600px){.lc-heads,.lc-split{grid-template-columns:1fr}}
+
   /* ---- practice leg stats panel ---- */
   .prac-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:20px;text-align:left}
   .prac-col{background:var(--surface);border:1px solid var(--wire);border-radius:12px;padding:14px 16px}
@@ -14464,21 +14499,75 @@ function startNextSet(){ startNextLeg(true); }
 
 function statRow(label,val,sm){ return `<div class="prac-row"><span class="prac-row-label">${label}</span><span class="prac-row-val${sm?' sm':''}">${val}</span></div>`; }
 
-function pracStatsHtml(turns){
-  if(!turns.length) return '';
-  const darts       = turns.reduce((s,t)=>s+t.darts,0);
-  const busts       = turns.filter(t=>t.bust).length;
-  const tlCount     = turns.filter(t=>t.trebleLess).length;
-  const tlPct       = turns.length ? Math.round(tlCount/turns.length*100)+'%' : '—';
-  const checkouts   = turns.filter(t=>t.checkout&&t.checkoutPoints).map(t=>t.checkoutPoints);
-  const topVisits   = turns.filter(t=>!t.bust).map(t=>t.scored).sort((a,b)=>b-a).slice(0,5);
-  return [
-    statRow('Darts Thrown', darts),
-    statRow('Checkout'+(checkouts.length!==1?'s':''), checkouts.length ? checkouts.join(', ') : '—', checkouts.length>1),
-    statRow('Best Visits', topVisits.length ? topVisits.join(', ') : '—', topVisits.length>2),
-    statRow('Busts', busts),
-    statRow('Trebleless %', tlPct),
-  ].join('');
+// The solo-practice leg-complete panel (/frontend-design direction D, "Trophy
+// Cabinet", 2026-07). Structure, in priority order:
+//   1. the two three-dart averages as a hero band — leg first, since that's the
+//      leg you just threw;
+//   2. the session's checkouts as a shelf of chips, best enlarged, because in a
+//      practice session the run of finishes IS the scoreboard;
+//   3. emoji tallies in the app's established vocabulary (💯 ton+, 🎯 180s,
+//      🐟 Big Fish, 🔥 best visit);
+//   4. everything genuinely secondary, in two quiet columns.
+// The averages come from the player's own canonical legPoints/legAvgDarts and
+// gamePoints/gameAvgDarts — the same fields the live scoreboard's "leg · game"
+// line reads — rather than being recomputed from the turn list, so this panel
+// can never disagree with the number shown during play.
+function practiceLegPanelHtml(p, game){
+  const leg = pracAggregate(game.currentLegTurns||[]);
+  const ses = pracAggregate(game.sessionTurns||[]);
+  const pct = v => v == null ? '—' : v + '%';
+  const first9 = pracFirst9Average(game.currentLegTurns||[]);
+  const legsPlayed = game.legNo;
+  const list = ns => ns.length ? ns.join(' · ') : '—';
+  const tally = (emoji, n, label) =>
+    `<div class="lc-t${n ? '' : ' zero'}"><span class="lc-em" aria-hidden="true">${emoji}</span>` +
+    `<span class="lc-n2">${n}</span><span class="lc-l2">${label}</span></div>`;
+
+  const chips = ses.checkouts.length
+    ? ses.checkouts.map((c,i)=>`<span class="lc-co${i===0?' best':''}">${c}</span>`).join('')
+    : '<span class="lc-co" style="color:#4d514a">no finishes yet</span>';
+
+  return `
+    <div class="lc-heads">
+      <div class="lc-head lead">
+        <div><div class="lc-k">This leg</div>
+          <div class="lc-sub">3-dart average · ${leg.darts} dart${leg.darts===1?'':'s'}</div></div>
+        <div class="lc-n">${avgStr(p.legPoints, p.legAvgDarts)}</div>
+      </div>
+      <div class="lc-head alt">
+        <div><div class="lc-k">Session · ${legsPlayed} leg${legsPlayed===1?'':'s'}</div>
+          <div class="lc-sub">3-dart average · ${ses.darts} dart${ses.darts===1?'':'s'}</div></div>
+        <div class="lc-n">${avgStr(p.gamePoints, p.gameAvgDarts)}</div>
+      </div>
+    </div>
+    <div class="lc-sect">
+      <span class="lc-eyebrow">Checkouts this session — ${ses.checkouts.length} finish${ses.checkouts.length===1?'':'es'}</span>
+      <div class="lc-cos">${chips}</div>
+      <div class="lc-tally">
+        ${tally('💯', ses.tonPlus, 'ton+ visits')}
+        ${tally('🎯', ses.oneEighties, ses.oneEighties===1?'180':'180s')}
+        ${tally('🐟', ses.bigFish, 'big fish')}
+        ${tally('🔥', ses.bestVisit, 'best visit')}
+      </div>
+    </div>
+    <div class="lc-split">
+      <div class="prac-col">
+        <div class="prac-col-title">This leg</div>
+        ${statRow('First 9 average', first9 == null ? '—' : first9.toFixed(1))}
+        ${statRow('Best visits', list(leg.topVisits), leg.topVisits.length>2)}
+        ${statRow('Checkout'+(leg.checkouts.length===1?'':'s'), list(leg.checkouts))}
+        ${statRow('Busts', leg.busts)}
+        ${statRow('Trebleless visits', pct(leg.treblelessPct))}
+      </div>
+      <div class="prac-col">
+        <div class="prac-col-title">Session</div>
+        ${statRow('Darts per leg', legsPlayed ? (ses.darts/legsPlayed).toFixed(1) : '—')}
+        ${statRow('Best visits', list(ses.topVisits), ses.topVisits.length>2)}
+        ${statRow('Legs played', legsPlayed)}
+        ${statRow('Busts', ses.busts)}
+        ${statRow('Trebleless visits', pct(ses.treblelessPct))}
+      </div>
+    </div>`;
 }
 
 // Default (X01-shaped) per-player leg/game stat rows — GAME_TYPES entries
@@ -14565,8 +14654,16 @@ function finishUnit(kind, winner, opts){
   updateBowOutButtonVisibility();
   renderGame();
   const sb=document.getElementById('scoreboard');
+  // A solo practice session has nobody to win against, so "Ben wins the leg"
+  // reads oddly for the only person in the room — the same reasoning the Around
+  // the Clock redesign applied to its own completion wording via opts.bannerText.
+  // Here it's derived rather than passed, because every solo practice leg goes
+  // through the generic onLegWon() path and there is no per-call site to change.
+  const soloPractice = !!game.practice && game.players.length === 1;
   const labels = { leg:'wins the leg', set:'wins the set', game:'wins the game' };
-  const bannerText = opts.bannerText || `${escapeHtml(winner)} ${labels[kind]}`;
+  const soloLabels = { leg:`Leg ${game.legNo} complete`, set:'Set complete', game:'Session complete' };
+  const bannerText = opts.bannerText
+    || (soloPractice ? soloLabels[kind] : `${escapeHtml(winner)} ${labels[kind]}`);
   const banner=document.createElement('div');
   banner.className='pscore'; banner.style.borderColor='var(--gold)';
   banner.innerHTML=`<div class="nm" style="color:var(--gold)">🎯 ${bannerText}</div>`;
@@ -14742,24 +14839,19 @@ function finishUnit(kind, winner, opts){
     // panel is actively misleading for the 3 filler-starting-score formats
     // (Bullseye Gauntlet/Treble Run/Steady Hand), whose 3-dart average is computed
     // against a meaningless countdown, not the real challenge result.
-    const legPanel = isCricket || isKiller || kind!=='leg' || lastLegWasChallenge ? '' : GAME_TYPES[game.gameType].h2hRows ? h2hStatsHtml(winner) : game.practice ? `
-      <div class="prac-stats">
-        <div class="prac-col">
-          <div class="prac-col-title">This Leg</div>
-          ${pracStatsHtml(game.currentLegTurns||[])}
-        </div>
-        <div class="prac-col">
-          <div class="prac-col-title">This Session</div>
-          ${pracStatsHtml(game.sessionTurns||[])}
-        </div>
-      </div>` : h2hStatsHtml(winner);
+    const legPanel = isCricket || isKiller || kind!=='leg' || lastLegWasChallenge ? '' : GAME_TYPES[game.gameType].h2hRows ? h2hStatsHtml(winner) : game.practice ? practiceLegPanelHtml(game.players[0], game) : h2hStatsHtml(winner);
     const challengeShareBtn = lastLegWasChallenge
       ? `<button class="btn btn-ghost" onclick="shareMomentCard('dailychallenge')">📤 Share</button>` : '';
     // A Daily Challenge attempt never has a "next leg" — it's a single-shot,
     // one-per-calendar-day round — so it gets its own heading and actions instead
     // of the regular leg-complete "Next leg / End game" pair.
     const heading = lastLegWasChallenge ? 'CHALLENGE COMPLETE' : (kind==='set'?'SET COMPLETE':'LEG COMPLETE');
-    const subtext = lastLegWasChallenge ? "Today's attempt is locked in — see you tomorrow." : 'Stats saved.';
+    // The session's leg count belongs on this screen (it is the one number that
+    // says how far into a practice session you are), and the subtext is where it
+    // costs nothing — the panel below repeats it in its own Session heading.
+    const soloPracticeLeg = game.practice && game.players.length === 1 && kind === 'leg';
+    const subtext = lastLegWasChallenge ? "Today's attempt is locked in — see you tomorrow."
+      : soloPracticeLeg ? `Leg ${game.legNo} of this session · stats saved.` : 'Stats saved.';
     const actionButtons = lastLegWasChallenge
       ? `<button class="btn btn-primary" onclick="setMode('challenge'); show('setup')">Try Again</button>
          <button class="btn btn-ghost" onclick="setMode('h2h'); show('setup')">New Game</button>`

@@ -310,6 +310,61 @@ dedicated flows before this code runs at all, also unaffected.
 "GAME OVER" phrasing where it doesn't fit (a solo drill has no opponent to
 "win" against) — see Around the Clock's own use of this, above.
 
+**Solo practice never "wins"** (2026-07). `finishUnit()` also *derives* a
+non-competitive banner when `game.practice && game.players.length === 1`:
+"🎯 Leg 17 complete" rather than "🎯 Ben wins the leg". Derived rather than
+passed through `opts`, because every solo practice leg comes through the generic
+`onLegWon()` path — there is no per-call site to change. The leg-complete
+subtext gains the session's leg count for the same case ("Leg 17 of this
+session · stats saved."), which is the one number that says how far into a
+practice session you are.
+
+### Solo practice leg-complete panel — "Trophy Cabinet" (2026-07)
+
+`practiceLegPanelHtml(p, game)` (`frontend/index.html`) replaced two flat
+label/value cards in which every row carried identical visual weight — nothing
+was scannable, and the **three-dart average, the single most important number in
+darts, wasn't on the panel at all** (it lived in 11px text up in the live
+scoreboard). Chosen by the owner from four `/frontend-design` directions.
+
+Structure, in deliberate priority order:
+
+1. **The two averages as a hero band** — this leg first (it's the leg you just
+   threw, so it gets the gold-tinted card), session beside it. Both read from
+   the player's own canonical `legPoints`/`legAvgDarts` and
+   `gamePoints`/`gameAvgDarts` — the same fields the live scoreboard's
+   "leg · game" line uses — rather than being recomputed from the turn list, so
+   this panel can never disagree with the number shown during play.
+2. **The session's checkouts as a shelf of chips**, descending, best enlarged.
+   In a practice session the run of finishes *is* the scoreboard.
+3. **Emoji tallies** in the app's established vocabulary — 💯 ton+ visits,
+   🎯 180s, 🐟 Big Fish, 🔥 best visit. A zero stays on screen (a session with no
+   180s is information) but is dimmed so it never competes with a real number.
+4. **Two quiet columns** for everything genuinely secondary: first-9 average,
+   best visits, checkouts, busts, trebleless %, darts per leg, legs played.
+
+**The aggregates live in `frontend/scoring.js`**, not here:
+`pracAggregate(turns)` and `pracFirst9Average(legTurns)`. Two reasons — both
+scopes (the leg, the session) go through **one** implementation, so a leg figure
+and its session counterpart can never be computed two different ways; and being
+pure they carry committed tests (`backend/test/prac-leg-panel.test.js`), per
+CLAUDE.md's "every new calculation" rule.
+
+- **Checkouts sort descending**, matching Best Visits beside them. They used to
+  render chronologically, so one panel presented two lists of numbers under two
+  different rules — the specific thing the owner reported.
+- **A busted visit scores nothing** but still counts its darts: excluded from
+  best visit / top visits / ton+ / 180s, included in the darts total and in the
+  trebleless denominator (it was still a visit you threw).
+- **`pracFirst9Average()` is leg-scope only.** The turn records carry no leg
+  boundary, so "the first 9 darts of each leg" isn't reconstructable from a flat
+  session list, and averaging the session's own first three visits would be a
+  different number wearing the same name. Returns `null` (rendered "—") for a leg
+  with no darts, never `0.0`.
+
+H2H is unaffected — it keeps `h2hStatsHtml()`, whose `h2hRowsX01()` already leads
+with Leg Avg / Game Avg.
+
 ### Undo — snapshot-based, one level deep
 
 Every call to `enterTurn()` builds a full snapshot (`_snap`) of the acting

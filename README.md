@@ -312,7 +312,7 @@ The scoring screen is optimised for touchscreen entry on a tablet. Everything fi
 - The checkout suggestion updates dart-by-dart as you enter the visit
 
 **Between legs/sets/games:** a summary panel appears before the next unit begins —
-- **Practice:** *This Leg* and *This Session* columns showing darts thrown, checkouts, best visits, busts, and treble-less %
+- **Practice (solo):** the two **three-dart averages** lead — this leg, then the session — followed by every checkout you've hit this session as a row of chips (highest first, best one enlarged), tallies for ton+ visits / 180s / Big Fish / best visit, and two quieter columns: first-9 average, best visits, checkouts, busts and treble-less % for the leg; darts per leg, best visits, legs played, busts and treble-less % for the session. The banner reads "Leg 17 complete" rather than announcing a winner — there's nobody to beat in a solo session.
 - **H2H (leg complete):** each player's leg average, game average, darts thrown this leg, and legs/sets standing
 - **H2H (game over):** each player's game average, total darts thrown, and final sets/legs standing
 

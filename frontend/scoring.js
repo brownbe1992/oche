@@ -108,6 +108,63 @@ function resolveBoardColors(stored){
   return { sector20, even: pair(sector20), odd: pair(other) };
 }
 
+/* ---------------------------------------------------------------------------
+   Solo-practice leg-complete aggregates (Settings-free, pure)
+   ---------------------------------------------------------------------------
+   The X01 leg-complete panel summarises two scopes of the same thing — the leg
+   just thrown and the whole session. These live here rather than in index.html
+   so both scopes go through ONE implementation (a leg figure and its session
+   counterpart can never be computed two different ways) and so they carry
+   committed tests, per CLAUDE.md's "every new calculation" rule.
+
+   A `turn` is the practice turn record enterTurn() pushes:
+     { scored, trebleLess, bust, checkout, checkoutPoints, darts }
+   `scored` is 0 on a bust; `darts` is how many darts that visit actually used.
+   --------------------------------------------------------------------------- */
+
+function pracAggregate(turns){
+  const list = turns || [];
+  const scoring = list.filter(t => !t.bust);
+  // Both number lists on the panel are sorted descending. The checkout list used
+  // to render in chronological order while Best Visits sat beside it sorted,
+  // so one panel presented two lists of numbers under two different rules.
+  const checkouts = list.filter(t => t.checkout && t.checkoutPoints)
+    .map(t => t.checkoutPoints).sort((a, b) => b - a);
+  return {
+    visits:      list.length,
+    darts:       list.reduce((s, t) => s + t.darts, 0),
+    busts:       list.filter(t => t.bust).length,
+    // Trebleless share of ALL visits, busts included — a busted visit was still
+    // a visit you threw, and excluding it would flatter the number.
+    treblelessPct: list.length
+      ? Math.round(list.filter(t => t.trebleLess).length / list.length * 100) : null,
+    checkouts,
+    topVisits:   scoring.map(t => t.scored).sort((a, b) => b - a).slice(0, 5),
+    bestVisit:   scoring.length ? Math.max(...scoring.map(t => t.scored)) : 0,
+    tonPlus:     scoring.filter(t => t.scored >= 100).length,
+    oneEighties: scoring.filter(t => t.scored === 180).length,
+    bigFish:     checkouts.filter(c => c === 170).length,
+  };
+}
+
+// First-9 average: points per three darts across the opening three visits of a
+// leg — the standard measure of how well someone started. Returns null when the
+// leg has no darts yet.
+//
+// Deliberately LEG-scope only. The turn records carry no leg boundary, so "the
+// first 9 darts of each leg" isn't reconstructable from a flat session list, and
+// averaging the session's own first three visits would be a different number
+// wearing the same name.
+//
+// A busted opening visit counts as 0 points over the darts it used, which is how
+// a real first-9 average treats it.
+function pracFirst9Average(legTurns){
+  const first3 = (legTurns || []).slice(0, 3);
+  const darts  = first3.reduce((s, t) => s + t.darts, 0);
+  if(!darts) return null;
+  return first3.reduce((s, t) => s + t.scored, 0) / darts * 3;
+}
+
 function dartValue(sector, mult){
   if(sector === 0) return 0;
   if(sector === 25) return mult === 2 ? 50 : 25;   // bull: 25 or double-bull 50, no treble
@@ -2351,6 +2408,7 @@ function aroundTheHornProgress(visitLogs){
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
+    pracAggregate, pracFirst9Average,
     BOARD_SCHEMES, BOARD_SCHEME_IDS, BOARD_SECTOR20_SCHEME_DEFAULT,
     normaliseSchemeId, hexToRgb, relativeLuminance, contrastRatio, boardLabelColor,
     resolveBoardColors, BOARD_LABEL_LIGHT, BOARD_LABEL_DARK,
