@@ -18,29 +18,50 @@
    ============================================================================= */
 
 /* ---------------------------------------------------------------------------
-   Dartboard colour scheme (admin-configurable, Settings -> Board colours)
+   Dartboard colour schemes (admin-configurable, Settings -> Board colours)
    ---------------------------------------------------------------------------
-   A real board alternates two pairs around its 20 sectors: sector 20 (index 0
-   of DB_SECTORS) is the "A" pair — a light tan single with red double/treble —
-   and its neighbours are the "B" pair, a near-black single with green rings.
-   The admin picks A and the B pair is DERIVED, which is what makes this one
-   choice rather than four: you decide what 20 looks like and the board follows.
-   The derived values are shown in Settings and can be overridden when the guess
-   is wrong for an unusual palette.
+   A dartboard has exactly TWO zone colour schemes, and each is a PAIR — the
+   single bed and its double/treble ring always go together:
+
+     "Red & black"   black single (#1c1e1a) + red rings   (#c8102e)
+     "Green & white" white single (#cbbf96) + green rings (#17752f)
+
+   Every sector uses one scheme or the other, strictly alternating, so the only
+   real choice is WHICH SCHEME SECTOR 20 GETS. The other scheme then takes every
+   alternate sector automatically. That is one decision, not four colours.
+
+   Note what this fixes. buildDartboard() used to pick the single and the ring
+   from two independent lists — `i%2 ? tan : black` for the bed and
+   `i%2 ? red : green` for the ring — which paired the TAN single with the RED
+   ring. That is not either scheme: on a real board a red ring always sits on a
+   black bed. The singles were effectively offset by one sector from the rings.
+   Modelling a scheme as a pair makes that mismatch unrepresentable rather than
+   merely fixed.
+
+   The colours of each scheme stay editable (an admin who wants a blue/gold board
+   should have one), but they are edited AS PAIRS, so no combination of settings
+   can put a ring on the wrong bed.
 
    These live here rather than in index.html for two reasons: they are pure
-   calculations (so they get committed tests, per CLAUDE.md), and server.js
-   validates the stored colours with the SAME normaliseBoardColor() the client
-   uses, so the accepted format cannot drift between the two ends.
+   (so they carry committed tests, per CLAUDE.md), and server.js validates stored
+   values with the SAME normaliseBoardColor() the client uses, so the accepted
+   format cannot drift between the two ends.
    --------------------------------------------------------------------------- */
 
-// The classic board, and the fallback for any stored value that fails validation.
-const BOARD_COLOR_DEFAULTS = {
-  singleA: '#cbbf96',   // sector 20's single — tan
-  ringA:   '#c8102e',   // sector 20's double + treble — red
-  singleB: '#1c1e1a',   // the alternating sector's single — near-black
-  ringB:   '#1b8a3a',   // the alternating sector's double + treble — green
+const BOARD_SCHEMES = {
+  red_black:   { label: 'Red & black',   single: '#1c1e1a', ring: '#c8102e' },
+  // The green is a shade darker than the #1b8a3a this board used to draw. That
+  // was never a problem while the inner bull was always red, but the inner bull
+  // takes SECTOR 20's ring colour, so choosing "Green & white" for 20 puts the
+  // 12px "Bull" label on green — and no label colour cleared 4.5:1 there (the
+  // best of cream/near-black managed 4.10:1). Darkening to #17752f takes that to
+  // 4.70:1 AND improves the ring against its own white bed (2.41:1 -> 3.16:1),
+  // so it is a strict improvement on both counts rather than a trade.
+  green_white: { label: 'Green & white', single: '#cbbf96', ring: '#17752f' },
 };
+const BOARD_SCHEME_IDS = ['red_black', 'green_white'];
+// A real board's 20 is a black bed with red doubles and trebles.
+const BOARD_SECTOR20_SCHEME_DEFAULT = 'red_black';
 
 // Strict `#rrggbb`, lowercased. Anything else returns null.
 //
@@ -55,73 +76,20 @@ const BOARD_COLOR_DEFAULTS = {
 function normaliseBoardColor(v){
   return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : null;
 }
+function normaliseSchemeId(v){
+  return BOARD_SCHEME_IDS.includes(v) ? v : null;
+}
 
 function hexToRgb(hex){
-  const h = normaliseBoardColor(hex) || BOARD_COLOR_DEFAULTS.singleA;
+  const h = normaliseBoardColor(hex) || '#000000';
   return [1,3,5].map(i => parseInt(h.slice(i, i+2), 16));
-}
-function rgbToHex(r, g, b){
-  const c = n => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2,'0');
-  return '#' + c(r) + c(g) + c(b);
-}
-function hexToHsl(hex){
-  const [r,g,b] = hexToRgb(hex).map(v => v/255);
-  const max = Math.max(r,g,b), min = Math.min(r,g,b), d = max-min;
-  const l = (max+min)/2;
-  const s = d === 0 ? 0 : d/(1 - Math.abs(2*l - 1));
-  let h = 0;
-  if(d !== 0){
-    if(max === r)      h = 60*(((g-b)/d) % 6);
-    else if(max === g) h = 60*(((b-r)/d) + 2);
-    else               h = 60*(((r-g)/d) + 4);
-  }
-  return { h: (h + 360) % 360, s, l };
-}
-function hslToHex({h, s, l}){
-  const c = (1 - Math.abs(2*l - 1)) * s;
-  const x = c * (1 - Math.abs(((h/60) % 2) - 1));
-  const m = l - c/2;
-  const seg = Math.floor(((h % 360) + 360) % 360 / 60);
-  const [r,g,b] = [[c,x,0],[x,c,0],[0,c,x],[0,x,c],[x,0,c],[c,0,x]][seg];
-  return rgbToHex((r+m)*255, (g+m)*255, (b+m)*255);
-}
-
-// The alternating sector's SINGLE. A board's two singles are a light/dark pair,
-// so this flips to the opposite end of the lightness scale while keeping the
-// chosen hue — at 11% lightness the hue is imperceptible anyway, which is why
-// the classic near-black comes out right regardless of the tan's exact hue.
-const ALT_SINGLE_DARK = { s: 0.07, l: 0.11 };
-const ALT_SINGLE_LIGHT = { s: 0.30, l: 0.80 };
-function deriveAltSingle(hex){
-  const { h } = hexToHsl(hex);
-  const dark  = hslToHex({ h, s: ALT_SINGLE_DARK.s,  l: ALT_SINGLE_DARK.l });
-  const light = hslToHex({ h, s: ALT_SINGLE_LIGHT.s, l: ALT_SINGLE_LIGHT.l });
-  // Whichever direction actually separates further — NOT `l >= 0.5 ? dark : light`.
-  // A mid-lightness pick sits nearly equidistant from both ends, and the naive
-  // threshold sent l=0.35 to the light target for only 2.92:1, which is two
-  // adjacent sectors you can't reliably tell apart. Choosing by measured
-  // contrast holds the worst case across the whole hue/lightness space at
-  // 3.21:1 — above the 3:1 floor WCAG sets for non-text UI components. The
-  // committed sweep in board-colors.test.js is what found the hole and is what
-  // keeps it closed.
-  return contrastRatio(hex, dark) >= contrastRatio(hex, light) ? dark : light;
-}
-
-// The alternating sector's DOUBLE/TREBLE ring. A hue rotation, not a lightness
-// flip: both rings have to stay vivid enough to read as scoring bands. 150 deg
-// (rather than a straight 180 deg complement) is what turns the classic red into
-// the classic green — see the committed test that pins exactly that.
-const ALT_RING_HUE_SHIFT = 150;
-function deriveAltRing(hex){
-  const { h, s, l } = hexToHsl(hex);
-  return hslToHex({ h: h + ALT_RING_HUE_SHIFT, s: s * 0.8, l: l * 0.78 });
 }
 
 // WCAG relative luminance, and the label colour to sit on a given fill.
 // buildDartboard() prints "Bull" on the inner-bull circle, which is whatever the
-// A-ring colour happens to be — so the label can't be a fixed cream any more.
-// This replaces the previous hardcoded colorblind-mode special case with the
-// general rule that case was one instance of.
+// sector-20 scheme's ring colour happens to be — so the label can't be a fixed
+// cream any more. This replaces the previous hardcoded colorblind-mode special
+// case with the general rule that case was one instance of.
 function relativeLuminance(hex){
   const [r,g,b] = hexToRgb(hex).map(v => {
     const c = v/255;
@@ -140,31 +108,36 @@ function boardLabelColor(bgHex){
     ? BOARD_LABEL_LIGHT : BOARD_LABEL_DARK;
 }
 
-// The full four-colour scheme from whatever is stored. Every field is validated
-// independently, so one bad value falls back on its own rather than discarding
-// the admin's other three choices. A missing B value is derived from its A
-// partner — that is the "set 20 and the rest follows" behaviour, and it means a
-// household that never overrides the derived pair keeps following A if they
-// later change it.
+// The board's full colour state from whatever is stored.
 //
-// The one exception: while A is still the classic colour, B is the classic
-// colour too, EXACTLY, rather than the derived approximation of it. The
-// derivation reproduces the classic board to within a 1.003/1.053 contrast ratio
-// — visually identical, but not byte-identical, and an install that never opens
-// this setting must render exactly the board it rendered before the feature
-// existed. Deriving starts the moment the admin actually changes something.
+// Returns both halves of the answer, because two different callers need
+// different shapes and neither should have to re-derive the other's:
+//   `schemes`  — the two editable pairs, for the Settings form.
+//   `sector20` — which scheme id sector 20 uses.
+//   `even`/`odd` — the resolved pair per sector parity, which is all
+//                  buildDartboard() wants (DB_SECTORS[0] is 20, so `even` IS
+//                  sector 20's scheme). No caller needs to know the alternation
+//                  rule to draw a board.
+//
+// Every colour is validated independently, so one bad value falls back on its
+// own rather than discarding the admin's other choices.
 function resolveBoardColors(stored){
   const src = stored || {};
-  const singleA = normaliseBoardColor(src.singleA) || BOARD_COLOR_DEFAULTS.singleA;
-  const ringA   = normaliseBoardColor(src.ringA)   || BOARD_COLOR_DEFAULTS.ringA;
-  const altSingle = singleA === BOARD_COLOR_DEFAULTS.singleA
-    ? BOARD_COLOR_DEFAULTS.singleB : deriveAltSingle(singleA);
-  const altRing = ringA === BOARD_COLOR_DEFAULTS.ringA
-    ? BOARD_COLOR_DEFAULTS.ringB : deriveAltRing(ringA);
+  const schemes = {};
+  for (const id of BOARD_SCHEME_IDS) {
+    schemes[id] = {
+      label: BOARD_SCHEMES[id].label,
+      single: normaliseBoardColor(src[`${id}_single`]) || BOARD_SCHEMES[id].single,
+      ring:   normaliseBoardColor(src[`${id}_ring`])   || BOARD_SCHEMES[id].ring,
+    };
+  }
+  const sector20 = normaliseSchemeId(src.sector20) || BOARD_SECTOR20_SCHEME_DEFAULT;
+  const other = BOARD_SCHEME_IDS.find(id => id !== sector20);
   return {
-    singleA, ringA,
-    singleB: normaliseBoardColor(src.singleB) || altSingle,
-    ringB:   normaliseBoardColor(src.ringB)   || altRing,
+    sector20,
+    schemes,
+    even: { single: schemes[sector20].single, ring: schemes[sector20].ring },
+    odd:  { single: schemes[other].single,    ring: schemes[other].ring },
   };
 }
 
@@ -2386,8 +2359,9 @@ function aroundTheHornProgress(visitLogs){
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
-    BOARD_COLOR_DEFAULTS, normaliseBoardColor, hexToRgb, rgbToHex, hexToHsl, hslToHex,
-    deriveAltSingle, deriveAltRing, relativeLuminance, contrastRatio, boardLabelColor,
+    BOARD_SCHEMES, BOARD_SCHEME_IDS, BOARD_SECTOR20_SCHEME_DEFAULT,
+    normaliseBoardColor, normaliseSchemeId, hexToRgb,
+    relativeLuminance, contrastRatio, boardLabelColor,
     resolveBoardColors, BOARD_LABEL_LIGHT, BOARD_LABEL_DARK,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS, CRICKET_ALL_NUMBERS,
     evaluateVisitBaseball, baseballInningTarget, isBaseballCycle, parseSqliteTimestamp,

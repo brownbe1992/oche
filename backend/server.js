@@ -210,15 +210,20 @@ const db = require('./db.js');
 const auth = require('./auth.js');
 const netguard = require('./netguard.js');
 const backupLib = require('./backup-lib.js');
-const { normaliseBoardColor } = require('../frontend/scoring.js');
+const { normaliseBoardColor, normaliseSchemeId, BOARD_SCHEME_IDS } = require('../frontend/scoring.js');
 
-// Settings -> Board colours. Stored per field so one bad value can never discard
-// the admin's other three choices, and validated with the SAME
-// normaliseBoardColor() the client uses so the accepted format can't drift
-// between the two ends. These reach a browser as an SVG `fill="..."` attribute,
-// which is why the format is enforced here on write, again in db.getBoardColors()
-// on read, and again at the sink in buildDartboard().
-const BOARD_COLOR_KEYS = ['board_single_a','board_ring_a','board_single_b','board_ring_b'];
+// Settings -> Board colours. A dartboard has two zone schemes, each a
+// (single bed, double/treble ring) PAIR; the only structural choice is which one
+// sector 20 gets. The pair colours stay editable, and are stored per field so one
+// bad value can never discard the admin's other choices.
+//
+// Validated with the SAME normaliseBoardColor()/normaliseSchemeId() the client
+// uses, so the accepted format can't drift between the two ends. The colours
+// reach a browser as an SVG `fill="..."` attribute, which is why the format is
+// enforced here on write, again in db.getBoardColors() on read, and again at the
+// sink in buildDartboard().
+const BOARD_COLOR_KEYS = BOARD_SCHEME_IDS.flatMap(id => [`board_${id}_single`, `board_${id}_ring`]);
+const BOARD_SCHEME_KEY = 'board_sector20_scheme';
 
 const PORT = process.env.PORT || 8046;
 // Every state-changing (write) API endpoint requires a logged-in admin session by
@@ -968,7 +973,7 @@ const server = http.createServer(async (req, res) => {
         'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold',
         'admin_lockout_grace','admin_lockout_base_seconds','admin_lockout_max_seconds','scoreboard_layout',
         'default_scoring_input','card_tagline','heatmap_style','heatmap_number_style',
-        ...BOARD_COLOR_KEYS, ...boolKeys];
+        ...BOARD_COLOR_KEYS, BOARD_SCHEME_KEY, ...boolKeys];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
@@ -991,16 +996,17 @@ const server = http.createServer(async (req, res) => {
       if ('card_tagline' in safe && safe.card_tagline.length > 140) {
         return send(res, 400, { error: 'card_tagline must be 140 characters or fewer' });
       }
-      // An empty string is how the client CLEARS an override (the derived-from-A
-      // value takes over again on read), so it is allowed through; anything else
-      // must be an exact #rrggbb. Rejecting rather than silently coercing, so an
-      // admin whose picker sent something unexpected is told, not quietly ignored.
+      // Rejecting rather than silently coercing, so an admin whose picker sent
+      // something unexpected is told, not quietly ignored — and so a payload can
+      // never be half-applied with one colour silently dropped.
       for (const k of BOARD_COLOR_KEYS) {
         if (!(k in safe)) continue;
-        if (safe[k] === '') continue;
         const ok = normaliseBoardColor(safe[k]);
         if (!ok) return send(res, 400, { error: `${k} must be a #rrggbb colour` });
         safe[k] = ok;
+      }
+      if (BOARD_SCHEME_KEY in safe && !normaliseSchemeId(safe[BOARD_SCHEME_KEY])) {
+        return send(res, 400, { error: `${BOARD_SCHEME_KEY} must be one of: ${BOARD_SCHEME_IDS.join(', ')}` });
       }
       // SEC-9: ha_url and the webhook-ID fields were previously stored unbounded.
       if ('ha_url' in safe && String(safe.ha_url).length > 2048) {

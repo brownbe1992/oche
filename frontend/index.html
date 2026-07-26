@@ -576,11 +576,32 @@
   .hidden{display:none!important}
 
   /* ---- Settings -> Board colours ---- */
+  /* The scheme choice is the primary control, so it reads as two real options
+     you pick between, each showing the pair it stands for — not a dropdown of
+     words. Radio inputs underneath (visually hidden, not display:none, so they
+     stay focusable and keyboard-operable as a real radiogroup). */
+  .bc-schemes{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .bc-scheme{position:relative;flex:1;min-width:132px;display:flex;align-items:center;gap:10px;
+    background:var(--surface);border:1px solid var(--wire);border-radius:11px;
+    padding:10px 12px;cursor:pointer}
+  .bc-scheme input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  .bc-scheme:hover{border-color:var(--gold)}
+  .bc-scheme:has(input:checked){border-color:var(--gold);background:var(--surface-2)}
+  .bc-scheme:has(input:focus-visible){outline:2px solid var(--gold);outline-offset:2px}
+  /* The pair, drawn as a bed with its ring sitting on it — the relationship the
+     whole feature is about. Decorative; the label text carries the meaning. */
+  .bc-chip{flex:none;width:34px;height:34px;border-radius:50%;border:2px solid var(--wire)}
+  .bc-scheme-name{font-size:13px;font-weight:700;line-height:1.25}
+  .bc-scheme-sub{font-size:11px;color:var(--muted)}
+
+  .bc-advanced{margin-bottom:12px}
+  .bc-advanced > summary{cursor:pointer;font-size:12px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+  .bc-advanced > summary:hover{color:var(--ink)}
   .bc-grid{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
-  .bc-col{display:flex;flex-direction:column;gap:2px;min-width:150px}
+  .bc-col{display:flex;flex-direction:column;gap:2px;min-width:150px;flex:1}
   .bc-col-head{font-size:11px;text-transform:uppercase;letter-spacing:.07em;
     color:var(--muted);font-weight:600;margin-bottom:6px}
-  .bc-col-head span{text-transform:none;letter-spacing:0;font-weight:400}
   /* A native <input type="color"> so the platform's own picker (and its
      accessibility behaviour) is what opens — this is not a place to hand-roll a
      colour wheel. The UA chrome around the swatch is stripped so it reads as a
@@ -591,7 +612,7 @@
   .bc-swatch::-webkit-color-swatch{border:none;border-radius:6px}
   .bc-swatch::-moz-color-swatch{border:none;border-radius:6px}
   .bc-swatch:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
-  .bc-preview{flex:1;min-width:170px;max-width:240px;aspect-ratio:1;
+  .bc-preview{width:100%;max-width:240px;aspect-ratio:1;margin:0 auto;
     background:var(--board);border:1px solid var(--wire);border-radius:12px;padding:6px}
   .bc-preview svg{width:100%;height:100%;display:block}
 
@@ -2126,36 +2147,29 @@
         </div>
         <div id="board-colors-body" hidden>
           <p class="settings-intro">
-            Pick what sector 20 looks like and the rest of the board follows: every
-            other sector alternates to the second pair below, worked out from your
-            choice. Change either derived colour if the automatic pick isn't right.
+            A dartboard has two zone schemes, and each one is a pair — the single
+            bed and its double/treble ring always go together. Pick which scheme
+            sector 20 uses; every other sector alternates to the other one.
           </p>
-          <div class="bc-grid">
-            <div class="bc-col">
-              <div class="bc-col-head">Sector 20</div>
-              <label class="field" for="board-single-a">Single</label>
-              <input type="color" class="bc-swatch" id="board-single-a" oninput="onBoardColorInput('a')">
-              <label class="field" for="board-ring-a">Double &amp; treble</label>
-              <input type="color" class="bc-swatch" id="board-ring-a" oninput="onBoardColorInput('a')">
+          <label class="field">Sector 20 uses</label>
+          <div class="bc-schemes" id="board-scheme-choice" role="radiogroup" aria-label="Colour scheme for sector 20"></div>
+          <details class="bc-advanced">
+            <summary>Change what each scheme looks like</summary>
+            <p class="settings-intro" style="margin-top:10px">
+              Edited as pairs, so a ring can never end up on the wrong bed.
+            </p>
+            <div class="bc-grid" id="board-scheme-editors"></div>
+            <div class="btn-row" style="margin-top:10px">
+              <button class="btn btn-ghost" type="button" onclick="resetBoardColors()">Reset to the classic colours</button>
             </div>
-            <div class="bc-col">
-              <div class="bc-col-head">Every other sector <span id="board-derived-note">(worked out for you)</span></div>
-              <label class="field" for="board-single-b">Single</label>
-              <input type="color" class="bc-swatch" id="board-single-b" oninput="onBoardColorInput('b')">
-              <label class="field" for="board-ring-b">Double &amp; treble</label>
-              <input type="color" class="bc-swatch" id="board-ring-b" oninput="onBoardColorInput('b')">
-            </div>
-            <div class="bc-preview" id="board-color-preview" aria-hidden="true"></div>
-          </div>
+          </details>
+          <div class="bc-preview" id="board-color-preview" aria-hidden="true"></div>
           <p class="settings-intro" id="board-colors-cb-note" hidden>
             Colorblind mode is on, so the doubles and trebles render in its orange
             and blue on the real board — an accessibility setting isn't overridden
-            by a colour choice. The singles below still apply.
+            by a colour choice. The single beds still apply, and the preview above
+            shows exactly what will be drawn.
           </p>
-          <div class="btn-row" style="margin-top:10px">
-            <button class="btn btn-ghost" type="button" onclick="resetBoardColors()">Reset to the classic board</button>
-            <button class="btn btn-ghost" type="button" onclick="reDeriveBoardColors()">Re-derive from sector 20</button>
-          </div>
         </div>
       </div>
 
@@ -2956,10 +2970,14 @@ function buildDartboard(){
   // where the pickers are. The SINGLES are not remapped by colorblind mode (they
   // never were: the light/dark pair is a lightness contrast, not a hue one), so a
   // custom single applies in both modes.
-  const ringA = colorblindMode ? '#e2711d' : boardColors.ringA;  // orange substitute for red
-  const ringB = colorblindMode ? '#2f8fd9' : boardColors.ringB;  // blue substitute for green
-  const singleA = boardColors.singleA;
-  const singleB = boardColors.singleB;
+  // `even` is sector 20's scheme (DB_SECTORS[0] is 20), `odd` the other one.
+  // Each is a (single bed, double/treble ring) PAIR — which is the point: the
+  // previous code picked the bed and the ring from two independent lists and so
+  // paired a TAN bed with a RED ring, a combination no real board has.
+  const ringA = colorblindMode ? '#e2711d' : boardColors.even.ring;  // orange substitute for red
+  const ringB = colorblindMode ? '#2f8fd9' : boardColors.odd.ring;   // blue substitute for green
+  const singleA = boardColors.even.single;
+  const singleB = boardColors.odd.single;
   // Miss-ring fills: deliberately muted/neutral (not tied to ringA/ringB) so they read
   // as "off the scoring board" at a glance — near stays closer in tone to the board's
   // own dark background, far is visibly more washed-out/distant.
@@ -2967,7 +2985,7 @@ function buildDartboard(){
   const missFarFill = '#221f1a';
   DB_SECTORS.forEach((num,i)=>{
     const s0=i*DEG-DEG/2, e0=s0+DEG;
-    const sc = i%2===0 ? singleA : singleB;  // sector 20's pair, then the alternating one
+    const sc = i%2===0 ? singleA : singleB;  // sector 20's scheme, then the alternating one
     const rc = i%2===0 ? ringA : ringB;  // alternating ring color per sector
     const sw = 'stroke="#151613" stroke-width="0.5"';
     s += `<path class="dz" d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${sc}" ${sw} ${oc(num,1,'inner')}/>`;
@@ -5325,15 +5343,6 @@ const SETTINGS_FIELDS = [
   { key:'voice_bigfish',        id:'voice-bigfish',         kind:'checkbox-optout' },
   { key:'voice_match_progress', id:'voice-match-progress',  kind:'checkbox-optout' },
   { key:'card_tagline', id:'card-tagline', kind:'text', default: DEFAULT_CARD_TAGLINE },
-  // Board colours. The two B fields save '' when they are NOT overridden, which
-  // is how the server records "keep following sector 20" — see boardColorOverride
-  // and resolveBoardColors(). `kind:'color'` exists so the generic loader doesn't
-  // try to put an empty string into an <input type="color">, which silently
-  // becomes #000000 and would look like a deliberate black board.
-  { key:'board_single_a', id:'board-single-a', kind:'color', default: BOARD_COLOR_DEFAULTS.singleA },
-  { key:'board_ring_a',   id:'board-ring-a',   kind:'color', default: BOARD_COLOR_DEFAULTS.ringA },
-  { key:'board_single_b', id:'board-single-b', kind:'color', optional:'singleB' },
-  { key:'board_ring_b',   id:'board-ring-b',   kind:'color', optional:'ringB' },
   { key:'heatmap_style',        id:'heatmap-style',        kind:'allowed', allowed:['classic','scorched'], default:'classic' },
   { key:'heatmap_number_style', id:'heatmap-number-style', kind:'allowed', allowed:['original','molten_seam','chalk_ledger'], default:'original' },
   { key:'require_admin_auth',   id:'require-admin-auth',   kind:'checkbox' },
@@ -5350,19 +5359,6 @@ function loadSettingsField(cfg, f){
   // generic `cfg[f.key] === '1'` check below, which would show unchecked/off any
   // time the on-by-default fallback hadn't yet been explicitly saved.
   if(f.key === 'require_admin_auth'){ el.checked = !!Auth.requireAuth; return; }
-  // An <input type="color"> cannot hold "unset": an empty value silently becomes
-  // #000000. So a B field with nothing stored shows the DERIVED colour (and is
-  // remembered as not-overridden), rather than a black swatch that looks chosen.
-  if(f.kind === 'color'){
-    const stored = normaliseBoardColor(cfg[f.key]);
-    if(f.optional){
-      boardColorOverride[f.optional] = !!stored;
-      el.value = stored || resolveBoardColors(settingsBoardColorsFromForm(cfg))[f.optional];
-    } else {
-      el.value = stored || f.default;
-    }
-    return;
-  }
   if(f.kind === 'checkbox') el.checked = cfg[f.key] === '1';
   else if(f.kind === 'checkbox-optout') el.checked = cfg[f.key] !== '0';
   else if(f.kind === 'allowed') el.value = f.allowed.includes(cfg[f.key]) ? cfg[f.key] : f.default;
@@ -5375,15 +5371,7 @@ function loadSettingsField(cfg, f){
 }
 function saveSettingsField(payload, f){
   const el = document.getElementById(f.id);
-  if(f.kind === 'color'){
-    const raw = normaliseBoardColor((el||{}).value);
-    // A derived B colour is saved as '' rather than as its current hex. Storing
-    // the hex would freeze it: changing sector 20 later would no longer move the
-    // rest of the board, which is the entire point of the feature.
-    if(f.optional && !boardColorOverride[f.optional]){ payload[f.key] = ''; return; }
-    payload[f.key] = raw || f.default || '';
-    return;
-  }
+
   if(f.kind === 'checkbox' || f.kind === 'checkbox-optout'){ payload[f.key] = (el && el.checked) ? '1' : '0'; return; }
   const raw = (el||{}).value || '';
   if(f.kind === 'number'){ payload[f.key] = Number(raw) || f.default; return; }
@@ -5437,9 +5425,11 @@ async function renderSettings(){
     // off), which is exactly what SETTINGS_FIELDS' 'checkbox-optout' kind reads.
     toggleVoiceSubOptions();
     toggleHeatmapNumberStyleOption();
-    // After loadSettingsField() has set boardColorOverride from what's stored —
-    // this fills in any derived swatch, the note, and the preview.
-    syncBoardColorInputs();
+    // Board colours are built from BOARD_SCHEMES rather than declared field by
+    // field: the unit an admin edits is a (bed, ring) PAIR plus one "which
+    // scheme does 20 use" choice, which the flat SETTINGS_FIELDS table can't
+    // express without letting the two halves of a pair be set independently.
+    renderBoardColorControls(cfg);
     refreshSettingsTileStates();
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
@@ -5600,9 +5590,11 @@ const SETTINGS_TILE_STATES = [
     } },
   { id:'tile-state-board-colors', compute: () => {
       const c = settingsBoardColors();
-      const d = BOARD_COLOR_DEFAULTS;
-      return (c.singleA === d.singleA && c.ringA === d.ringA
-           && c.singleB === d.singleB && c.ringB === d.ringB) ? 'Classic' : 'Custom';
+      const stock = BOARD_SCHEME_IDS.every(id =>
+        c.schemes[id].single === BOARD_SCHEMES[id].single && c.schemes[id].ring === BOARD_SCHEMES[id].ring);
+      // The summary answers "what does 20 look like", because that is the choice
+      // this tile is actually about; a recoloured scheme is the footnote.
+      return c.schemes[c.sector20].label + (stock ? '' : ', recoloured');
     } },
   { id:'tile-state-heatmap', compute: () => (document.getElementById('heatmap-style')||{}).value === 'scorched' ? 'Scorched' : 'Classic' },
   { id:'tile-state-smart-home', compute: () => (document.getElementById('ha-url')||{}).value ? 'URL set' : 'Not set' },
@@ -5952,71 +5944,111 @@ function toggleVoiceSubOptions(){
   sub.querySelectorAll('input[type=checkbox]').forEach(el=>el.disabled = !on);
 }
 /* ---------- Settings -> Board colours ----------
-   Sector 20's pair is chosen; the alternating pair is derived from it unless the
-   admin has explicitly overridden one. This flag is what distinguishes the two —
-   a derived value is stored as '' so it keeps following sector 20, an overridden
-   one is stored as its hex. Reset whenever the form is loaded (loadSettingsField)
-   or the admin asks to re-derive. */
-let boardColorOverride = { singleB:false, ringB:false };
+   A dartboard has two zone schemes, each a (single bed, double/treble ring)
+   PAIR. The only structural choice is which scheme sector 20 gets; the other
+   takes every alternate sector. The pair colours stay editable, but always as
+   pairs, so no combination of settings can put a ring on the wrong bed.
 
-// The A-pair as currently entered, for feeding resolveBoardColors(). Reads the
-// live inputs when they exist (so the preview tracks a drag) and falls back to a
-// settings payload when called during load, before the inputs hold anything.
-function settingsBoardColorsFromForm(cfg){
-  const val = (id, key) => {
-    const el = document.getElementById(id);
-    return normaliseBoardColor(el && el.value) || (cfg ? cfg[key] : null);
-  };
-  return { singleA: val('board-single-a','board_single_a'), ringA: val('board-ring-a','board_ring_a') };
+   The form is BUILT from BOARD_SCHEMES rather than hand-written twice — a
+   third scheme (or a rename) then needs no new markup, the same
+   derive-from-the-registry discipline items 39/41/46 applied elsewhere. */
+
+// Which scheme sector 20 currently has, in the form. Read straight off the
+// radios so there is no second copy of the answer to fall out of sync.
+function settingsSector20Scheme(){
+  const checked = document.querySelector('#board-scheme-choice input:checked');
+  return (checked && normaliseSchemeId(checked.value)) || BOARD_SECTOR20_SCHEME_DEFAULT;
 }
 
-// The four colours the board would render with right now, given the form state.
+// The board's full colour state as the form currently describes it.
 function settingsBoardColors(){
-  const base = settingsBoardColorsFromForm(null);
-  return resolveBoardColors({
-    ...base,
-    singleB: boardColorOverride.singleB ? (document.getElementById('board-single-b')||{}).value : null,
-    ringB:   boardColorOverride.ringB   ? (document.getElementById('board-ring-b')||{}).value   : null,
-  });
+  const stored = { sector20: settingsSector20Scheme() };
+  for(const id of BOARD_SCHEME_IDS){
+    const single = document.getElementById(`board-${id}-single`);
+    const ring   = document.getElementById(`board-${id}-ring`);
+    if(single) stored[`${id}_single`] = single.value;
+    if(ring)   stored[`${id}_ring`]   = ring.value;
+  }
+  return resolveBoardColors(stored);
 }
 
-// `which` is 'a' (sector 20 changed -> re-derive any non-overridden B) or 'b'
-// (the admin edited a derived swatch, which promotes it to an override).
-function onBoardColorInput(which){
-  if(which === 'b'){
-    boardColorOverride.singleB = true;
-    boardColorOverride.ringB = true;
+// Builds the scheme radios and the pair editors once, then keeps them in sync.
+// `cfg` is the settings payload on first load; omitted on later refreshes.
+function renderBoardColorControls(cfg){
+  const choice = document.getElementById('board-scheme-choice');
+  const editors = document.getElementById('board-scheme-editors');
+  if(!choice || !editors) return;
+
+  const stored = {};
+  if(cfg){
+    stored.sector20 = cfg.board_sector20_scheme;
+    for(const id of BOARD_SCHEME_IDS){
+      stored[`${id}_single`] = cfg[`board_${id}_single`];
+      stored[`${id}_ring`]   = cfg[`board_${id}_ring`];
+    }
+  }
+  const c = cfg ? resolveBoardColors(stored) : settingsBoardColors();
+
+  if(!choice.children.length){
+    choice.innerHTML = BOARD_SCHEME_IDS.map(id => `
+      <label class="bc-scheme">
+        <input type="radio" name="board-sector20-scheme" value="${id}" onchange="syncBoardColorInputs()">
+        <span class="bc-chip" id="board-chip-${id}" aria-hidden="true"></span>
+        <span>
+          <span class="bc-scheme-name">${escapeHtml(c.schemes[id].label)}</span><br>
+          <span class="bc-scheme-sub">bed &amp; ring</span>
+        </span>
+      </label>`).join('');
+    editors.innerHTML = BOARD_SCHEME_IDS.map(id => `
+      <div class="bc-col">
+        <div class="bc-col-head">${escapeHtml(c.schemes[id].label)}</div>
+        <label class="field" for="board-${id}-single">Single bed</label>
+        <input type="color" class="bc-swatch" id="board-${id}-single" oninput="syncBoardColorInputs()">
+        <label class="field" for="board-${id}-ring">Double &amp; treble</label>
+        <input type="color" class="bc-swatch" id="board-${id}-ring" oninput="syncBoardColorInputs()">
+      </div>`).join('');
+  }
+
+  const radio = choice.querySelector(`input[value="${c.sector20}"]`);
+  if(radio) radio.checked = true;
+  for(const id of BOARD_SCHEME_IDS){
+    const single = document.getElementById(`board-${id}-single`);
+    const ring   = document.getElementById(`board-${id}-ring`);
+    if(single) single.value = c.schemes[id].single;
+    if(ring)   ring.value   = c.schemes[id].ring;
   }
   syncBoardColorInputs();
 }
+
 function syncBoardColorInputs(){
   const c = settingsBoardColors();
-  const set = (id, v) => { const el = document.getElementById(id); if(el && el.value !== v) el.value = v; };
-  if(!boardColorOverride.singleB) set('board-single-b', c.singleB);
-  if(!boardColorOverride.ringB)   set('board-ring-b', c.ringB);
-  const note = document.getElementById('board-derived-note');
-  if(note) note.textContent = (boardColorOverride.singleB || boardColorOverride.ringB)
-    ? '(set by you)' : '(worked out for you)';
+  // Each chip shows the PAIR: the bed as the fill, the ring as the border.
+  for(const id of BOARD_SCHEME_IDS){
+    const chip = document.getElementById(`board-chip-${id}`);
+    if(chip){
+      chip.style.background = c.schemes[id].single;
+      chip.style.borderColor = c.schemes[id].ring;
+    }
+  }
   const cbNote = document.getElementById('board-colors-cb-note');
   if(cbNote) cbNote.hidden = !(document.getElementById('colorblind-mode')||{}).checked;
   renderBoardColorPreview();
   refreshSettingsTileStates();
 }
+
 function resetBoardColors(){
-  boardColorOverride = { singleB:false, ringB:false };
-  const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
-  set('board-single-a', BOARD_COLOR_DEFAULTS.singleA);
-  set('board-ring-a', BOARD_COLOR_DEFAULTS.ringA);
-  syncBoardColorInputs();
-}
-function reDeriveBoardColors(){
-  boardColorOverride = { singleB:false, ringB:false };
+  for(const id of BOARD_SCHEME_IDS){
+    const single = document.getElementById(`board-${id}-single`);
+    const ring   = document.getElementById(`board-${id}-ring`);
+    if(single) single.value = BOARD_SCHEMES[id].single;
+    if(ring)   ring.value   = BOARD_SCHEMES[id].ring;
+  }
   syncBoardColorInputs();
 }
 
 // A miniature of the real board: same BOARD_GEOM, same alternation, no hit areas
 // and no numbers (at this size they'd be illegible noise). Deliberately NOT a
-// call into buildDartboard() — that one wires 100 onclick handlers to
+// call into buildDartboard() — that one wires ~100 onclick handlers to
 // throwDartBoard() and would put live scoring controls on the Settings page.
 function renderBoardColorPreview(){
   const host = document.getElementById('board-color-preview');
@@ -6027,14 +6059,14 @@ function renderBoardColorPreview(){
   // so the preview has to show the same thing or it would be promising a board
   // the household will never see.
   const cb = !!(document.getElementById('colorblind-mode')||{}).checked;
-  const ringA = cb ? '#e2711d' : c.ringA;
-  const ringB = cb ? '#2f8fd9' : c.ringB;
+  const ringA = cb ? '#e2711d' : c.even.ring;
+  const ringB = cb ? '#2f8fd9' : c.odd.ring;
   const sw = 'stroke="#151613" stroke-width="0.5"';
   let out = `<svg viewBox="0 0 460 460" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
     <circle cx="${CX-100}" cy="${CY-100}" r="${R.doubleOut+8}" fill="#0d0e0b"/>`;
   DB_SECTORS.forEach((num,i)=>{
     const s0=i*DEG-DEG/2, e0=s0+DEG;
-    const sc = i%2===0 ? c.singleA : c.singleB;
+    const sc = i%2===0 ? c.even.single : c.odd.single;
     const rc = i%2===0 ? ringA : ringB;
     out += `<g transform="translate(-100,-100)">`
       + `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${sc}" ${sw}/>`
@@ -6075,6 +6107,13 @@ function saveSettings(){
 
   const payload = {};
   SETTINGS_FIELDS.forEach(f => saveSettingsField(payload, f));
+  // See renderBoardColorControls() for why these aren't SETTINGS_FIELDS entries.
+  const bc = settingsBoardColors();
+  payload.board_sector20_scheme = bc.sector20;
+  for(const id of BOARD_SCHEME_IDS){
+    payload[`board_${id}_single`] = bc.schemes[id].single;
+    payload[`board_${id}_ring`]   = bc.schemes[id].ring;
+  }
   Backend.send('PUT','/api/settings', payload).then(()=>{
     if(btn){ btn.disabled=false; btn.textContent='Save settings'; }
     cardTagline = (document.getElementById('card-tagline')||{}).value || DEFAULT_CARD_TAGLINE;
@@ -19459,9 +19498,19 @@ function showBackendErrorScreen(){
     Backend.get('/api/settings/ha-webhook-status').then(hw => { haWebhookStatus = { enabled: !!hw.enabled, events: hw.events || {} }; }).catch(()=>{}),
     Backend.get('/api/settings/heatmap-style').then(hs => { heatmapStyle = hs.style === 'scorched' ? 'scorched' : 'classic'; }).catch(()=>{}),
     Backend.get('/api/settings/heatmap-number-style').then(ns => { heatmapNumberStyle = ['molten_seam','chalk_ledger'].includes(ns.style) ? ns.style : 'original'; }).catch(()=>{}),
-    // Re-resolved rather than trusted: the server already validated these, but
-    // the sink is an SVG fill attribute, so this end validates too.
-    Backend.get('/api/settings/board-colors').then(bc => { boardColors = resolveBoardColors(bc); }).catch(()=>{}),
+    // Re-resolved rather than trusted: the server already validated these, but the
+    // sink is an SVG fill attribute, so this end validates too. The response is
+    // already resolved, so it is flattened back to the stored-key shape first.
+    Backend.get('/api/settings/board-colors').then(bc => {
+      const flat = { sector20: bc.sector20 };
+      for(const id of BOARD_SCHEME_IDS){
+        if(bc.schemes && bc.schemes[id]){
+          flat[`${id}_single`] = bc.schemes[id].single;
+          flat[`${id}_ring`]   = bc.schemes[id].ring;
+        }
+      }
+      boardColors = resolveBoardColors(flat);
+    }).catch(()=>{}),
   ]);
   document.body.classList.toggle('colorblind', colorblindMode);
   // Settings tiles (2026-07 modular-dashboard redesign) show a live one-line

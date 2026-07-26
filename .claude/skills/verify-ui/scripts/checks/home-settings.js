@@ -10,13 +10,11 @@
  */
 const L = require('../lib');
 
-// Settings -> Board colours. The whole feature rests on one behaviour that no
-// unit test can see: changing sector 20 has to move the rest of the board, in
-// the form, immediately. The derivation itself is covered by
-// backend/test/board-colors.test.js; this covers the wiring around it — the
-// pickers exist, the derived swatches follow, editing one promotes it to an
-// override that then STOPS following, and the saved scheme actually reaches the
-// SVG the player taps.
+// Settings -> Board colours. A dartboard has two zone schemes, each a
+// (single bed, double/treble ring) PAIR; the choice is which one sector 20 gets.
+// The model is unit-tested in backend/test/board-colors.test.js; this covers the
+// wiring — the radios exist, picking one repaints the preview, and the saved
+// choice actually reaches the SVG the player taps, with the pair intact.
 async function boardColors(rep) {
   await L.withPage(L.LANDSCAPE, async (page, pageErrors) => {
     await page.evaluate(async () => {
@@ -33,86 +31,72 @@ async function boardColors(rep) {
     await page.waitForTimeout(200);
 
     const start = await page.evaluate(() => {
-      const v = id => (document.getElementById(id) || {}).value;
-      return { singleA: v('board-single-a'), ringA: v('board-ring-a'),
-               singleB: v('board-single-b'), ringB: v('board-ring-b'),
+      const checked = document.querySelector('#board-scheme-choice input:checked');
+      return { options: [...document.querySelectorAll('#board-scheme-choice input')].map(i => i.value),
+               chosen: checked && checked.value,
                tile: (document.getElementById('tile-state-board-colors') || {}).textContent };
     });
-    rep.ok('board colours: a fresh household shows the classic four',
-      start.singleA === '#cbbf96' && start.ringA === '#c8102e'
-      && start.singleB === '#1c1e1a' && start.ringB === '#1b8a3a', JSON.stringify(start));
-    rep.ok('board colours: the tile reads Classic before anything is changed',
-      (start.tile || '').trim() === 'Classic', start.tile);
+    rep.ok('board colours: both schemes are offered',
+      start.options.join() === 'red_black,green_white', start.options.join());
+    rep.ok('board colours: a fresh household gets a real board (20 is red & black)',
+      start.chosen === 'red_black', String(start.chosen));
+    rep.ok('board colours: the tile names the scheme sector 20 uses',
+      /Red & black/.test(start.tile || ''), start.tile);
 
-    // Change sector 20 -> both derived swatches must move.
-    const derived = await page.evaluate(() => {
-      document.getElementById('board-single-a').value = '#3060a0';
-      document.getElementById('board-ring-a').value = '#f2c14e';
-      onBoardColorInput('a');
-      const v = id => document.getElementById(id).value;
-      return { singleB: v('board-single-b'), ringB: v('board-ring-b'),
-               tile: document.getElementById('tile-state-board-colors').textContent.trim(),
-               previewFills: [...new Set([...document.querySelectorAll('#board-color-preview path')]
-                 .map(p => p.getAttribute('fill')))].sort() };
+    // Switching the scheme must repaint the preview, both halves together.
+    const before = await page.evaluate(() =>
+      [...document.querySelectorAll('#board-color-preview path')].slice(0, 4).map(p => p.getAttribute('fill')));
+    // Click the LABEL, not the input: the radio is visually hidden (kept
+    // focusable rather than display:none, so the group stays keyboard-operable),
+    // and the swatch chip sits over it. Clicking the label is what a person
+    // actually does, so this is the more faithful check anyway.
+    await page.click('#board-scheme-choice label:has(input[value="green_white"])');
+    await page.waitForTimeout(250);
+    const after = await page.evaluate(() =>
+      [...document.querySelectorAll('#board-color-preview path')].slice(0, 4).map(p => p.getAttribute('fill')));
+    rep.ok('board colours: switching the scheme repaints the preview',
+      before.join() !== after.join(), `${before.join()} -> ${after.join()}`);
+    // Sector 20 is the first sector drawn, so its first two paths are the bed and
+    // the treble ring of whatever scheme it now has.
+    rep.ok('board colours: sector 20 takes the whole pair, bed and ring together',
+      after[0] === '#cbbf96' && after[1] === '#17752f', after.slice(0, 2).join());
+
+    // Recolour a scheme, then confirm the pair stays together when saved.
+    await page.evaluate(() => {
+      document.getElementById('board-red_black-ring').value = '#f2c14e';
+      syncBoardColorInputs();
+      saveSettings();
     });
-    rep.ok('board colours: changing sector 20 moves the derived pair',
-      derived.singleB !== start.singleB && derived.ringB !== start.ringB, JSON.stringify(derived));
-    rep.ok('board colours: the tile flips to Custom', derived.tile === 'Custom', derived.tile);
-    rep.ok('board colours: the preview repaints with exactly the four colours',
-      derived.previewFills.length === 4
-      && derived.previewFills.includes('#3060a0') && derived.previewFills.includes('#f2c14e'),
-      JSON.stringify(derived.previewFills));
-
-    // Editing a derived swatch promotes it to an override, which then stops following.
-    const overridden = await page.evaluate(() => {
-      document.getElementById('board-single-b').value = '#ffcc00';
-      onBoardColorInput('b');
-      document.getElementById('board-single-a').value = '#802020';
-      onBoardColorInput('a');
-      return { singleB: document.getElementById('board-single-b').value,
-               note: document.getElementById('board-derived-note').textContent };
-    });
-    rep.ok('board colours: an overridden swatch stops following sector 20',
-      overridden.singleB === '#ffcc00', overridden.singleB);
-    rep.ok('board colours: the label says the pair is now set by hand',
-      /set by you/.test(overridden.note), overridden.note);
-
-    // Re-derive hands it back.
-    const rederived = await page.evaluate(() => {
-      reDeriveBoardColors();
-      return document.getElementById('board-single-b').value;
-    });
-    rep.ok('board colours: "Re-derive" hands the swatch back to sector 20',
-      rederived !== '#ffcc00', rederived);
-
-    // Save, then confirm the colours reach the real board's SVG.
-    await page.evaluate(() => { resetBoardColors();
-      document.getElementById('board-single-a').value = '#3060a0';
-      document.getElementById('board-ring-a').value = '#f2c14e';
-      onBoardColorInput('a'); saveSettings(); });
     await page.waitForTimeout(1200);
-    await page.evaluate(() => { const m = document.querySelector('.modal-backdrop'); if (m) m.remove(); });
+    const stored = await page.evaluate(() => fetch('/api/settings/board-colors').then(r => r.json()));
+    rep.ok('board colours: the recoloured pair persists intact',
+      stored.schemes.red_black.ring === '#f2c14e' && stored.schemes.red_black.single === '#1c1e1a',
+      JSON.stringify(stored.schemes.red_black));
+    rep.ok('board colours: the scheme choice persists',
+      stored.sector20 === 'green_white', stored.sector20);
 
+    await page.evaluate(() => { const m = document.querySelector('.modal-backdrop'); if (m) m.remove(); });
     await L.startX01(page, { names: [L.uniqueName('BcA'), L.uniqueName('BcB')], startScore: 501 });
     await page.evaluate(() => { dartboardMode = true; applyDartMode(); });
     await page.waitForTimeout(400);
     const board = await page.evaluate(() => {
       const fills = [...document.querySelectorAll('#dart-board-wrap path')].map(p => p.getAttribute('fill'));
       const texts = [...document.querySelectorAll('#dart-board-wrap text')];
-      return { has: fills.includes('#3060a0') && fills.includes('#f2c14e'),
+      return { fills: fills.slice(0, 4),
                // Every fill must be a plain hex literal — the values are
                // interpolated into an SVG attribute, so anything else means the
                // guard chain leaked.
                allSafe: fills.every(f => /^#[0-9a-f]{6}$/i.test(f)),
-               bullLabel: (texts[texts.length - 1] || {}).getAttribute
-                 ? texts[texts.length - 1].getAttribute('fill') : null };
+               bullLabel: texts.length ? texts[texts.length - 1].getAttribute('fill') : null };
     });
-    rep.ok('board colours: the saved scheme reaches the board you actually tap', board.has);
+    rep.ok('board colours: the saved scheme reaches the board you actually tap',
+      board.fills[0] === '#cbbf96' && board.fills[1] === '#17752f', board.fills.join());
     rep.ok('board colours: every fill on the board is a plain hex literal', board.allSafe);
-    // #f2c14e is a light ring, so the "Bull" label must have flipped to the dark
-    // option — the old hardcoded cream would be 1.9:1 on it.
-    rep.ok('board colours: the Bull label flips to stay legible on a light ring',
-      board.bullLabel === '#151613', String(board.bullLabel));
+    // Sector 20 now carries the green ring, so the inner bull is green and the
+    // "Bull" label must be the cream option (4.70:1) rather than the near-black
+    // one it uses on red.
+    rep.ok('board colours: the Bull label follows sector 20\'s ring colour',
+      board.bullLabel === '#efe7d2', String(board.bullLabel));
 
     rep.ok('board-colours: no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
     await rep.captureIfFailed(page, 'board-colors');

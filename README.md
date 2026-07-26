@@ -1105,27 +1105,36 @@ Multi-language support is left to whatever voice/locale the browser already prov
 
 #### Board colours
 
-Change what the interactive [Dartboard](#scoring-a-game) input looks like. You
-set the two colours for **sector 20** — its single, and its double/treble ring —
-and the rest of the board follows: every other sector alternates to a second
-pair worked out from your choice, the same way a real board alternates tan/red
-with black/green.
+A dartboard has two zone schemes, and each one is a **pair** — the single bed and
+its double/treble ring always go together:
 
-- The derived pair is shown next to your own, with a live preview of the whole
-  board. If the automatic pick isn't right for an unusual palette, edit either
-  derived swatch — it then stays put instead of following sector 20.
-- **Re-derive from sector 20** hands an edited swatch back to the automatic rule.
-  **Reset to the classic board** puts all four back to the standard tan/red and
-  black/green.
+| Scheme | Single bed | Double & treble |
+|---|---|---|
+| **Red & black** | black | red |
+| **Green & white** | white | green |
+
+Sectors alternate between the two, so the only thing to choose is **which scheme
+sector 20 uses**. Everything else follows. There's a live preview of the whole
+board as you change it.
+
+- **Change what each scheme looks like** (collapsed by default) recolours the two
+  pairs. They're edited as pairs, so a ring can never end up on the wrong bed.
+  **Reset to the classic colours** puts both back to standard.
 - A change applies immediately, including to a game already in progress.
 - If **Colorblind mode** (under Accessibility) is on, the doubles and trebles
   still render in its orange and blue — an accessibility setting isn't overridden
-  by a colour choice. Your chosen singles apply in both cases, and the preview
-  shows you exactly what will be drawn.
+  by a colour choice. Your chosen beds apply in both cases, and the preview shows
+  exactly what will be drawn.
 
 This affects the scoring board only. The [Dartboard Heatmap](#player-profile)
 keeps its own heat scale, because its colours mean "how often you hit here"
 rather than "which sector this is".
+
+> **Changed in this release:** sector 20 now defaults to a **black bed with red
+> rings**, which is what a real dartboard looks like. Previously the board paired
+> the *tan* bed with the red ring — a combination no real board has — because the
+> beds and the rings alternated independently of each other. The green is also a
+> shade darker so the "Bull" label stays legible when green is on sector 20.
 
 #### Home Assistant Integration
 
@@ -1885,8 +1894,8 @@ GET  /api/settings/voice-announcements      { enabled, turnScore, noScore, check
 GET  /api/settings/card-tagline             { tagline } — public, read at app boot for shareable cards
 GET  /api/settings/heatmap-style            { style: 'classic'|'scorched' } — public, read at app boot
 GET  /api/settings/heatmap-number-style     { style: 'original'|'molten_seam'|'chalk_ledger' } — public, read at app boot
-GET  /api/settings/board-colors             { singleA, ringA, singleB, ringB } — public, read at app boot;
-                                              always fully resolved #rrggbb, never partial
+GET  /api/settings/board-colors             { sector20, schemes: {red_black, green_white}, even, odd } —
+                                              public, read at app boot; always fully resolved
 POST /api/ha-test                           Test HA connectivity  { url }                        [admin]
 POST /api/ha-webhook                        Fire an HA webhook    { event, player, category, … }
 ```

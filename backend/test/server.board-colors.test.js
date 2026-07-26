@@ -86,9 +86,12 @@ const putSettings = body => fetch(`${base}/api/settings`, {
 });
 
 describe('GET /api/settings/board-colors is public and always fully resolved', () => {
-  test('a fresh install answers the classic board', async () => {
+  test('a fresh install answers a real board — 20 is a black bed with red rings', async () => {
     await withServer(async () => {
-      assert.deepEqual(await getColors(), S.BOARD_COLOR_DEFAULTS);
+      const c = await getColors();
+      assert.equal(c.sector20, 'red_black');
+      assert.deepEqual(c.even, { single: '#1c1e1a', ring: '#c8102e' });
+      assert.deepEqual(c.odd,  { single: '#cbbf96', ring: '#17752f' });
     });
   });
 
@@ -96,48 +99,35 @@ describe('GET /api/settings/board-colors is public and always fully resolved', (
     await withServer(async () => {
       const r = await fetch(`${base}/api/settings/board-colors`);   // no Cookie header
       assert.equal(r.status, 200);
-      assert.deepEqual(Object.keys(await r.json()).sort(), ['ringA','ringB','singleA','singleB']);
+      assert.deepEqual(Object.keys(await r.json()).sort(), ['even','odd','schemes','sector20']);
     });
   });
 
-  test('setting sector 20 moves the derived pair with it', async () => {
+  test('switching sector 20 to the other scheme swaps both halves', async () => {
     await withServer(async () => {
-      // '' for the B fields is what the client sends for a colour it has NOT
-      // overridden — the server must store that as "keep following 20", not as
-      // a literal empty colour.
-      const r = await putSettings({ board_single_a: '#3060a0', board_ring_a: '#8a2be2',
-                                    board_single_b: '', board_ring_b: '' });
+      const r = await putSettings({ board_sector20_scheme: 'green_white' });
       assert.equal(r.status, 200);
       const c = await getColors();
-      assert.equal(c.singleA, '#3060a0');
-      assert.equal(c.ringA, '#8a2be2');
-      assert.equal(c.singleB, S.deriveAltSingle('#3060a0'));
-      assert.equal(c.ringB, S.deriveAltRing('#8a2be2'));
+      assert.deepEqual(c.even, { single: '#cbbf96', ring: '#17752f' });
+      assert.deepEqual(c.odd,  { single: '#1c1e1a', ring: '#c8102e' });
     });
   });
 
-  test('an explicit override is kept, and only for the field overridden', async () => {
+  test('a recoloured scheme stays a pair, on whichever side it lands', async () => {
     await withServer(async () => {
-      await putSettings({ board_single_a: '#3060a0', board_single_b: '#ffcc00', board_ring_b: '' });
-      const c = await getColors();
-      assert.equal(c.singleB, '#ffcc00');
-      assert.equal(c.ringB, S.BOARD_COLOR_DEFAULTS.ringB, 'ringA is untouched, so its partner stays classic');
-    });
-  });
+      await putSettings({ board_red_black_single: '#101820', board_red_black_ring: '#f2c14e' });
+      assert.deepEqual((await getColors()).even, { single: '#101820', ring: '#f2c14e' });
 
-  test('clearing an override hands the field back to the derivation', async () => {
-    await withServer(async () => {
-      await putSettings({ board_single_a: '#3060a0', board_single_b: '#ffcc00' });
-      assert.equal((await getColors()).singleB, '#ffcc00');
-      await putSettings({ board_single_a: '#3060a0', board_single_b: '' });
-      assert.equal((await getColors()).singleB, S.deriveAltSingle('#3060a0'));
+      await putSettings({ board_sector20_scheme: 'green_white' });
+      assert.deepEqual((await getColors()).odd, { single: '#101820', ring: '#f2c14e' },
+        'the same pair, now on the alternate sectors — still together');
     });
   });
 
   test('an uppercase colour is normalised on the way in', async () => {
     await withServer(async () => {
-      await putSettings({ board_ring_a: '#AABBCC' });
-      assert.equal((await getColors()).ringA, '#aabbcc');
+      await putSettings({ board_red_black_ring: '#AABBCC' });
+      assert.equal((await getColors()).schemes.red_black.ring, '#aabbcc');
     });
   });
 });
@@ -151,38 +141,52 @@ describe('the write path refuses anything that is not an exact #rrggbb', () => {
     ['shorthand hex', '#c81'],
     ['trailing space', '#c8102e '],
     ['not hex at all', '#gggggg'],
+    ['an empty string', ''],
   ];
 
   for (const [label, value] of hostile) {
     test(`${label} is rejected with 400, and nothing is stored`, async () => {
       await withServer(async () => {
-        const r = await putSettings({ board_ring_a: value });
+        const r = await putSettings({ board_red_black_ring: value });
         assert.equal(r.status, 400, `${label} should be refused`);
         const body = await r.json();
-        assert.match(body.error || '', /board_ring_a must be a #rrggbb colour/);
+        assert.match(body.error || '', /board_red_black_ring must be a #rrggbb colour/);
         // The rejection must be atomic: a refused request must not have written
         // the other fields in the same payload either.
-        assert.deepEqual(await getColors(), S.BOARD_COLOR_DEFAULTS);
+        assert.equal((await getColors()).schemes.red_black.ring, '#c8102e');
       });
     });
   }
 
+  test('an unknown scheme id is rejected rather than silently defaulted', async () => {
+    await withServer(async () => {
+      const r = await putSettings({ board_sector20_scheme: 'purple_gold' });
+      assert.equal(r.status, 400);
+      assert.match((await r.json()).error || '', /board_sector20_scheme must be one of/);
+      assert.equal((await getColors()).sector20, 'red_black');
+    });
+  });
+
   test('a rejected colour does not partially apply the rest of the payload', async () => {
     await withServer(async () => {
-      const r = await putSettings({ board_single_a: '#3060a0', board_ring_a: 'red' });
+      const r = await putSettings({ board_sector20_scheme: 'green_white', board_red_black_ring: 'red' });
       assert.equal(r.status, 400);
-      assert.equal((await getColors()).singleA, S.BOARD_COLOR_DEFAULTS.singleA,
+      assert.equal((await getColors()).sector20, 'red_black',
         'the valid field in a rejected payload must not have been written');
     });
   });
 
-  test('the server validates with the same function the client does', async () => {
-    // Two independent copies of "what is a valid colour" is how the two ends
-    // drift until one accepts something the other renders wrong.
+  test('the server validates with the same functions the client does', async () => {
+    // Two independent copies of "what is a valid colour"/"what is a valid
+    // scheme" is how the two ends drift until one accepts something the other
+    // renders wrong.
     const src = fs.readFileSync(SERVER_PATH, 'utf8');
-    assert.match(src, /const \{ normaliseBoardColor \} = require\('\.\.\/frontend\/scoring\.js'\)/);
-    assert.match(src, /const BOARD_COLOR_KEYS = \['board_single_a','board_ring_a','board_single_b','board_ring_b'\]/);
-    assert.match(src, /\.\.\.BOARD_COLOR_KEYS/,
+    assert.match(src, /const \{ normaliseBoardColor, normaliseSchemeId, BOARD_SCHEME_IDS \} = require\('\.\.\/frontend\/scoring\.js'\)/);
+    // The key list is DERIVED from the scheme registry, not hand-written — so a
+    // third scheme can't be added with its keys silently missing from the
+    // allowlist, which would make saving it look like it worked and do nothing.
+    assert.match(src, /const BOARD_COLOR_KEYS = BOARD_SCHEME_IDS\.flatMap/);
+    assert.match(src, /\.\.\.BOARD_COLOR_KEYS, BOARD_SCHEME_KEY/,
       'the keys must be in the PUT allowlist, or saving silently does nothing');
   });
 });

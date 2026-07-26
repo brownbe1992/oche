@@ -171,30 +171,38 @@ cosmetic one.
 
 ### Applied: admin-chosen board colours (2026-07)
 
-Settings → Board colours lets an admin recolour the scoring board. Two standing
-concerns were designed in rather than audited after:
+Settings → Board colours lets an admin choose which of a dartboard's two zone
+schemes sector 20 uses (each scheme being a single-bed + double/treble-ring
+*pair*), and recolour either pair. Three standing concerns were designed in
+rather than audited after:
 
 - **Colorblind mode keeps precedence.** `buildDartboard()` applies
-  `body.colorblind`'s orange/blue ring substitutes on top of whatever colours were
-  chosen. A household that needs the setting must not lose it because somebody
+  `body.colorblind`'s orange/blue ring substitutes on top of whatever scheme is in
+  force. A household that needs the setting must not lose it because somebody
   picked a nicer red. The Settings panel says so where the pickers are, and the
   live preview renders the substituted colours, so it never promises a board that
   won't be drawn.
 - **The "Bull" label contrast is now computed.** It sits on the inner-bull circle,
-  whose colour is chosen by the admin. `boardLabelColor()` picks whichever of
-  cream/near-black contrasts better against the actual fill. This replaced the
-  hardcoded colorblind special case from this doc's own contrast audit (cream
-  normally; near-black in colorblind mode, whose lighter orange measured 2.58:1
-  against cream) with the general rule that case was one instance of — and
-  reproduces both of its answers exactly.
-- **The two singles are held apart automatically.** Adjacent sectors have to be
-  distinguishable, so `deriveAltSingle()` picks its target by measured contrast
-  rather than a lightness threshold. The naive `l >= 0.5` version sent a
-  mid-lightness pick to only 2.92:1; the committed sweep across the whole
-  hue/lightness space now holds the worst case at 3.10:1, above WCAG's 3:1 floor
-  for non-text UI components. An admin can still override a derived colour to
-  anything they like — that is their call — but nothing the app derives on their
-  behalf falls below the floor.
+  which takes *sector 20's* ring colour — so it is no longer always red.
+  `boardLabelColor()` picks whichever of cream/near-black contrasts better against
+  the actual fill. This replaced the hardcoded colorblind special case from this
+  doc's own contrast audit (cream normally; near-black in colorblind mode, whose
+  lighter orange measured 2.58:1 against cream) with the general rule that case
+  was one instance of — and reproduces both of its answers exactly. Swept across
+  the RGB cube in the committed tests rather than spot-checked, because an admin
+  can put any colour under that label.
+- **The stock green was darkened, `#1b8a3a` → `#17752f`.** Letting sector 20 take
+  the green scheme puts the 12px "Bull" label on green for the first time, and no
+  label colour cleared 4.5:1 there — the best of cream/near-black managed 4.10:1.
+  The darker green reaches 4.70:1 *and* improves the ring against its own white
+  bed (2.41:1 → 3.16:1), so it is a strict improvement rather than a trade.
+
+One thing deliberately **not** asserted: a contrast ratio between the red ring and
+the green ring. They are ~1.3:1 apart in luminance by nature, and darkening one to
+force a number would make a worse-looking board without helping anyone —
+red/green confusion is a *hue* problem, which is what colorblind mode already
+solves. A luminance floor there would look like accessibility work while doing
+none. The committed test says so in place of the assertion.
 
 ## Open questions for whoever picks this up
 

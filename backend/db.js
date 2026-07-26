@@ -36,7 +36,7 @@ const { checkoutHint, dartLabel,
   makeDartCore, PRESSURE_ROUNDS, generatePressureCard, computePressureRoundResult,
   pressureMissPenaltyForCard, pressureComposureRating, rebuildPressureChamberState,
   doubleElimStructure,
-  normaliseBoardColor, resolveBoardColors } = require('../frontend/scoring.js');
+  resolveBoardColors } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -7622,19 +7622,23 @@ function getHeatmapNumberStyle() {
   const style = row ? row.value : 'original';
   return { style: ['original','molten_seam','chalk_ledger'].includes(style) ? style : 'original' };
 }
-// Public (no-auth) read of the dartboard's colour scheme — every device that
+// Public (no-auth) read of the dartboard's colour schemes — every device that
 // renders the scoring board needs it, not just an admin's browser, exactly like
 // the heatmap style above.
 //
 // resolveBoardColors() re-validates every stored value on the way OUT, not just
-// on the way in. The values are interpolated into an SVG `fill="..."` attribute
+// on the way in. The colours are interpolated into an SVG `fill="..."` attribute
 // client-side, so a string written straight into the settings table (a restored
 // backup, a hand-edited database, a future write path that forgets to check)
-// must still be unable to reach a browser. An install that has never touched
-// this setting gets the classic board back byte-for-byte.
+// must still be unable to reach a browser.
 function getBoardColors() {
-  const keys = { singleA: 'board_single_a', ringA: 'board_ring_a',
-                 singleB: 'board_single_b', ringB: 'board_ring_b' };
+  const keys = {
+    sector20: 'board_sector20_scheme',
+    red_black_single: 'board_red_black_single',
+    red_black_ring: 'board_red_black_ring',
+    green_white_single: 'board_green_white_single',
+    green_white_ring: 'board_green_white_ring',
+  };
   const stored = {};
   for (const [field, key] of Object.entries(keys)) {
     const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
