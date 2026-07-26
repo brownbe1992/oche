@@ -17,6 +17,157 @@
    that's exactly what makes it extractable at all.
    ============================================================================= */
 
+/* ---------------------------------------------------------------------------
+   Dartboard colour scheme (admin-configurable, Settings -> Board colours)
+   ---------------------------------------------------------------------------
+   A real board alternates two pairs around its 20 sectors: sector 20 (index 0
+   of DB_SECTORS) is the "A" pair — a light tan single with red double/treble —
+   and its neighbours are the "B" pair, a near-black single with green rings.
+   The admin picks A and the B pair is DERIVED, which is what makes this one
+   choice rather than four: you decide what 20 looks like and the board follows.
+   The derived values are shown in Settings and can be overridden when the guess
+   is wrong for an unusual palette.
+
+   These live here rather than in index.html for two reasons: they are pure
+   calculations (so they get committed tests, per CLAUDE.md), and server.js
+   validates the stored colours with the SAME normaliseBoardColor() the client
+   uses, so the accepted format cannot drift between the two ends.
+   --------------------------------------------------------------------------- */
+
+// The classic board, and the fallback for any stored value that fails validation.
+const BOARD_COLOR_DEFAULTS = {
+  singleA: '#cbbf96',   // sector 20's single — tan
+  ringA:   '#c8102e',   // sector 20's double + treble — red
+  singleB: '#1c1e1a',   // the alternating sector's single — near-black
+  ringB:   '#1b8a3a',   // the alternating sector's double + treble — green
+};
+
+// Strict `#rrggbb`, lowercased. Anything else returns null.
+//
+// This is a SECURITY boundary as much as a formatting one: the value is
+// interpolated straight into an SVG `fill="..."` attribute by buildDartboard(),
+// so an unvalidated string is an attribute-injection sink. Enforced server-side
+// on write (PUT /api/settings), again server-side on read (so a value written
+// directly into the database still can't reach a client), and again at the sink
+// itself — the same defence-in-depth the two-context escaping rule already
+// applies elsewhere. Shorthand #abc is deliberately NOT accepted: one exact
+// format keeps the check trivial to audit.
+function normaliseBoardColor(v){
+  return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : null;
+}
+
+function hexToRgb(hex){
+  const h = normaliseBoardColor(hex) || BOARD_COLOR_DEFAULTS.singleA;
+  return [1,3,5].map(i => parseInt(h.slice(i, i+2), 16));
+}
+function rgbToHex(r, g, b){
+  const c = n => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2,'0');
+  return '#' + c(r) + c(g) + c(b);
+}
+function hexToHsl(hex){
+  const [r,g,b] = hexToRgb(hex).map(v => v/255);
+  const max = Math.max(r,g,b), min = Math.min(r,g,b), d = max-min;
+  const l = (max+min)/2;
+  const s = d === 0 ? 0 : d/(1 - Math.abs(2*l - 1));
+  let h = 0;
+  if(d !== 0){
+    if(max === r)      h = 60*(((g-b)/d) % 6);
+    else if(max === g) h = 60*(((b-r)/d) + 2);
+    else               h = 60*(((r-g)/d) + 4);
+  }
+  return { h: (h + 360) % 360, s, l };
+}
+function hslToHex({h, s, l}){
+  const c = (1 - Math.abs(2*l - 1)) * s;
+  const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+  const m = l - c/2;
+  const seg = Math.floor(((h % 360) + 360) % 360 / 60);
+  const [r,g,b] = [[c,x,0],[x,c,0],[0,c,x],[0,x,c],[x,0,c],[c,0,x]][seg];
+  return rgbToHex((r+m)*255, (g+m)*255, (b+m)*255);
+}
+
+// The alternating sector's SINGLE. A board's two singles are a light/dark pair,
+// so this flips to the opposite end of the lightness scale while keeping the
+// chosen hue — at 11% lightness the hue is imperceptible anyway, which is why
+// the classic near-black comes out right regardless of the tan's exact hue.
+const ALT_SINGLE_DARK = { s: 0.07, l: 0.11 };
+const ALT_SINGLE_LIGHT = { s: 0.30, l: 0.80 };
+function deriveAltSingle(hex){
+  const { h } = hexToHsl(hex);
+  const dark  = hslToHex({ h, s: ALT_SINGLE_DARK.s,  l: ALT_SINGLE_DARK.l });
+  const light = hslToHex({ h, s: ALT_SINGLE_LIGHT.s, l: ALT_SINGLE_LIGHT.l });
+  // Whichever direction actually separates further — NOT `l >= 0.5 ? dark : light`.
+  // A mid-lightness pick sits nearly equidistant from both ends, and the naive
+  // threshold sent l=0.35 to the light target for only 2.92:1, which is two
+  // adjacent sectors you can't reliably tell apart. Choosing by measured
+  // contrast holds the worst case across the whole hue/lightness space at
+  // 3.21:1 — above the 3:1 floor WCAG sets for non-text UI components. The
+  // committed sweep in board-colors.test.js is what found the hole and is what
+  // keeps it closed.
+  return contrastRatio(hex, dark) >= contrastRatio(hex, light) ? dark : light;
+}
+
+// The alternating sector's DOUBLE/TREBLE ring. A hue rotation, not a lightness
+// flip: both rings have to stay vivid enough to read as scoring bands. 150 deg
+// (rather than a straight 180 deg complement) is what turns the classic red into
+// the classic green — see the committed test that pins exactly that.
+const ALT_RING_HUE_SHIFT = 150;
+function deriveAltRing(hex){
+  const { h, s, l } = hexToHsl(hex);
+  return hslToHex({ h: h + ALT_RING_HUE_SHIFT, s: s * 0.8, l: l * 0.78 });
+}
+
+// WCAG relative luminance, and the label colour to sit on a given fill.
+// buildDartboard() prints "Bull" on the inner-bull circle, which is whatever the
+// A-ring colour happens to be — so the label can't be a fixed cream any more.
+// This replaces the previous hardcoded colorblind-mode special case with the
+// general rule that case was one instance of.
+function relativeLuminance(hex){
+  const [r,g,b] = hexToRgb(hex).map(v => {
+    const c = v/255;
+    return c <= 0.03928 ? c/12.92 : Math.pow((c + 0.055)/1.055, 2.4);
+  });
+  return 0.2126*r + 0.7152*g + 0.0722*b;
+}
+function contrastRatio(a, b){
+  const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x,y) => y-x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+const BOARD_LABEL_LIGHT = '#efe7d2';
+const BOARD_LABEL_DARK = '#151613';
+function boardLabelColor(bgHex){
+  return contrastRatio(BOARD_LABEL_LIGHT, bgHex) >= contrastRatio(BOARD_LABEL_DARK, bgHex)
+    ? BOARD_LABEL_LIGHT : BOARD_LABEL_DARK;
+}
+
+// The full four-colour scheme from whatever is stored. Every field is validated
+// independently, so one bad value falls back on its own rather than discarding
+// the admin's other three choices. A missing B value is derived from its A
+// partner — that is the "set 20 and the rest follows" behaviour, and it means a
+// household that never overrides the derived pair keeps following A if they
+// later change it.
+//
+// The one exception: while A is still the classic colour, B is the classic
+// colour too, EXACTLY, rather than the derived approximation of it. The
+// derivation reproduces the classic board to within a 1.003/1.053 contrast ratio
+// — visually identical, but not byte-identical, and an install that never opens
+// this setting must render exactly the board it rendered before the feature
+// existed. Deriving starts the moment the admin actually changes something.
+function resolveBoardColors(stored){
+  const src = stored || {};
+  const singleA = normaliseBoardColor(src.singleA) || BOARD_COLOR_DEFAULTS.singleA;
+  const ringA   = normaliseBoardColor(src.ringA)   || BOARD_COLOR_DEFAULTS.ringA;
+  const altSingle = singleA === BOARD_COLOR_DEFAULTS.singleA
+    ? BOARD_COLOR_DEFAULTS.singleB : deriveAltSingle(singleA);
+  const altRing = ringA === BOARD_COLOR_DEFAULTS.ringA
+    ? BOARD_COLOR_DEFAULTS.ringB : deriveAltRing(ringA);
+  return {
+    singleA, ringA,
+    singleB: normaliseBoardColor(src.singleB) || altSingle,
+    ringB:   normaliseBoardColor(src.ringB)   || altRing,
+  };
+}
+
 function dartValue(sector, mult){
   if(sector === 0) return 0;
   if(sector === 25) return mult === 2 ? 50 : 25;   // bull: 25 or double-bull 50, no treble
@@ -2235,6 +2386,9 @@ function aroundTheHornProgress(visitLogs){
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
+    BOARD_COLOR_DEFAULTS, normaliseBoardColor, hexToRgb, rgbToHex, hexToHsl, hslToHex,
+    deriveAltSingle, deriveAltRing, relativeLuminance, contrastRatio, boardLabelColor,
+    resolveBoardColors, BOARD_LABEL_LIGHT, BOARD_LABEL_DARK,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS, CRICKET_ALL_NUMBERS,
     evaluateVisitBaseball, baseballInningTarget, isBaseballCycle, parseSqliteTimestamp,
     evaluateDartDoublesPractice, evaluateDartAroundTheClock, isStaircaseFinish,

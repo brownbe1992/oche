@@ -4323,7 +4323,9 @@ the linked game's `completed_at IS NULL` → `in_progress`; else `fulfilled`.
 `ha_webhook_<event>` (×12, see §10), `pin_lockout_threshold`,
 `admin_lockout_grace`, `admin_lockout_base_seconds`, `admin_lockout_max_seconds`,
 `scoreboard_layout`, `default_scoring_input`,
-`card_tagline`, `heatmap_style`, `heatmap_number_style`.
+`card_tagline`, `heatmap_style`, `heatmap_number_style`,
+`board_single_a`, `board_ring_a`, `board_single_b`, `board_ring_b` (see §17's
+"Board colours").
 
 ### `admins`
 | Column | Type | Notes |
@@ -4894,6 +4896,100 @@ purely a data-granularity and heatmap-visualization feature. Backend:
 `getDartHeatmap()`/`getBounceOutCount()` in `backend/db.js`. Frontend:
 `buildDartboard()`, `buildDartHeatmap()`, `throwDart()`/`throwDartBoard()`/
 `throwBounceOut()` in `frontend/index.html`.
+
+### Board colours (Settings → Board colours, 2026-07)
+
+A real board alternates two colour pairs around its 20 sectors. Sector 20 is
+index 0 of `DB_SECTORS`, so it is the **A** pair — classically a tan single
+(`#cbbf96`) with red doubles/trebles (`#c8102e`) — and its neighbours are the
+**B** pair, a near-black single (`#1c1e1a`) with green rings (`#1b8a3a`).
+
+An admin picks the **A** pair; **B is derived from it**. That is what makes this
+one choice rather than four: you decide what 20 looks like and the board follows.
+The derived pair is shown in Settings and either half can be overridden when the
+automatic pick is wrong for an unusual palette.
+
+**Where the logic lives.** `frontend/scoring.js` — `BOARD_COLOR_DEFAULTS`,
+`normaliseBoardColor()`, `hexToHsl()`/`hslToHex()`, `deriveAltSingle()`,
+`deriveAltRing()`, `relativeLuminance()`/`contrastRatio()`/`boardLabelColor()`,
+`resolveBoardColors()`. Pure functions, so they carry committed tests
+(`backend/test/board-colors.test.js`), and `server.js` validates stored values
+with the *same* `normaliseBoardColor()` the client uses, so the accepted format
+cannot drift between the two ends.
+
+**Storage and transport.** Four `settings` keys — `board_single_a`,
+`board_ring_a`, `board_single_b`, `board_ring_b` — written via `PUT /api/settings`
+(admin) and read by every device via the public
+`GET /api/settings/board-colors` (`db.getBoardColors()`), the same "public read,
+admin write" split as `colorblind_mode`/`heatmap_style`. The read always answers
+a **fully resolved** four-colour object, so no client ever has to know the
+derivation rules to render a board.
+
+**A derived B colour is stored as `''`, never as its resolved hex.** Storing the
+hex would freeze it: changing sector 20 later would no longer move the rest of
+the board, which is the entire feature. `''` means "keep following A." The client
+tracks which half is an override in `boardColorOverride`.
+
+**The derivation rules.**
+- `deriveAltSingle(hex)` — the two singles are a light/dark pair, so this keeps
+  the chosen hue and moves to one end of the lightness scale (`l: 0.11, s: 0.07`
+  dark; `l: 0.80, s: 0.30` light). It picks the end with the **measured** higher
+  contrast, *not* `l >= 0.5 ? dark : light`. The naive threshold sends a
+  mid-lightness pick (`l = 0.35`) to the light target for only 2.92:1 — two
+  adjacent sectors you cannot reliably tell apart. Choosing by contrast holds the
+  worst case across the whole hue/lightness space at **3.10:1**, above the 3:1
+  floor WCAG sets for non-text UI components. A committed sweep over that space is
+  what found the hole and is what keeps it closed.
+- `deriveAltRing(hex)` — a hue rotation of **150°** with `s × 0.8, l × 0.78`, not
+  a lightness flip: both rings have to stay vivid enough to read as scoring
+  bands. 150° rather than a straight 180° complement is what turns the classic red
+  into the classic green; the committed test pins exactly that, so the constant
+  can't be "tidied" to 180 without a failure explaining why.
+
+**An untouched install renders the classic board byte-for-byte.** The derivation
+reproduces the classic pair to within a 1.003 / 1.053 contrast ratio — visually
+identical, but not equal. `resolveBoardColors()` therefore special-cases "A is
+still the classic colour" and returns the exact classic B, so a household that
+never opens this setting sees precisely the board it saw before the feature
+existed. Deriving begins the moment A actually changes.
+
+**Colorblind mode still wins over the chosen ring colours.** `buildDartboard()`
+applies `body.colorblind`'s orange/blue substitutes on top of whatever the admin
+picked. It is an accessibility setting, and a household that needs it must not
+have it silently switched off because somebody chose a nicer red; the Settings
+panel says so where the pickers are, and the live preview shows the substituted
+colours so it never promises a board that won't be rendered. The **singles** are
+not remapped by colorblind mode (they never were — that pair is a lightness
+contrast, not a hue one), so a custom single applies in both modes.
+
+**The "Bull" label colour is computed, not fixed.** It sits on the inner-bull
+circle, which is now whatever `ringA` resolves to. `boardLabelColor()` picks
+whichever of cream (`#efe7d2`) / near-black (`#151613`) contrasts better against
+the actual fill. This *replaces* the previous hardcoded colorblind special case
+(cream normally, near-black in colorblind mode, because that mode's lighter
+orange measured 2.58:1 against cream) with the general rule that case was one
+instance of — and reproduces both of its answers exactly, which the tests assert.
+
+**Security: these values reach an SVG `fill="…"` attribute.** An unvalidated
+string is an attribute-injection sink, so `normaliseBoardColor()` enforces an
+exact `#rrggbb` (shorthand `#abc` deliberately refused — one format keeps the
+check trivial to audit) at **three** independent points: `server.js` on write
+(400, and the whole payload is rejected rather than partially applied),
+`db.getBoardColors()` on read (so a restored backup or hand-edited row still
+can't reach a browser), and `resolveBoardColors()` again client-side at the sink.
+Same defence-in-depth as §9's two-context escaping rule.
+
+**Applying a change mid-game.** `applyDartMode()` builds the board SVG once and
+then leaves it alone (~100 paths; rebuilding per dart was a real cost). That
+cache is exactly what would make a colour change appear not to work — the new
+colours would otherwise only reach a screen on the next `renderGameShell()`,
+which mid-game is the next *leg*. `invalidateDartboard()` drops the cached SVG
+after a save and lets `applyDartMode()` rebuild it on the spot.
+
+**Scope: the scoring board only.** The Player Profile heatmap keeps its own heat
+scale — its colours encode hit frequency, not board identity, so recolouring it
+would break what it means — and the live scoreboard's Around the Clock board
+keeps its own look.
 
 ### Zone tracking — inner vs. outer single
 

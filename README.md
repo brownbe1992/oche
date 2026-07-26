@@ -1069,7 +1069,7 @@ Plus global leaderboards for 180s, Big Fish, and nine-dart finishes, each filter
 
 ### Settings
 
-The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Heatmap**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, **Merge Players**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
+The Settings page (accessible from the top navigation) holds app-wide configuration, grouped into four tabs: **Account & Access**, **Gameplay & Display**, **Integrations**, and **Admin & Danger Zone**. Each section — **Admin accounts**, **Player PINs**, **Scoring**, **Accessibility**, **Voice Announcements**, **Shareable Moments**, **Data Collection**, **Live Scoreboard**, **Board colours**, **Heatmap**, **Smart Home Integration**, **Daily Challenge**, **Server Errors**, **Backups**, **Data Export**, **Merge Players**, and **Danger Zone** — is collapsed to just its header by default; click a header to expand it.
 
 Settings require an admin login (see [Admin Accounts & Player PINs](#admin-accounts--player-pins)) — until an admin account exists, the page offers to create the first one.
 
@@ -1102,6 +1102,30 @@ Multi-language support is left to whatever voice/locale the browser already prov
 #### Live Scoreboard
 
 - **Layout** — the preset the `/display` screen uses: **Full**, **Compact**, or **Minimal** (see [Live Scoreboard](#live-scoreboard)). Can be overridden per-screen with `?layout=` in the URL.
+
+#### Board colours
+
+Change what the interactive [Dartboard](#scoring-a-game) input looks like. You
+set the two colours for **sector 20** — its single, and its double/treble ring —
+and the rest of the board follows: every other sector alternates to a second
+pair worked out from your choice, the same way a real board alternates tan/red
+with black/green.
+
+- The derived pair is shown next to your own, with a live preview of the whole
+  board. If the automatic pick isn't right for an unusual palette, edit either
+  derived swatch — it then stays put instead of following sector 20.
+- **Re-derive from sector 20** hands an edited swatch back to the automatic rule.
+  **Reset to the classic board** puts all four back to the standard tan/red and
+  black/green.
+- A change applies immediately, including to a game already in progress.
+- If **Colorblind mode** (under Accessibility) is on, the doubles and trebles
+  still render in its orange and blue — an accessibility setting isn't overridden
+  by a colour choice. Your chosen singles apply in both cases, and the preview
+  shows you exactly what will be drawn.
+
+This affects the scoring board only. The [Dartboard Heatmap](#player-profile)
+keeps its own heat scale, because its colours mean "how often you hit here"
+rather than "which sector this is".
 
 #### Home Assistant Integration
 
@@ -1861,6 +1885,8 @@ GET  /api/settings/voice-announcements      { enabled, turnScore, noScore, check
 GET  /api/settings/card-tagline             { tagline } — public, read at app boot for shareable cards
 GET  /api/settings/heatmap-style            { style: 'classic'|'scorched' } — public, read at app boot
 GET  /api/settings/heatmap-number-style     { style: 'original'|'molten_seam'|'chalk_ledger' } — public, read at app boot
+GET  /api/settings/board-colors             { singleA, ringA, singleB, ringB } — public, read at app boot;
+                                              always fully resolved #rrggbb, never partial
 POST /api/ha-test                           Test HA connectivity  { url }                        [admin]
 POST /api/ha-webhook                        Fire an HA webhook    { event, player, category, … }
 ```

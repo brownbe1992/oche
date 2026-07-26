@@ -169,6 +169,33 @@ multiplier" — a control not on screen in that mode (`docs/bug-roadmap.md` **BU
 Instructions that name absent controls are an accessibility defect as much as a
 cosmetic one.
 
+### Applied: admin-chosen board colours (2026-07)
+
+Settings → Board colours lets an admin recolour the scoring board. Two standing
+concerns were designed in rather than audited after:
+
+- **Colorblind mode keeps precedence.** `buildDartboard()` applies
+  `body.colorblind`'s orange/blue ring substitutes on top of whatever colours were
+  chosen. A household that needs the setting must not lose it because somebody
+  picked a nicer red. The Settings panel says so where the pickers are, and the
+  live preview renders the substituted colours, so it never promises a board that
+  won't be drawn.
+- **The "Bull" label contrast is now computed.** It sits on the inner-bull circle,
+  whose colour is chosen by the admin. `boardLabelColor()` picks whichever of
+  cream/near-black contrasts better against the actual fill. This replaced the
+  hardcoded colorblind special case from this doc's own contrast audit (cream
+  normally; near-black in colorblind mode, whose lighter orange measured 2.58:1
+  against cream) with the general rule that case was one instance of — and
+  reproduces both of its answers exactly.
+- **The two singles are held apart automatically.** Adjacent sectors have to be
+  distinguishable, so `deriveAltSingle()` picks its target by measured contrast
+  rather than a lightness threshold. The naive `l >= 0.5` version sent a
+  mid-lightness pick to only 2.92:1; the committed sweep across the whole
+  hue/lightness space now holds the worst case at 3.10:1, above WCAG's 3:1 floor
+  for non-text UI components. An admin can still override a derived colour to
+  anything they like — that is their call — but nothing the app derives on their
+  behalf falls below the floor.
+
 ## Open questions for whoever picks this up
 
 - How much should `aria-live="polite"` vs. `aria-live="assertive"` be used for

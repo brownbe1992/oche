@@ -575,6 +575,26 @@
   .dart-board-wrap.board-disabled{pointer-events:none;opacity:.4}
   .hidden{display:none!important}
 
+  /* ---- Settings -> Board colours ---- */
+  .bc-grid{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
+  .bc-col{display:flex;flex-direction:column;gap:2px;min-width:150px}
+  .bc-col-head{font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--muted);font-weight:600;margin-bottom:6px}
+  .bc-col-head span{text-transform:none;letter-spacing:0;font-weight:400}
+  /* A native <input type="color"> so the platform's own picker (and its
+     accessibility behaviour) is what opens — this is not a place to hand-roll a
+     colour wheel. The UA chrome around the swatch is stripped so it reads as a
+     tile rather than a button with a stripe in it. */
+  .bc-swatch{width:100%;height:38px;padding:0;margin-bottom:10px;cursor:pointer;
+    background:none;border:1px solid var(--wire);border-radius:9px;color-scheme:dark}
+  .bc-swatch::-webkit-color-swatch-wrapper{padding:3px}
+  .bc-swatch::-webkit-color-swatch{border:none;border-radius:6px}
+  .bc-swatch::-moz-color-swatch{border:none;border-radius:6px}
+  .bc-swatch:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  .bc-preview{flex:1;min-width:170px;max-width:240px;aspect-ratio:1;
+    background:var(--board);border:1px solid var(--wire);border-radius:12px;padding:6px}
+  .bc-preview svg{width:100%;height:100%;display:block}
+
   /* ---- Dart Builder: icon picker (docs/archive/dart-builder-roadmap.md accessibility
      item — a visual diagram per barrel shape/grip and flight shape option, since
      terms like "torpedo"/"knurled"/"kite" aren't self-explanatory by name alone.
@@ -2098,6 +2118,47 @@
         </div>
       </div>
 
+      <!-- Board colours -->
+      <div class="pp-section stile zone-gameplay">
+        <div class="pp-section-title settings-title" onclick="toggleSettingsSection('board-colors-body',this)">
+          <span><span class="stile-icon">🎯</span>Board colours<span class="stile-state" id="tile-state-board-colors">…</span></span>
+          <svg class="settings-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="board-colors-body" hidden>
+          <p class="settings-intro">
+            Pick what sector 20 looks like and the rest of the board follows: every
+            other sector alternates to the second pair below, worked out from your
+            choice. Change either derived colour if the automatic pick isn't right.
+          </p>
+          <div class="bc-grid">
+            <div class="bc-col">
+              <div class="bc-col-head">Sector 20</div>
+              <label class="field" for="board-single-a">Single</label>
+              <input type="color" class="bc-swatch" id="board-single-a" oninput="onBoardColorInput('a')">
+              <label class="field" for="board-ring-a">Double &amp; treble</label>
+              <input type="color" class="bc-swatch" id="board-ring-a" oninput="onBoardColorInput('a')">
+            </div>
+            <div class="bc-col">
+              <div class="bc-col-head">Every other sector <span id="board-derived-note">(worked out for you)</span></div>
+              <label class="field" for="board-single-b">Single</label>
+              <input type="color" class="bc-swatch" id="board-single-b" oninput="onBoardColorInput('b')">
+              <label class="field" for="board-ring-b">Double &amp; treble</label>
+              <input type="color" class="bc-swatch" id="board-ring-b" oninput="onBoardColorInput('b')">
+            </div>
+            <div class="bc-preview" id="board-color-preview" aria-hidden="true"></div>
+          </div>
+          <p class="settings-intro" id="board-colors-cb-note" hidden>
+            Colorblind mode is on, so the doubles and trebles render in its orange
+            and blue on the real board — an accessibility setting isn't overridden
+            by a colour choice. The singles below still apply.
+          </p>
+          <div class="btn-row" style="margin-top:10px">
+            <button class="btn btn-ghost" type="button" onclick="resetBoardColors()">Reset to the classic board</button>
+            <button class="btn btn-ghost" type="button" onclick="reDeriveBoardColors()">Re-derive from sector 20</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Heatmap -->
       <div class="pp-section stile zone-gameplay">
         <div class="pp-section-title settings-title" onclick="toggleSettingsSection('heatmap-style-body',this)">
@@ -2810,6 +2871,10 @@ const DEFAULT_CARD_TAGLINE = 'Darts tracked via Oche — track your darts today!
 let cardTagline = DEFAULT_CARD_TAGLINE; // admin-editable; refreshed at boot from /api/settings/card-tagline
 let heatmapStyle = 'classic'; // admin-toggled; refreshed at boot from /api/settings/heatmap-style
 let heatmapNumberStyle = 'original'; // admin-toggled; refreshed at boot from /api/settings/heatmap-number-style
+// Dartboard colour scheme (Settings -> Board colours); refreshed at boot from
+// /api/settings/board-colors. Held resolved (all four fields present) so
+// buildDartboard() never has to think about derivation or fallbacks.
+let boardColors = resolveBoardColors({});
 
 /* ---------- dartboard input mode ---------- */
 const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
@@ -2885,8 +2950,16 @@ function buildDartboard(){
     <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0d0e0b"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>
     <circle cx="${CX}" cy="${CY}" r="${R.doubleOut}" fill="#0d0e0b"/>`;
-  const ringA = colorblindMode ? '#e2711d' : '#c8102e';  // orange substitute for red
-  const ringB = colorblindMode ? '#2f8fd9' : '#1b8a3a';  // blue substitute for green
+  // Colorblind mode still WINS over the admin's chosen ring colours. It is an
+  // accessibility setting, and a household that needs it must not have it
+  // silently switched off because somebody picked a nicer red — Settings says so
+  // where the pickers are. The SINGLES are not remapped by colorblind mode (they
+  // never were: the light/dark pair is a lightness contrast, not a hue one), so a
+  // custom single applies in both modes.
+  const ringA = colorblindMode ? '#e2711d' : boardColors.ringA;  // orange substitute for red
+  const ringB = colorblindMode ? '#2f8fd9' : boardColors.ringB;  // blue substitute for green
+  const singleA = boardColors.singleA;
+  const singleB = boardColors.singleB;
   // Miss-ring fills: deliberately muted/neutral (not tied to ringA/ringB) so they read
   // as "off the scoring board" at a glance — near stays closer in tone to the board's
   // own dark background, far is visibly more washed-out/distant.
@@ -2894,7 +2967,7 @@ function buildDartboard(){
   const missFarFill = '#221f1a';
   DB_SECTORS.forEach((num,i)=>{
     const s0=i*DEG-DEG/2, e0=s0+DEG;
-    const sc = i%2===0 ? '#cbbf96' : '#1c1e1a';  // light/dark singles
+    const sc = i%2===0 ? singleA : singleB;  // sector 20's pair, then the alternating one
     const rc = i%2===0 ? ringA : ringB;  // alternating ring color per sector
     const sw = 'stroke="#151613" stroke-width="0.5"';
     s += `<path class="dz" d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${sc}" ${sw} ${oc(num,1,'inner')}/>`;
@@ -2913,12 +2986,16 @@ function buildDartboard(){
   });
   s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${ringB}" stroke="#151613" stroke-width="0.5" ${oc(25,1)}/>`;
   s += `<circle class="dz" cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${ringA}" stroke="#151613" stroke-width="0.5" ${oc(25,2)}/>`;
-  // "Bull" text sits on the inner bull circle (ringA) — cream passes 4.5:1 against the
-  // default red (#c8102e) but fails badly (2.58:1) against colorblind mode's lighter
-  // orange substitute (#e2711d), a contrast regression that colorblind mode itself
-  // introduced. Dark text instead, only in that mode, passes 6.1:1 there while cream
-  // stays correct for everyone else (docs/accessibility-roadmap.md contrast audit).
-  const bullTextFill = colorblindMode ? '#151613' : '#efe7d2';
+  // "Bull" text sits on the inner bull circle, which is whatever ringA resolves to
+  // — so its colour has to be computed, not fixed. Cream passes 4.5:1 against the
+  // classic red (#c8102e) but fails badly (2.58:1) against colorblind mode's
+  // lighter orange substitute (#e2711d); now that an admin can choose the ring
+  // colour outright, that same failure is one colour-picker click away for
+  // everyone. boardLabelColor() picks whichever of cream/near-black contrasts
+  // better against the actual fill, which reproduces the old colorblind
+  // special case exactly and generalises it to every colour
+  // (docs/accessibility-roadmap.md contrast audit).
+  const bullTextFill = boardLabelColor(ringA);
   s += `<text x="${CX}" y="${CY}" text-anchor="middle" dominant-baseline="central"
     font-family="Bebas Neue,sans-serif" font-size="12" fill="${bullTextFill}" style="pointer-events:none;user-select:none">Bull</text>`;
   s += `</svg>`;
@@ -2984,6 +3061,16 @@ function applyDartMode(){
     board.classList.add('hidden');
     if(game) renderPad();   // populate buttons immediately when switching to pad mode
   }
+}
+// applyDartMode() builds the board SVG once and then leaves it alone (it is ~100
+// paths; rebuilding it per dart was a real cost). That cache is exactly what
+// makes a colour change appear not to work: the new colours only reach a screen
+// on the next renderGameShell(), which mid-game is the next LEG. Dropping the
+// cached SVG is all that's needed — applyDartMode() rebuilds it on the spot.
+function invalidateDartboard(){
+  const board = document.getElementById('dart-board-wrap');
+  if(board) board.innerHTML = '';
+  if(typeof game !== 'undefined' && game) applyDartMode();
 }
 function setDartMode(mode){ dartboardMode=(mode==='board'); applyDartMode(); }
 
@@ -5238,6 +5325,15 @@ const SETTINGS_FIELDS = [
   { key:'voice_bigfish',        id:'voice-bigfish',         kind:'checkbox-optout' },
   { key:'voice_match_progress', id:'voice-match-progress',  kind:'checkbox-optout' },
   { key:'card_tagline', id:'card-tagline', kind:'text', default: DEFAULT_CARD_TAGLINE },
+  // Board colours. The two B fields save '' when they are NOT overridden, which
+  // is how the server records "keep following sector 20" — see boardColorOverride
+  // and resolveBoardColors(). `kind:'color'` exists so the generic loader doesn't
+  // try to put an empty string into an <input type="color">, which silently
+  // becomes #000000 and would look like a deliberate black board.
+  { key:'board_single_a', id:'board-single-a', kind:'color', default: BOARD_COLOR_DEFAULTS.singleA },
+  { key:'board_ring_a',   id:'board-ring-a',   kind:'color', default: BOARD_COLOR_DEFAULTS.ringA },
+  { key:'board_single_b', id:'board-single-b', kind:'color', optional:'singleB' },
+  { key:'board_ring_b',   id:'board-ring-b',   kind:'color', optional:'ringB' },
   { key:'heatmap_style',        id:'heatmap-style',        kind:'allowed', allowed:['classic','scorched'], default:'classic' },
   { key:'heatmap_number_style', id:'heatmap-number-style', kind:'allowed', allowed:['original','molten_seam','chalk_ledger'], default:'original' },
   { key:'require_admin_auth',   id:'require-admin-auth',   kind:'checkbox' },
@@ -5254,6 +5350,19 @@ function loadSettingsField(cfg, f){
   // generic `cfg[f.key] === '1'` check below, which would show unchecked/off any
   // time the on-by-default fallback hadn't yet been explicitly saved.
   if(f.key === 'require_admin_auth'){ el.checked = !!Auth.requireAuth; return; }
+  // An <input type="color"> cannot hold "unset": an empty value silently becomes
+  // #000000. So a B field with nothing stored shows the DERIVED colour (and is
+  // remembered as not-overridden), rather than a black swatch that looks chosen.
+  if(f.kind === 'color'){
+    const stored = normaliseBoardColor(cfg[f.key]);
+    if(f.optional){
+      boardColorOverride[f.optional] = !!stored;
+      el.value = stored || resolveBoardColors(settingsBoardColorsFromForm(cfg))[f.optional];
+    } else {
+      el.value = stored || f.default;
+    }
+    return;
+  }
   if(f.kind === 'checkbox') el.checked = cfg[f.key] === '1';
   else if(f.kind === 'checkbox-optout') el.checked = cfg[f.key] !== '0';
   else if(f.kind === 'allowed') el.value = f.allowed.includes(cfg[f.key]) ? cfg[f.key] : f.default;
@@ -5266,6 +5375,15 @@ function loadSettingsField(cfg, f){
 }
 function saveSettingsField(payload, f){
   const el = document.getElementById(f.id);
+  if(f.kind === 'color'){
+    const raw = normaliseBoardColor((el||{}).value);
+    // A derived B colour is saved as '' rather than as its current hex. Storing
+    // the hex would freeze it: changing sector 20 later would no longer move the
+    // rest of the board, which is the entire point of the feature.
+    if(f.optional && !boardColorOverride[f.optional]){ payload[f.key] = ''; return; }
+    payload[f.key] = raw || f.default || '';
+    return;
+  }
   if(f.kind === 'checkbox' || f.kind === 'checkbox-optout'){ payload[f.key] = (el && el.checked) ? '1' : '0'; return; }
   const raw = (el||{}).value || '';
   if(f.kind === 'number'){ payload[f.key] = Number(raw) || f.default; return; }
@@ -5319,6 +5437,9 @@ async function renderSettings(){
     // off), which is exactly what SETTINGS_FIELDS' 'checkbox-optout' kind reads.
     toggleVoiceSubOptions();
     toggleHeatmapNumberStyleOption();
+    // After loadSettingsField() has set boardColorOverride from what's stored —
+    // this fills in any derived swatch, the note, and the preview.
+    syncBoardColorInputs();
     refreshSettingsTileStates();
   }).catch(err=>{ const s=document.getElementById('settings-error'); if(s){ s.textContent='Could not load settings: '+err.message; s.hidden=false; } });
 }
@@ -5476,6 +5597,12 @@ const SETTINGS_TILE_STATES = [
   { id:'tile-state-scoreboard', compute: () => {
       const v = (document.getElementById('scoreboard-layout')||{}).value;
       return v === 'compact' ? 'Compact' : v === 'minimal' ? 'Minimal' : 'Full';
+    } },
+  { id:'tile-state-board-colors', compute: () => {
+      const c = settingsBoardColors();
+      const d = BOARD_COLOR_DEFAULTS;
+      return (c.singleA === d.singleA && c.ringA === d.ringA
+           && c.singleB === d.singleB && c.ringB === d.ringB) ? 'Classic' : 'Custom';
     } },
   { id:'tile-state-heatmap', compute: () => (document.getElementById('heatmap-style')||{}).value === 'scorched' ? 'Scorched' : 'Classic' },
   { id:'tile-state-smart-home', compute: () => (document.getElementById('ha-url')||{}).value ? 'URL set' : 'Not set' },
@@ -5824,6 +5951,102 @@ function toggleVoiceSubOptions(){
   sub.style.opacity = on ? '1' : '.4';
   sub.querySelectorAll('input[type=checkbox]').forEach(el=>el.disabled = !on);
 }
+/* ---------- Settings -> Board colours ----------
+   Sector 20's pair is chosen; the alternating pair is derived from it unless the
+   admin has explicitly overridden one. This flag is what distinguishes the two —
+   a derived value is stored as '' so it keeps following sector 20, an overridden
+   one is stored as its hex. Reset whenever the form is loaded (loadSettingsField)
+   or the admin asks to re-derive. */
+let boardColorOverride = { singleB:false, ringB:false };
+
+// The A-pair as currently entered, for feeding resolveBoardColors(). Reads the
+// live inputs when they exist (so the preview tracks a drag) and falls back to a
+// settings payload when called during load, before the inputs hold anything.
+function settingsBoardColorsFromForm(cfg){
+  const val = (id, key) => {
+    const el = document.getElementById(id);
+    return normaliseBoardColor(el && el.value) || (cfg ? cfg[key] : null);
+  };
+  return { singleA: val('board-single-a','board_single_a'), ringA: val('board-ring-a','board_ring_a') };
+}
+
+// The four colours the board would render with right now, given the form state.
+function settingsBoardColors(){
+  const base = settingsBoardColorsFromForm(null);
+  return resolveBoardColors({
+    ...base,
+    singleB: boardColorOverride.singleB ? (document.getElementById('board-single-b')||{}).value : null,
+    ringB:   boardColorOverride.ringB   ? (document.getElementById('board-ring-b')||{}).value   : null,
+  });
+}
+
+// `which` is 'a' (sector 20 changed -> re-derive any non-overridden B) or 'b'
+// (the admin edited a derived swatch, which promotes it to an override).
+function onBoardColorInput(which){
+  if(which === 'b'){
+    boardColorOverride.singleB = true;
+    boardColorOverride.ringB = true;
+  }
+  syncBoardColorInputs();
+}
+function syncBoardColorInputs(){
+  const c = settingsBoardColors();
+  const set = (id, v) => { const el = document.getElementById(id); if(el && el.value !== v) el.value = v; };
+  if(!boardColorOverride.singleB) set('board-single-b', c.singleB);
+  if(!boardColorOverride.ringB)   set('board-ring-b', c.ringB);
+  const note = document.getElementById('board-derived-note');
+  if(note) note.textContent = (boardColorOverride.singleB || boardColorOverride.ringB)
+    ? '(set by you)' : '(worked out for you)';
+  const cbNote = document.getElementById('board-colors-cb-note');
+  if(cbNote) cbNote.hidden = !(document.getElementById('colorblind-mode')||{}).checked;
+  renderBoardColorPreview();
+  refreshSettingsTileStates();
+}
+function resetBoardColors(){
+  boardColorOverride = { singleB:false, ringB:false };
+  const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
+  set('board-single-a', BOARD_COLOR_DEFAULTS.singleA);
+  set('board-ring-a', BOARD_COLOR_DEFAULTS.ringA);
+  syncBoardColorInputs();
+}
+function reDeriveBoardColors(){
+  boardColorOverride = { singleB:false, ringB:false };
+  syncBoardColorInputs();
+}
+
+// A miniature of the real board: same BOARD_GEOM, same alternation, no hit areas
+// and no numbers (at this size they'd be illegible noise). Deliberately NOT a
+// call into buildDartboard() — that one wires 100 onclick handlers to
+// throwDartBoard() and would put live scoring controls on the Settings page.
+function renderBoardColorPreview(){
+  const host = document.getElementById('board-color-preview');
+  if(!host) return;
+  const { CX, CY, R, DEG, annulus } = BOARD_GEOM;
+  const c = settingsBoardColors();
+  // Mirrors buildDartboard(): colorblind mode overrides the RING colours there,
+  // so the preview has to show the same thing or it would be promising a board
+  // the household will never see.
+  const cb = !!(document.getElementById('colorblind-mode')||{}).checked;
+  const ringA = cb ? '#e2711d' : c.ringA;
+  const ringB = cb ? '#2f8fd9' : c.ringB;
+  const sw = 'stroke="#151613" stroke-width="0.5"';
+  let out = `<svg viewBox="0 0 460 460" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+    <circle cx="${CX-100}" cy="${CY-100}" r="${R.doubleOut+8}" fill="#0d0e0b"/>`;
+  DB_SECTORS.forEach((num,i)=>{
+    const s0=i*DEG-DEG/2, e0=s0+DEG;
+    const sc = i%2===0 ? c.singleA : c.singleB;
+    const rc = i%2===0 ? ringA : ringB;
+    out += `<g transform="translate(-100,-100)">`
+      + `<path d="${annulus(R.bullOut,R.trebleIn,s0,e0)}" fill="${sc}" ${sw}/>`
+      + `<path d="${annulus(R.trebleIn,R.trebleOut,s0,e0)}" fill="${rc}" ${sw}/>`
+      + `<path d="${annulus(R.trebleOut,R.doubleIn,s0,e0)}" fill="${sc}" ${sw}/>`
+      + `<path d="${annulus(R.doubleIn,R.doubleOut,s0,e0)}" fill="${rc}" ${sw}/></g>`;
+  });
+  out += `<circle cx="${CX-100}" cy="${CY-100}" r="${R.bullOut}" fill="${ringB}" ${sw}/>`;
+  out += `<circle cx="${CX-100}" cy="${CY-100}" r="${R.bullIn}" fill="${ringA}" ${sw}/></svg>`;
+  host.innerHTML = out;
+}
+
 function toggleHeatmapNumberStyleOption(){
   const scorched = (document.getElementById('heatmap-style')||{}).value === 'scorched';
   const sel = document.getElementById('heatmap-number-style');
@@ -5861,6 +6084,8 @@ function saveSettings(){
     heatmapStyle = (document.getElementById('heatmap-style')||{}).value === 'scorched' ? 'scorched' : 'classic';
     const nsVal = (document.getElementById('heatmap-number-style')||{}).value;
     heatmapNumberStyle = ['molten_seam','chalk_ledger'].includes(nsVal) ? nsVal : 'original';
+    boardColors = settingsBoardColors();
+    invalidateDartboard();
     Auth.requireAuth = (document.getElementById('require-admin-auth')||{}).checked || false;
     uiAlert('Settings saved.');
   }).catch(err=>{
@@ -19234,6 +19459,9 @@ function showBackendErrorScreen(){
     Backend.get('/api/settings/ha-webhook-status').then(hw => { haWebhookStatus = { enabled: !!hw.enabled, events: hw.events || {} }; }).catch(()=>{}),
     Backend.get('/api/settings/heatmap-style').then(hs => { heatmapStyle = hs.style === 'scorched' ? 'scorched' : 'classic'; }).catch(()=>{}),
     Backend.get('/api/settings/heatmap-number-style').then(ns => { heatmapNumberStyle = ['molten_seam','chalk_ledger'].includes(ns.style) ? ns.style : 'original'; }).catch(()=>{}),
+    // Re-resolved rather than trusted: the server already validated these, but
+    // the sink is an SVG fill attribute, so this end validates too.
+    Backend.get('/api/settings/board-colors').then(bc => { boardColors = resolveBoardColors(bc); }).catch(()=>{}),
   ]);
   document.body.classList.toggle('colorblind', colorblindMode);
   // Settings tiles (2026-07 modular-dashboard redesign) show a live one-line
@@ -19244,6 +19472,12 @@ function showBackendErrorScreen(){
   if(settingsContent){
     settingsContent.addEventListener('input', refreshSettingsTileStates);
     settingsContent.addEventListener('change', refreshSettingsTileStates);
+    // The board preview mirrors buildDartboard(), which lets colorblind mode
+    // override the ring colours — so toggling THAT checkbox has to redraw the
+    // preview too, not just the colour pickers' own oninput.
+    settingsContent.addEventListener('change', e => {
+      if(e.target && e.target.id === 'colorblind-mode') syncBoardColorInputs();
+    });
   }
   restoreSetup();
   sanitizeSlots();

@@ -35,7 +35,8 @@ const { checkoutHint, dartLabel,
   rebuildDeadManWalkingState, deadManWalkingResultTier, CHALLENGE_CHECKOUTS,
   makeDartCore, PRESSURE_ROUNDS, generatePressureCard, computePressureRoundResult,
   pressureMissPenaltyForCard, pressureComposureRating, rebuildPressureChamberState,
-  doubleElimStructure } = require('../frontend/scoring.js');
+  doubleElimStructure,
+  normaliseBoardColor, resolveBoardColors } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -7621,6 +7622,27 @@ function getHeatmapNumberStyle() {
   const style = row ? row.value : 'original';
   return { style: ['original','molten_seam','chalk_ledger'].includes(style) ? style : 'original' };
 }
+// Public (no-auth) read of the dartboard's colour scheme — every device that
+// renders the scoring board needs it, not just an admin's browser, exactly like
+// the heatmap style above.
+//
+// resolveBoardColors() re-validates every stored value on the way OUT, not just
+// on the way in. The values are interpolated into an SVG `fill="..."` attribute
+// client-side, so a string written straight into the settings table (a restored
+// backup, a hand-edited database, a future write path that forgets to check)
+// must still be unable to reach a browser. An install that has never touched
+// this setting gets the classic board back byte-for-byte.
+function getBoardColors() {
+  const keys = { singleA: 'board_single_a', ringA: 'board_ring_a',
+                 singleB: 'board_single_b', ringB: 'board_ring_b' };
+  const stored = {};
+  for (const [field, key] of Object.entries(keys)) {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+    if (row) stored[field] = row.value;
+  }
+  return resolveBoardColors(stored);
+}
+
 // Public (no-auth) read of WHETHER each HA webhook event is configured (never the
 // webhook IDs themselves, which stay admin-only via getSettings()) — every device
 // playing a game calls sendHaWebhook() and needs to know up front whether firing
@@ -9446,7 +9468,7 @@ module.exports = {
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport, getPlayerCsvExport, importPlayerExport, getMergePreview, mergePlayers,
   getOnThisDay,
   getCheckoutRoutes, getDartAnalytics, getCoachingInsights,
-  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, getHaWebhookStatus, fireHaWebhook, getHeatmapStyle, getHeatmapNumberStyle, getRequireAuthSetting,
+  getSettings, updateSettings, getDartTimingEnabled, getScoreboardLayout, getDefaultScoringInput, getColorblindMode, getVoiceAnnouncementSettings, getCardTagline, getHaWebhookStatus, fireHaWebhook, getHeatmapStyle, getHeatmapNumberStyle, getBoardColors, getRequireAuthSetting,
   isSetupRequired, createFirstAdmin, createAdmin, listAdmins, deleteAdmin, changeAdminPassword, clearAdminLockout,
   login, logout, getSessionAdmin, adminLockoutDelayMs, verifyAdminPassword, backupRetentionDays,
   setPlayerPin, removePlayerPin, verifyPlayerPin, pinLockoutThreshold,

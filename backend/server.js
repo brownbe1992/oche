@@ -210,6 +210,15 @@ const db = require('./db.js');
 const auth = require('./auth.js');
 const netguard = require('./netguard.js');
 const backupLib = require('./backup-lib.js');
+const { normaliseBoardColor } = require('../frontend/scoring.js');
+
+// Settings -> Board colours. Stored per field so one bad value can never discard
+// the admin's other three choices, and validated with the SAME
+// normaliseBoardColor() the client uses so the accepted format can't drift
+// between the two ends. These reach a browser as an SVG `fill="..."` attribute,
+// which is why the format is enforced here on write, again in db.getBoardColors()
+// on read, and again at the sink in buildDartboard().
+const BOARD_COLOR_KEYS = ['board_single_a','board_ring_a','board_single_b','board_ring_b'];
 
 const PORT = process.env.PORT || 8046;
 // Every state-changing (write) API endpoint requires a logged-in admin session by
@@ -942,6 +951,10 @@ const server = http.createServer(async (req, res) => {
     // style — any device viewing a profile needs this, not just an admin's browser.
     if (p === '/api/settings/heatmap-style' && m === 'GET') { return send(res, 200, db.getHeatmapStyle()); }
     if (p === '/api/settings/heatmap-number-style' && m === 'GET') { return send(res, 200, db.getHeatmapNumberStyle()); }
+    // Public (no-auth) read of the dartboard's colour scheme — every device that
+    // renders the scoring board needs it, and the board is drawn before any admin
+    // session exists on a shared household tablet.
+    if (p === '/api/settings/board-colors' && m === 'GET') { return send(res, 200, db.getBoardColors()); }
     if (p === '/api/settings' && m === 'PUT') {
       if (!requireAdmin(req, res)) return;
       const b = await readJson(req);
@@ -954,7 +967,8 @@ const server = http.createServer(async (req, res) => {
         'ha_webhook_gamestart','ha_webhook_gameend','ha_webhook_setstart','ha_webhook_setend',
         'ha_webhook_legstart','ha_webhook_legend','pin_lockout_threshold',
         'admin_lockout_grace','admin_lockout_base_seconds','admin_lockout_max_seconds','scoreboard_layout',
-        'default_scoring_input','card_tagline','heatmap_style','heatmap_number_style', ...boolKeys];
+        'default_scoring_input','card_tagline','heatmap_style','heatmap_number_style',
+        ...BOARD_COLOR_KEYS, ...boolKeys];
       const safe = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
       if ('pin_lockout_threshold' in safe) {
         const n = Number(safe.pin_lockout_threshold);
@@ -976,6 +990,17 @@ const server = http.createServer(async (req, res) => {
       }
       if ('card_tagline' in safe && safe.card_tagline.length > 140) {
         return send(res, 400, { error: 'card_tagline must be 140 characters or fewer' });
+      }
+      // An empty string is how the client CLEARS an override (the derived-from-A
+      // value takes over again on read), so it is allowed through; anything else
+      // must be an exact #rrggbb. Rejecting rather than silently coercing, so an
+      // admin whose picker sent something unexpected is told, not quietly ignored.
+      for (const k of BOARD_COLOR_KEYS) {
+        if (!(k in safe)) continue;
+        if (safe[k] === '') continue;
+        const ok = normaliseBoardColor(safe[k]);
+        if (!ok) return send(res, 400, { error: `${k} must be a #rrggbb colour` });
+        safe[k] = ok;
       }
       // SEC-9: ha_url and the webhook-ID fields were previously stored unbounded.
       if ('ha_url' in safe && String(safe.ha_url).length > 2048) {
