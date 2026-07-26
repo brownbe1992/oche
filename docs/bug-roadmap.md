@@ -2721,6 +2721,94 @@ unknown difficulty falls back to medium, that a client-supplied `config.rounds` 
 still ignored outright, and an exhaustive check that no difficulty can ever push a
 budget below the perfect route. Confirmed live across all four settings.
 
+### BUG-37 — 121 Checkout Ladder awarded no achievements either, the same structural gap as BUG-34  **(MED, user-facing / a whole mode silently missing a feature)**
+
+**Status: ✅ Fixed (2026-07).** Reported from live play: "achievements are not
+firing during checkout ladder mode."
+
+**Same root cause as BUG-34**, which is the point worth recording: the per-visit
+achievement block lived inline inside `enterTurn()`, so *every* mode with its own
+commit path was missing it, not just the one first reported.
+`enterTurnCheckoutLadder()` uses `evaluateVisit()` — X01's own per-visit evaluator
+— so the `ev` shape is identical and every check applies. Big Fish is genuinely
+reachable here: the ladder's top rung **is** 170.
+
+**Fix.** Call the shared `awardVisitAchievements(p, ev, _snap)` (extracted in
+BUG-34), and add the per-visit tracking fields to
+`newMatchPlayerCheckoutLadder()` — it had the same gap Dead Man Walking's factory
+did, so without them the first committed visit throws on `p.legVisitScores.push`.
+
+**Scope deliberately stopped here.** An audit of all the enter-turn paths found
+seven modes awarding only the time-of-day pair. Three of them —
+X01, Dead Man Walking, Checkout Ladder — evaluate visits with `evaluateVisit()`
+and are now wired up. The other four (Gauntlet's per-station
+`evaluateGauntletStation()`, Bob's 27, The Pressure Chamber, plus Cricket/Baseball/
+Shanghai/Halve-It) have no remaining score to check out from, so most of the block
+is meaningless there; they keep the time-of-day pair on purpose. The committed test
+states that list, so the decision is recorded rather than re-litigated.
+
+**Verification.** `backend/test/frontend.visit-achievements-shared.test.js` now
+asserts by CALLER rather than by call count (a count is a chore to maintain and
+says nothing about which mode regressed), plus a check that every calling mode's
+player factory carries the tracking fields. Confirmed live: a 121 checkout on the
+first rung queued `cruisecontrol`, where previously nothing fired at all.
+
+### BUG-38 — Guided Around the World retired itself permanently after one completion  **(MED, game-design / user-facing)**
+
+**Status: ✅ Fixed (2026-07).** Reported from live play: "Around the world mode
+starts from wherever your lifetime around the world results stand. After hitting
+whatever darts are left, the achievement for around the world mode fires off
+despite having only hit the missing lifetime darts, not them all during one
+session. Then, when starting a new game, everything has already been hit."
+
+**Both halves are one defect.** The drill tracked *lifetime* progress, so a run
+started at whatever the player's lifetime 63-outcome set already contained. That
+made `guided_world` fire for a session in which only a handful of never-before-hit
+outcomes were thrown — and once the lifetime set was complete, every subsequent
+game opened at 63/63 with nothing to do.
+
+The mechanism behind the second symptom, specifically: `p.sessionHitSet` was only
+added to when the outcome was new to **lifetime**
+(`if(isNewLifetimeOutcome) p.sessionHitSet.add(…)`). A player with a complete
+lifetime set therefore could never make progress at all — every dart was a no-op.
+
+This one is a **design** correction, not a code-vs-spec mismatch: `REFERENCE.md`
+documented the lifetime behaviour as intended ("not reset per session, and the
+session never force-ends"). Updated in the same change, per the standing
+REFERENCE.md convention.
+
+**Fix — "one world = one game",** matching the shape Around the Clock was already
+redesigned into. Every dart joins the session set; the dart that brings it to 63
+ends the whole game with a **WORLD COMPLETE** screen, running the same completion
+sequence the Clock uses (webhooks, event log, `DB.completeGame()`, `matchResult`,
+`finishUnit`). Without that sequence the game never becomes `done` — the exact bug
+the Clock's own redesign fixed, and it would have been reintroduced here.
+
+Lifetime progress is **not** removed: it stays on the scoreboard as a secondary
+line, still labels a dart as *first ever* versus merely *new this session*, and
+still drives the Player Profile grid, the Home leaderboard and the passive
+`around_the_world` badge.
+
+Two consequences that needed handling and are easy to miss:
+- `rebuildAroundTheWorldState()` returned only a dart count. With the session set
+  now being the state, a resumed save would have come back with its checklist
+  reset to 0/63; it replays the outcomes out of the turns instead. It routes each
+  dart through `makeDartCore()`, so an attempted treble bull normalises to `25:1`
+  rather than becoming a phantom 64th outcome.
+- Undo has to restore `game.roundOver`. The completing dart sets a guard that
+  refuses further darts, so undoing it without clearing the flag would leave the
+  run permanently closed.
+
+**Verification.** `backend/test/around-the-world-session.test.js` (16 cases) — the
+rebuild replaying exact outcomes, repeats counting as darts but not progress, the
+miss and both bulls being real members of the 63, treble-bull normalisation, 62
+not completing, the lifetime-gated add being gone, completion measured on the
+session set, the full completion sequence, the dart guard, undo restoring it, and
+lifetime still being tracked and shown. Confirmed live: run 1 starts 0/63,
+completes at 63/63 in 63 darts, awards `guided_world` and sets `game.done`; run 2
+starts fresh at 0/63 with the lifetime line reading its own separate total, which
+`GET /api/players/around-the-world` confirms at 63/63.
+
 ## Standing practice
 
 When a functional bug is found: add it here with a repro and a fix outline before fixing,

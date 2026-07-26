@@ -1993,8 +1993,19 @@ function rebuildKillerState({ participants, numbers, turns, threshold }){
 // deliberately does NOT rebuild" section accepts losing (the combined lifetime
 // progress total stays fully correct either way, since that's server-derived,
 // not built from this count).
+// The session's own hit set is the mode's state now (one world = one game,
+// 2026-07), so a resumed game has to replay it out of the turns the same way
+// rebuildAroundTheClockState() does — returning only a dart count would drop
+// every outcome already collected and restart the checklist at 0/63.
 function rebuildAroundTheWorldState({ turns }){
-  return { sessionDarts: turns.length };
+  const hitSet = new Set();
+  for(const t of turns){
+    const d = t.darts && t.darts[0];
+    if(!d) continue;
+    const dart = makeDartCore(d.sector, d.mult);
+    hitSet.add(`${dart.sector}:${dart.mult}`);
+  }
+  return { sessionDarts: turns.length, hitSet, roundOver: hitSet.size >= 63 };
 }
 
 // Marathon Mode (docs/archive/marathon-mode-roadmap.md) — the two genuinely new

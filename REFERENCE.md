@@ -814,17 +814,46 @@ function evaluateDartAroundTheClock(dart, hitSet){
   is — `display.html`'s "GAME OVER" banner reads `s.doneHeading || 'GAME
   OVER'` instead of the literal string.
 
-**Around the World** is structurally identical to Just Chuckin' It: no round
-boundary at all, one continuous stream of 1-dart turns per `games` row
-(`set_no=leg_no=1` throughout), tracking progress toward the same lifetime
-63-outcome set `getAroundTheWorldProgress()` already computes — **not** reset
-per session, and the session never force-ends (reaching 63/63 is a notable
-event, not a stop condition). `newMatchPlayerAroundTheWorld()` fetches the
-lifetime baseline **once** at game start via the existing
-`GET /api/players/around-the-world` endpoint, the same
+**Around the World is one world = one game** (2026-07 redesign, superseding
+this doc's original "progress is lifetime, not reset per session, and the
+session never force-ends" design). The goal is the **session's own** 63
+outcomes: every dart joins `p.sessionHitSet`, and the dart that brings it to 63
+ends the whole game, running the same completion sequence Around the Clock's own
+redesign uses (webhooks, event log, `DB.completeGame()`, `matchResult`,
+`finishUnit('game', …)` with a **WORLD COMPLETE** heading).
+
+The old lifetime-scoped design had two reported failures, which are one defect
+seen from both ends:
+
+1. A run started at whatever the player's lifetime set already contained, so
+   "finishing" it meant hitting only the handful of outcomes they had never hit
+   before — and `guided_world` fired for that.
+2. Once the lifetime set was complete, **every subsequent game opened at 63/63
+   with nothing left to do.** The mode retired itself permanently after one
+   completion.
+
+The cause of (2) specifically: `p.sessionHitSet` was only added to when the
+outcome was new to *lifetime* (`if(isNewLifetimeOutcome) p.sessionHitSet.add(…)`),
+so a player with a complete lifetime set could never make progress at all.
+
+**Lifetime progress is still tracked and still shown**, just as context rather
+than the objective — the scoreboard's `.standing` line, the Player Profile grid,
+the Home leaderboard and the passive `around_the_world` badge all still mean
+lifetime. `newMatchPlayerAroundTheWorld()` still fetches that baseline **once**
+at game start via `GET /api/players/around-the-world`, the same
 `lifetimeDartsBase`/`lifetimeTreblesBase`-style precedent Chuckin's
-`newMatchPlayerChuckin()` established, to avoid a per-dart network round-trip
-and the rate-limiter/dropped-dart risk documented above for Chuckin.
+`newMatchPlayerChuckin()` established, to avoid a per-dart network round-trip and
+the rate-limiter/dropped-dart risk documented above for Chuckin. It is used for
+the lifetime line and to label a dart as *first ever* rather than merely *new
+this session*.
+
+Structurally the mode is still Chuckin-shaped otherwise: one continuous stream of
+1-dart turns per `games` row (`set_no=leg_no=1` throughout).
+`rebuildAroundTheWorldState()` (`frontend/scoring.js`) now replays the session's
+hit set out of the turns rather than returning only a dart count — a saved game
+would otherwise resume with its checklist reset to 0/63. Note it routes each dart
+through `makeDartCore()`, so an attempted treble bull normalises to `25:1` instead
+of becoming a phantom 64th outcome.
 
 **Undo** is supported for both, one dart deep, mirroring
 `undoLastTurnDoublesPractice()`/`undoLastTurnChuckin()`'s snapshot-restore
@@ -2345,7 +2374,7 @@ firing exactly as they always have, from any mode, unrelated to these:
 | Badge | Exact condition |
 |---|---|
 | 🧭 **Guided Clock** | A guided Around the Clock round completes — `evaluateDartAroundTheClock()`'s `completed` flag fires (all 20 numbers 1-20 hit as singles). **Once-badge**, undo-revocable (§2's "Guided Around the Clock / Around the World" section). |
-| 🗺️ **Guided World** | The lifetime Around the World progress count reaches 63/63 as a direct result of a dart thrown during a guided Around the World session (checked inline after every dart, via the same `baselineHitSet + sessionHitSet` running total `playerSnapshotAroundTheWorld()` reports). **Once-badge**, undo-revocable. |
+| 🗺️ **Guided World** | All 63 outcomes hit **within a single guided Around the World session** (`p.sessionHitSet.size === 63`, checked inline after every dart). Before the 2026-07 "one world = one game" redesign this was the *lifetime* count reaching 63/63, so it could fire for a session in which the player hit only the few outcomes they had never hit before. **Once-badge**, undo-revocable — and since the completing dart also ends the game, undo restores `game.roundOver` too, or the run would stay permanently closed to further darts. |
 
 ### Description text
 

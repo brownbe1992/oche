@@ -40,18 +40,42 @@ function sharedFn(s) {
 }
 
 describe('the per-visit achievement block is shared, not X01-only', () => {
-  test('both commit paths call it', () => {
-    const s = src();
-    const calls = s.match(/awardVisitAchievements\(p, ev, _snap\);/g) || [];
-    assert.equal(calls.length, 2,
-      `expected enterTurn() and enterTurnDeadManWalking() to both call it, found ${calls.length}`);
+  // Asserted by CALLER, not by a call count — a count has to be edited every
+  // time another mode is wired up, which turns a meaningful test into a chore
+  // and tells you nothing about which mode regressed.
+  //
+  // These three are exactly the modes whose visits come from evaluateVisit()
+  // (X01's own per-visit evaluator), so the `ev` shape is identical and every
+  // check applies. Modes with their own evaluators — Gauntlet's per-station
+  // evaluateGauntletStation(), Bob's 27, The Pressure Chamber, Cricket,
+  // Baseball, Shanghai, Halve-It — are deliberately NOT in this list: they have
+  // no remaining score to check out from, so most of the block is meaningless
+  // there and they keep the time-of-day pair only.
+  const CALLERS = ['enterTurn', 'enterTurnDeadManWalking', 'enterTurnCheckoutLadder'];
 
-    // And specifically inside Dead Man Walking's own commit function, not merely
-    // somewhere else in the file.
-    const dmw = s.match(/function enterTurnDeadManWalking\(\)\{[\s\S]*?\n\}/);
-    assert.ok(dmw, 'enterTurnDeadManWalking() not found');
-    assert.match(dmw[0], /awardVisitAchievements\(p, ev, _snap\)/,
-      'Dead Man Walking must award per-visit achievements like every other mode');
+  for (const fnName of CALLERS) {
+    test(`${fnName}() awards per-visit achievements`, () => {
+      const body = src().match(new RegExp(`\nfunction ${fnName}\\(\\)\\{[\\s\\S]*?\n\\}`));
+      assert.ok(body, `${fnName}() not found`);
+      assert.match(body[0], /awardVisitAchievements\(p, ev, _snap\)/,
+        `${fnName}() must award per-visit achievements like every other mode`);
+    });
+  }
+
+  test('every mode that calls it has the tracking fields its player needs', () => {
+    // p.legVisitScores.push is the first thing the shared block touches, so a
+    // player factory missing these throws on the very first committed visit.
+    // Both Dead Man Walking (BUG-34) and Checkout Ladder (BUG-37) had this gap.
+    const s = src();
+    const FIELDS = ['legVisitScores', 'metronomeFired', 'pendingIceInTheVeins',
+      'singlesHit', 'atwHitSet', 'atwBaselineHitSet', 'sessionOneEighties', 'lifetimeOneEightiesBase'];
+    for (const factory of ['newMatchPlayer', 'newMatchPlayerDeadManWalking', 'newMatchPlayerCheckoutLadder']) {
+      const body = s.match(new RegExp(`function ${factory}\\([^)]*\\)\\{[\\s\\S]*?\n\\}`));
+      assert.ok(body, `${factory}() not found`);
+      for (const f of FIELDS) {
+        assert.ok(body[0].includes(f), `${factory}() is missing ${f} — the first committed visit will throw`);
+      }
+    }
   });
 
   test('it is no longer duplicated inline in enterTurn()', () => {

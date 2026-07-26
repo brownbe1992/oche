@@ -15688,15 +15688,23 @@ const GAME_TYPES = {
     statDefs: AROUND_THE_WORLD_STAT_DEFS,
     personalBestsSpec: AROUND_THE_WORLD_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyAroundTheWorld,
-    liveModeState: game => ({ atwLastDart: game.atwLastDart || null }),
+    // A finishing summary, same as the Clock's — the completion is a real game
+    // end now, so it gets the same treatment on the results screen, the live
+    // scoreboard and display.html rather than a silent state change.
+    legSummary: (game) => [{ name: game.players[0].name,
+      outcomes: game.players[0].sessionHitSet ? game.players[0].sessionHitSet.size : 0,
+      darts: game.players[0].sessionDarts||0, won: true }],
+    liveModeState: game => ({ atwLastDart: game.atwLastDart || null,
+      roundOver: !!game.roundOver }),
     soloOnly: true,
     resume: (ctx) => {
       const { players, state } = ctx;
       const r = rebuildAroundTheWorldState({ turns: state.turns });
       players[0].sessionDarts = r.sessionDarts;
+      players[0].sessionHitSet = r.hitSet;
       return {
-        overlay: {},
-        statusMsg: `Resumed — ${r.sessionDarts} darts this session so far.`,
+        overlay: { roundOver: r.roundOver },
+        statusMsg: `Resumed — ${r.hitSet.size} of 63 outcomes this session, ${r.sessionDarts} dart${r.sessionDarts===1?'':'s'} thrown.`,
       };
     }
   },
@@ -16072,7 +16080,15 @@ function playerSnapshotBobs27(p){
    roadmap doc. Always double-out (the classic checkout-ladder rule),
    regardless of this player's own X01 out-mode preference elsewhere. */
 function newMatchPlayerCheckoutLadder(name){
-  return { name, score:121, doubleOut:true, legDarts:0, setDarts:0, gameDarts:0 };
+  return { name, score:121, doubleOut:true, legDarts:0, setDarts:0, gameDarts:0,
+    // Per-visit achievement tracking, the same fields newMatchPlayer() carries —
+    // needed since enterTurnCheckoutLadder() started calling the shared
+    // awardVisitAchievements() (docs/bug-roadmap.md BUG-37). Without them the
+    // first committed visit throws on `p.legVisitScores.push`, the same way Dead
+    // Man Walking's own factory did (BUG-34).
+    legVisits:0, legVisitScores:[], metronomeFired:false, pendingIceInTheVeins:false,
+    singlesHit: new Set(), atwHitSet: new Set(), atwBaselineHitSet: new Set(),
+    sessionOneEighties:0, lifetimeOneEightiesBase:0 };
 }
 function resetPlayerForNextLegCheckoutLadder(p, game, newSet){
   p.score = game.checkoutLadderTarget;
@@ -16129,7 +16145,14 @@ function enterTurnCheckoutLadder(){
   game.currentLegTurns.push(turnRecord);
   game.sessionTurns.push(turnRecord);
 
-  awardTimeOfDayBadges(p);
+  // Every per-visit achievement, same as X01 — this mode's visits come from
+  // evaluateVisit(), X01's own evaluator, so the `ev` shape is identical and
+  // every check applies. Big Fish is genuinely reachable (the ladder's top rung
+  // IS 170), as are Hat Trick, Madhouse, Bullseye Finish, No Cigar and the
+  // first-100-checkout milestone. Before this the mode awarded only the
+  // time-of-day pair (which awardVisitAchievements() now makes for it), so in
+  // practice no achievement ever fired — docs/bug-roadmap.md BUG-37.
+  awardVisitAchievements(p, ev, _snap);
 
   const visitsUsed = game.checkoutLadderVisits + 1;
   if(ev.win){
@@ -18244,34 +18267,77 @@ function resetPlayerForNextLegAroundTheWorld(p){
 }
 function playerSnapshotAroundTheWorld(p){
   // hitOutcomes (not just a count) so the Live Scoreboard can render the same
-  // outcome grid the controller itself shows via buildOutcomeGridHtml().
-  const combined = new Set([...p.baselineHitSet, ...p.sessionHitSet]);
+  // outcome grid the controller itself shows via buildOutcomeGridHtml(). Reports
+  // the SESSION set, so the second screen shows the same checklist the player is
+  // filling rather than a lifetime total they can't affect this game.
   return { name:p.name, sessionDarts:p.sessionDarts||0,
-    hitOutcomes:[...combined], progress: combined.size, total: 63 };
+    hitOutcomes:[...p.sessionHitSet], progress: p.sessionHitSet.size, total: 63,
+    lifetimeProgress: new Set([...p.baselineHitSet, ...p.sessionHitSet]).size };
 }
+// One world = one game (2026-07 redesign, superseding "progress is lifetime and
+// never resets"). The old shape had two reported problems, and they were the same
+// problem seen from both ends: the run started at whatever your LIFETIME progress
+// happened to be, so finishing it meant hitting only the handful of outcomes you
+// had never hit before — and once that lifetime set was complete, every new game
+// opened at 63/63 with nothing left to do. The mode retired itself permanently
+// after one completion.
+//
+// The goal is now the SESSION's own 63 outcomes, which is the same "one clock =
+// one game" shape Around the Clock was redesigned into: a real drill you can play
+// again tomorrow, and a completion that means you actually hit all 63 in one
+// sitting. Lifetime progress is still tracked and still shown — it just isn't the
+// win condition any more.
 function throwDartAroundTheWorld(sector, zone, missZone, missDepth, bounced){
+  if(game.roundOver) return;
   const dart = makeDart(sector, bounced ? 1 : mult);
   mult = 1; updateMultUI();
   const p = game.players[0];
   const outcomeKey = `${dart.sector}:${dart.mult}`;
-  const isNewLifetimeOutcome = !p.baselineHitSet.has(outcomeKey) && !p.sessionHitSet.has(outcomeKey);
+  // Two different "new"s, both worth telling the player about: new to THIS
+  // session (progress toward the goal) and never hit in their life (a
+  // completionist milestone that still matters, just no longer the objective).
+  const isNewThisSession = !p.sessionHitSet.has(outcomeKey);
+  const isNewLifetimeOutcome = isNewThisSession && !p.baselineHitSet.has(outcomeKey);
 
   // snapshot state before mutation so undoLastTurnAroundTheWorld() can restore it.
   pushTurnSnapshot({ sessionDarts:p.sessionDarts, sessionHitSet: new Set(p.sessionHitSet),
-    atwLastDart:game.atwLastDart, badgeReverts:[], voided:false });
+    roundOver:game.roundOver, atwLastDart:game.atwLastDart, badgeReverts:[], voided:false });
 
   p.sessionDarts += 1;
-  if(isNewLifetimeOutcome) p.sessionHitSet.add(outcomeKey);
+  p.sessionHitSet.add(outcomeKey);
+  const progress = p.sessionHitSet.size;
+  const completed = progress === 63;
   recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
-  game.atwLastDart = { label:dart.label, isNewLifetimeOutcome };
-  const progress = p.baselineHitSet.size + p.sessionHitSet.size;
-  announce(`${dart.label}. ${progress} of 63 lifetime outcomes.`);
-  renderGameAroundTheWorld();
-  if(progress >= 63){
-    awardOnceBadge(p.name, 'guided_world', 'guided_world', game.lastTurnSnapshot,
-      { icon:'🗺️', headline:'GUIDED WORLD', statLine:'Completed Around the World during a guided session' });
+    scored:0, bust: completed, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
+  game.atwLastDart = { label:dart.label, isNewThisSession, isNewLifetimeOutcome };
+  const _snap = game.lastTurnSnapshot;
+  announce(`${dart.label}. ${progress} of 63 this session.`);
+
+  if(completed){
+    game.roundOver = true;
+    awardOnceBadge(p.name, 'guided_world', 'guided_world', _snap,
+      { icon:'🗺️', headline:'GUIDED WORLD', statLine:`All 63 outcomes in one session — ${p.sessionDarts} darts` });
+    // Same completion sequence Around the Clock's own "one clock = one game"
+    // redesign uses (webhooks, event log, DB.completeGame(), matchResult,
+    // finishUnit('game', ...)) — without it the game never becomes `done`, which
+    // is the bug that redesign fixed for the Clock.
+    sendHaWebhook('legend', p.name, game.category, { setNo: game.setNo, legNo: game.legNo });
+    sendHaWebhook('setend', p.name, game.category, { setNo: game.setNo });
+    sendHaWebhook('gameend', p.name, game.category);
+    DB.recordEvent('leg_end', game.setNo, game.legNo);
+    DB.recordEvent('set_end', game.setNo, null);
+    DB.recordEvent('game_end', null, null);
+    DB.completeGame(p.name);
+    game.matchResult = { ts:Date.now(), kind:'game', legNo:game.legNo, setNo:game.setNo, winner:p.name, bigFish:false };
+    fireMomentCard('matchwin', { icon:'🗺️', headline:'WORLD COMPLETE!', player:p.name,
+      statLine: `All 63 outcomes — ${p.sessionDarts} darts` });
+    finishUnit('game', p.name, {
+      heading: 'WORLD COMPLETE', subtext: `${escapeHtml(p.name)} hit every outcome. Stats saved.`,
+      bannerText: `${escapeHtml(p.name)} completes the world!`, liveMessage: `${p.name} completes the world!`,
+    });
+    return;
   }
+  renderGameAroundTheWorld();
 }
 // Undoes the single most recently thrown dart — mirrors undoLastTurnChuckin()'s
 // shape, plus revoking guided_world if this dart earned it.
@@ -18281,6 +18347,7 @@ function undoLastTurnAroundTheWorld(){
   const p = game.players[0];
   p.sessionDarts = snap.sessionDarts;
   p.sessionHitSet = snap.sessionHitSet;
+  game.roundOver = snap.roundOver;
   game.atwLastDart = snap.atwLastDart;
 
   _finishUndo(snap, renderGameAroundTheWorld, { msg: 'Last dart undone.' });
@@ -18288,7 +18355,11 @@ function undoLastTurnAroundTheWorld(){
 function renderGameAroundTheWorld(){
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
   const p = game.players[0];
-  const progress = p.baselineHitSet.size + p.sessionHitSet.size;
+  // Session progress is the goal; the grid is this session's own checklist.
+  const progress = p.sessionHitSet.size;
+  // Lifetime is still tracked and still shown, just as context rather than the
+  // objective — a first-ever outcome is a real milestone worth surfacing.
+  const lifetime = new Set([...p.baselineHitSet, ...p.sessionHitSet]).size;
   const row = document.createElement('div');
   row.className = 'pscore active';
   row.innerHTML = `
@@ -18297,7 +18368,8 @@ function renderGameAroundTheWorld(){
       <div class="turnflag">▸ throwing</div>
     </div>
     <div class="meta">
-      <div class="avgs">${progress} / 63 lifetime outcomes &nbsp;·&nbsp; ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'} this session</div>
+      <div class="avgs">${progress} / 63 this session &nbsp;·&nbsp; ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'}</div>
+      <div class="standing">${lifetime} / 63 lifetime</div>
     </div>
     <div class="rem-wrap">
       <div class="rem">${progress}</div>
@@ -18305,17 +18377,18 @@ function renderGameAroundTheWorld(){
     <div id="atw-live-progress" style="margin-top:10px"></div>`;
   if(sb) sb.appendChild(row);
   const progressEl = document.getElementById('atw-live-progress');
-  const combinedHitSet = new Set([...p.baselineHitSet, ...p.sessionHitSet]);
-  if(progressEl) progressEl.innerHTML = buildOutcomeGridHtml(combinedHitSet, { cells: 'all', live: true });
+  if(progressEl) progressEl.innerHTML = buildOutcomeGridHtml(p.sessionHitSet, { cells: 'all', live: true });
 
   const status = document.getElementById('status');
   if(status){
     if(game.atwLastDart){
-      status.className = game.atwLastDart.isNewLifetimeOutcome ? 'status win' : 'status';
-      status.textContent = `${game.atwLastDart.label}${game.atwLastDart.isNewLifetimeOutcome ? ' — new outcome!' : ''} · ${progress} of 63.`;
+      const d = game.atwLastDart;
+      status.className = d.isNewThisSession ? 'status win' : 'status';
+      const tag = d.isNewLifetimeOutcome ? ' — first ever!' : d.isNewThisSession ? ' — new!' : ' — already had it';
+      status.textContent = `${d.label}${tag} · ${progress} of 63.`;
     } else {
       status.className = 'status';
-      status.textContent = padOrBoardHint('Chip away at every lifetime outcome.');
+      status.textContent = padOrBoardHint('Hit all 63 outcomes in one session.');
     }
   }
   renderPad();
