@@ -2573,6 +2573,39 @@ the dartboard: the trainer opens on the pad, the toggle is absent (computed
 "Legal finish, but not optimal (you used 2 — 1 possible). Best route: Bull," and a
 following X01 game still gets the board. `REFERENCE.md` §19 rewritten accordingly.
 
+### BUG-33 — Four per-dart modes told dartboard players to "select a multiplier" — controls that are not on screen — from the first dart onward  **(LOW, user-facing / instructions contradict the UI)**
+
+**Status: ✅ Fixed (2026-07).** Reported by the owner from a live iPad screenshot: a
+**Just Chuckin' It** game with the 🎯 dartboard toggle selected, showing the hint
+*"Select a multiplier, then tap a number. No score, no pressure — just throw."* There
+is no multiplier row on screen in board mode — it is hidden by `applyDartMode()`.
+
+**Root cause.** `renderGame()` builds the initial hint correctly, branching on
+`boardInputActive()`. But the solo per-dart modes each re-render their own status line,
+and four of them hardcoded the **Pad** wording in that path:
+
+- `renderGameDoublesPractice()`
+- `renderGameChuckin()`
+- `renderGameAroundTheClock()`
+- `renderGameAroundTheWorld()`
+
+Those modes commit every dart immediately and re-render after each one, so the correct
+board copy survived exactly until the first dart (or until an undo returned the screen
+to its no-last-dart state, which is the branch the screenshot caught). The wording was
+duplicated in nine places across the file with no single source, which is how four
+copies came to disagree with the other five.
+
+**Fix.** One helper, `padOrBoardHint(suffix)`, derives the wording from
+`boardInputActive()` and takes the mode-specific tail as an argument. All nine sites
+call it. Killer keeps its own longer bespoke sentence, which was already mode-aware.
+
+**Verification.** `backend/test/frontend.landscape-scoring.test.js` asserts the helper
+derives from `boardInputActive()`, that **no** `status.textContent` assignment
+hardcodes the pad wording any more (a scan, so a tenth site can't reintroduce it), and
+that every hint site routes through the helper. Confirmed live in a browser: a Chuckin
+game in board mode reads "Tap the board to score. No score, no pressure — just throw."
+both at start and after an undo.
+
 ## Standing practice
 
 When a functional bug is found: add it here with a repro and a fix outline before fixing,

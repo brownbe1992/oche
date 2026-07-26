@@ -146,6 +146,29 @@ mobile app, etc.) should consider keyboard/focus order, color-only signals, and
 screen-reader announcements as part of its own design — not as a follow-up pass after
 the fact. See `CLAUDE.md` for the binding version of this statement.
 
+### Applied: landscape scoring-screen pass (2026-07)
+
+The tablet/landscape scoring layout was designed against this checklist rather than
+audited afterwards:
+
+- **Keyboard/focus order** — a filled dart slot became a real `<button>` (tap it to
+  walk the turn back to that dart). Empty slots stay inert `<div>`s: there is nothing
+  to undo, so adding three do-nothing tab stops per turn would have been a regression,
+  not a feature. Each button's accessible name says what it does
+  ("Dart 2, T20. Undo back to this dart."), not just what it shows.
+- **Colour-only signals** — the most-recent-dart marker is a gold inset ring, not a
+  third fill colour. `.slot.t`/`.slot.d` already spend red/green on treble/double, and
+  `body.colorblind` remaps exactly those two, so a colour marker would have been both
+  crowded and invisible to the setting the app already honours.
+- **Screen-reader announcements** — the new board-tap score flash is `aria-hidden`. It
+  is a visual repeat of what `#slots` and `#status` already announce; making it a
+  second live region would have announced every dart twice.
+
+Also fixed in the same pass: four per-dart modes told dartboard players to "select a
+multiplier" — a control not on screen in that mode (`docs/bug-roadmap.md` **BUG-33**).
+Instructions that name absent controls are an accessibility defect as much as a
+cosmetic one.
+
 ## Open questions for whoever picks this up
 
 - How much should `aria-live="polite"` vs. `aria-live="assertive"` be used for

@@ -87,6 +87,95 @@ async function soloMode(rep, gameType, label, expect) {
   });
 }
 
+// The landscape/tablet board-entry pass (2026-07). The board is the score-ENTRY
+// surface on a tablet, so its drawn size is a functional property, not a cosmetic
+// one — and it is decided entirely by its container (the SVG is
+// preserveAspectRatio "meet", so it fits the SHORTER of the column's two
+// dimensions). Before this pass a 760px cap on `.wrap` left the board at 400px of
+// an 1180px screen with ~165px of dead space above and below it. Only a real
+// browser can catch that regressing: the CSS would still parse, the test suite
+// would still pass, and the board would just quietly be small again.
+async function landscapeBoardEntry(rep) {
+  await L.withPage(L.LANDSCAPE, async (page, pageErrors) => {
+    const names = [L.uniqueName('LandA'), L.uniqueName('LandB')];
+    await L.startX01(page, { names, startScore: 501 });
+    await page.evaluate(() => { dartboardMode = true; applyDartMode(); });
+    await page.waitForTimeout(300);
+
+    const board = await page.evaluate(() => {
+      const r = document.getElementById('dart-board-wrap').getBoundingClientRect();
+      // "meet" draws a square fitted to the shorter side.
+      return { drawn: Math.round(Math.min(r.width, r.height)), vh: window.innerHeight };
+    });
+    // 0.85 of the viewport height is comfortably above the old 400px (0.49) and
+    // comfortably below anything achievable, so it fails loudly if the cap comes
+    // back without being brittle about a few pixels of chrome.
+    rep.ok('landscape: the board fills the panel height (>=85% of the viewport)',
+      board.drawn >= board.vh * 0.85, `board drew at ${board.drawn}px in a ${board.vh}px-tall viewport`);
+
+    await page.evaluate(() => { throwDartBoard(20, 3, 'treble'); throwDartBoard(5, 1, 'outer'); });
+    await page.waitForTimeout(200);
+
+    const flash = await page.evaluate(() => {
+      const el = document.getElementById('dart-flash');
+      const b = el.getBoundingClientRect();
+      const board = document.getElementById('dart-board-wrap').getBoundingClientRect();
+      return { text: el.textContent, on: el.classList.contains('on'),
+        display: getComputedStyle(el).display,
+        clearOfBoard: b.right <= board.left + 1 };
+    });
+    rep.ok('landscape: a board tap flashes the score it registered', flash.on && flash.text === '5',
+      `flash showed "${flash.text}" (on=${flash.on}, display=${flash.display})`);
+    rep.ok('landscape: the flash sits clear of the board, never over it', flash.clearOfBoard);
+
+    const row = await page.evaluate(() => {
+      const slots = [...document.querySelectorAll('#slots .slot')];
+      return { tags: slots.map(s => s.tagName), latest: slots.findIndex(s => s.classList.contains('latest')),
+        text: slots.map(s => s.querySelector('.lab') ? s.querySelector('.lab').textContent : null) };
+    });
+    rep.ok('landscape: the current-turn row reads T20 then 5',
+      row.text[0] === 'T20' && row.text[1] === '5', JSON.stringify(row.text));
+    rep.ok('landscape: the most recent dart is the one marked', row.latest === 1, `marked index ${row.latest}`);
+    rep.ok('landscape: filled darts are buttons, empty ones are not',
+      row.tags.join() === 'BUTTON,BUTTON,DIV', row.tags.join());
+
+    // Tap dart 1 — the whole turn should go, in one gesture.
+    await page.click('#slots .slot:nth-child(1)');
+    await page.waitForTimeout(250);
+    const undone = await page.evaluate(() => ({
+      darts: game.darts.length,
+      flashOn: document.getElementById('dart-flash').classList.contains('on'),
+    }));
+    rep.ok('landscape: tapping dart 1 walks the whole turn back', undone.darts === 0, `${undone.darts} darts left`);
+    rep.ok('landscape: the undo clears the flash too', undone.flashOn === false);
+
+    rep.ok('landscape-board: no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
+    await rep.captureIfFailed(page, 'landscape-board-entry');
+  });
+}
+
+// The portrait stack must be untouched by any of the above. The flash is inserted
+// into the markup unconditionally, so `display:none` at base is the only thing
+// keeping it out of the portrait column — and the dart row must stay 3-across.
+async function portraitUnchanged(rep) {
+  await L.withPage(L.PORTRAIT, async (page, pageErrors) => {
+    const names = [L.uniqueName('PortA'), L.uniqueName('PortB')];
+    await L.startX01(page, { names, startScore: 501 });
+    await page.evaluate(() => { dartboardMode = true; applyDartMode(); throwDartBoard(20, 3, 'treble'); });
+    await page.waitForTimeout(300);
+    const p = await page.evaluate(() => ({
+      flashDisplay: getComputedStyle(document.getElementById('dart-flash')).display,
+      cols: getComputedStyle(document.getElementById('slots')).gridTemplateColumns.split(' ').length,
+      wrapCapped: Math.round(document.querySelector('.wrap').getBoundingClientRect().width) <= 760,
+    }));
+    rep.ok('portrait: the board-tap flash is not rendered', p.flashDisplay === 'none', p.flashDisplay);
+    rep.ok('portrait: the dart row is still 3 across', p.cols === 3, `${p.cols} columns`);
+    rep.ok('portrait: the 760px game-screen cap still applies', p.wrapCapped);
+    rep.ok('portrait-unchanged: no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
+    await rep.captureIfFailed(page, 'portrait-unchanged');
+  });
+}
+
 module.exports = async function run() {
   const rep = L.makeReporter('scoring-modes');
   await stagedVisitMode(rep, 'x01', L.PORTRAIT, 'x01-portrait', /T20[\s\S]*60 pts/);
@@ -96,5 +185,7 @@ module.exports = async function run() {
     { slotsHidden: true, undoLabel: 'Undo Dart', enterHidden: true });
   await soloMode(rep, 'checkout_trainer', 'checkout-trainer',
     { slotsHidden: false, undoLabel: 'Undo Turn', enterHidden: false });
+  await landscapeBoardEntry(rep);
+  await portraitUnchanged(rep);
   return rep.finish();
 };

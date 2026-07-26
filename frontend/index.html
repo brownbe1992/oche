@@ -382,6 +382,26 @@
   .slot .lab{font-family:'Bebas Neue',sans-serif;font-size:30px;line-height:.9;letter-spacing:.03em}
   .slot .pts{font-size:11px;color:var(--muted)}
   .slot .ph{color:#4d514a;font-size:12px}
+  /* A FILLED slot is a <button> (renderSlots()) — tap it to walk the turn back
+     to that dart. Undo was never one-dart-deep (undoDart() pops one per tap and
+     undoLastTurn() walks a snapshot STACK back through the whole leg), but
+     nothing on screen said so; making each dart its own target is what makes
+     that depth discoverable. Empty slots stay plain <div>s — there is nothing
+     to undo, so there is nothing to focus. */
+  button.slot{font:inherit;color:inherit;cursor:pointer;-webkit-appearance:none;padding:0;width:100%}
+  button.slot:hover{border-color:var(--gold)}
+  /* Most recent dart of the current turn. A ring, not a colour swap: .slot.t/.d
+     already spend colour on treble/double, and this has to stay readable next
+     to them (and in colorblind mode, which remaps exactly those two). */
+  .slot.latest{box-shadow:0 0 0 2px var(--gold) inset}
+
+  /* Board-tap confirmation (landscape/tablet only — `display:none` here keeps
+     the portrait stack byte-identical). Shows the score that just registered
+     in ONE fixed spot well away from the board, so you can confirm a tap
+     without your eye leaving the wire you are aiming at. Purely a repeat of
+     what the slots/status line already say, hence aria-hidden — a live region
+     here would double every announcement. */
+  .dart-flash{display:none}
 
   .status{min-height:22px;text-align:center;font-size:13px;margin-bottom:12px;color:var(--muted)}
   .status.bust{color:var(--bust);font-weight:700;letter-spacing:.04em}
@@ -924,16 +944,37 @@
      sidesteps that whole class of bug — `.rail`'s own internal stacking is a
      plain, independent flex column. */
   @media (orientation:landscape) and (min-width:700px){
+    /* 2026-07: the board is the SCORE-ENTRY surface on this screen, so it gets
+       first call on space and everything else yields to it.
+       `body.game-active .wrap` caps the whole game screen at 760px — correct in
+       portrait, where it is the phone's width anyway, and deliberately left
+       alone there. On a 1180px tablet it left 420px of screen unused AND, more
+       importantly, made column 2 narrower (422px) than it was tall (753px).
+       The board SVG is preserveAspectRatio "meet", so it fits the SHORTER of
+       its container's two dimensions: it was being sized by that 422px width
+       and drawing at 400x400 inside a 731px-tall well, with ~165px of dead
+       space above and below. Releasing the cap lets width stop being the
+       binding constraint, and the board grows to the panel HEIGHT — measured
+       400px -> ~730px on an iPad Air 4, a 1.8x linear increase.
+       Nothing about the board itself changed: BOARD_GEOM's radii, the sector
+       paths, and the ring boundaries are untouched, so every double and treble
+       keeps its true visual size and no hit area is larger than the shape
+       drawn under it. The accuracy improvement is the scale, not the target. */
+    body.game-active .wrap{max-width:none}
     body.game-active #screen-game{
       display:grid;
-      grid-template-columns:minmax(190px,300px) 1fr;
+      /* Narrower rail than before (300 -> 240 max): every pixel taken off the
+         left column is a pixel the square board can grow by in BOTH dimensions
+         until height becomes the binding constraint again. 180px is still wide
+         enough for the compact score strip below. */
+      grid-template-columns:minmax(180px,240px) 1fr;
       /* Row 1 is the optional full-width Marathon banner (collapses to 0 when
          absent); row 2 is the rail + board. Every item sits in exactly ONE
          row — no multi-row span — so this stays clear of the row-sizing trap
          described above. */
       grid-template-rows:auto 1fr;
-      column-gap:14px; row-gap:6px;
-      padding:8px 12px 10px;
+      column-gap:10px; row-gap:6px;
+      padding:8px 10px 10px;
     }
     body.game-active .rail{
       display:flex; flex-direction:column;
@@ -949,12 +990,61 @@
        Stack it as a column here so the grid gets the rail's full width. */
     body.game-active .rail .pscore{flex-direction:column;align-items:stretch;gap:6px}
     body.game-active .rail .pscore .rem-wrap{align-items:flex-start;margin-left:0}
-    body.game-active #slots{grid-template-columns:1fr;gap:6px;margin-bottom:0}
-    body.game-active #slots .slot{height:auto;flex-direction:row;justify-content:flex-start;gap:8px;padding:6px 12px}
-    body.game-active #slots .slot .lab{font-size:22px}
+    /* Compact single-row strip. The column stack above stays the DEFAULT because
+       it is load-bearing for the solo per-dart modes (see the comment on that
+       rule) — this narrows the exception to "a card that does NOT contain the
+       wrapping outcome grid", tested structurally via the grid's own host id
+       rather than by listing game types here. If :has() is unsupported the whole
+       rule is dropped and the layout falls back to the column stack, i.e. to
+       exactly today's behaviour.
+       Scores are deliberately smaller than portrait's: this screen is optimised
+       for entering darts at arm's length from the board, not for reading a total
+       from across the room. */
+    body.game-active .rail .pscore:not(:has(#atc-live-progress, #atw-live-progress)){
+      flex-direction:row; align-items:center; flex-wrap:wrap; gap:6px 10px; padding:6px 10px;
+    }
+    body.game-active .rail .pscore:not(:has(#atc-live-progress, #atw-live-progress)) .rem-wrap{
+      margin-left:auto; align-items:flex-end;
+    }
+    body.game-active .rail .pscore:not(:has(#atc-live-progress, #atw-live-progress)) .rem{font-size:32px}
+    /* order:3 puts the meta line BELOW the name+score row rather than between
+       them — without it the full-basis meta block wraps first and pushes the
+       remaining score onto a third line of its own. */
+    body.game-active .rail .pscore:not(:has(#atc-live-progress, #atw-live-progress)) .meta{
+      order:3; flex-basis:100%; min-width:0; text-align:left; margin-left:0;
+    }
+    /* The current-turn dart row: "T20 · 5 · D18" on one line, most recent
+       ringed. Horizontal here (portrait keeps the 3-across grid) so it costs one
+       line of the rail instead of three, and reads as a sequence. */
+    body.game-active #slots{grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:0}
+    body.game-active #slots .slot{height:auto;flex-direction:column;justify-content:center;gap:0;padding:5px 4px}
+    body.game-active #slots .slot .lab{font-size:20px}
+    body.game-active #slots .slot .pts{font-size:9px}
     body.game-active #status{margin-bottom:0}
-    body.game-active .oche{grid-column:2;grid-row:2;display:flex;flex-direction:column;justify-content:center;min-height:0}
+    /* Board-tap confirmation. Sits in what used to be ~328px of dead rail — a
+       fixed spot, never over the board. `margin-top:auto` on both this and
+       .turn-actions splits the leftover space, parking the flash around the
+       middle of the rail and the buttons at the bottom whatever the mode's
+       scoreboard height turns out to be. */
+    body.game-active .dart-flash{
+      display:flex; align-items:center; justify-content:center;
+      margin-top:auto; min-height:0; padding:4px 0;
+      font-family:'Bebas Neue',sans-serif; font-size:clamp(40px,8dvh,72px); line-height:1;
+      letter-spacing:.03em; color:var(--gold);
+      opacity:0; transition:opacity .35s ease;
+    }
+    body.game-active .dart-flash.on{opacity:1; transition:none}
+    body.game-active .oche{grid-column:2;grid-row:2;display:flex;flex-direction:column;justify-content:center;min-height:0;padding:6px}
     body.game-active .turn-actions{margin-top:auto;padding-top:8px}
+    /* Undo Dart is the one control you reach for mid-turn, so it gets a real
+       target here and sits on the board side of the row (the board is column 2,
+       so the right-hand end of the rail is the shortest reach from it). Bounce
+       Out and Undo Turn stay their existing size — they are not mid-aim actions. */
+    body.game-active .turn-actions .undo-row{flex-wrap:wrap}
+    body.game-active .turn-actions .undo-row #undo-btn{
+      flex-basis:100%; order:2; min-height:52px;
+      font-size:clamp(13px,1.8dvh,16px); font-weight:700;
+    }
 
     /* GAME OVER/LEG COMPLETE/etc. results card. showGameResult() hides .oche,
        freeing column 2 — so the card takes the board's own big column while
@@ -1678,6 +1768,7 @@
         <div class="rail-play" id="rail-play">
           <div class="slots" id="slots"></div>
           <div class="status" id="status">Tap the board to score.</div>
+          <div class="dart-flash" id="dart-flash" aria-hidden="true"></div>
 
           <div class="turn-actions">
             <div class="undo-row">
@@ -2723,7 +2814,36 @@ let heatmapNumberStyle = 'original'; // admin-toggled; refreshed at boot from /a
 /* ---------- dartboard input mode ---------- */
 const DB_SECTORS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 
-function throwDartBoard(sector, m, zone, missZone, missDepth){ mult = m; throwDart(sector, zone, missZone, missDepth); }
+// Every board tap funnels through here, which is why the confirmation flash
+// lives here rather than in throwDart() — a PAD tap needs no confirmation (you
+// pressed a button with the score written on it), a board tap does (you pressed
+// a wedge, and which wedge is exactly the thing in doubt).
+function throwDartBoard(sector, m, zone, missZone, missDepth){
+  mult = m;
+  throwDart(sector, zone, missZone, missDepth);
+  flashDartScore(dartLabel(sector, m));
+}
+// Holds ~1.5s, then fades. Restarted on every tap, so three quick darts show
+// three scores rather than one stuck on screen. The timer id is module-level
+// (not a closure per call) so a second tap genuinely cancels the first tap's
+// fade instead of racing it.
+let dartFlashTimer = null;
+function flashDartScore(label){
+  const el = document.getElementById('dart-flash');
+  if(!el) return;
+  clearTimeout(dartFlashTimer);
+  el.textContent = label;
+  el.classList.add('on');
+  dartFlashTimer = setTimeout(()=>{ el.classList.remove('on'); }, 1500);
+}
+// Cleared outright whenever the turn is committed or walked back — leaving the
+// last dart of the previous turn glowing over a fresh empty turn is worse than
+// showing nothing, because it looks like a score that just registered.
+function clearDartFlash(){
+  const el = document.getElementById('dart-flash');
+  clearTimeout(dartFlashTimer);
+  if(el){ el.classList.remove('on'); el.textContent=''; }
+}
 function throwBounceOut(){ throwDart(0, undefined, undefined, undefined, true); }
 
 // Dartboard geometry kernel — the ONE authority for board layout, shared by
@@ -2822,6 +2942,20 @@ function padOnlyGame(){
 // every game they played afterwards.
 function boardInputActive(){
   return dartboardMode && !padOnlyGame();
+}
+
+// The "how do I enter a dart" hint, worded for whichever input is actually on
+// screen. It exists because the per-dart modes each re-render their own status
+// line after every dart, and four of them (Doubles Practice, Just Chuckin' It,
+// Around the Clock, Around the World) hardcoded the PAD wording in that path —
+// so a household playing on the dartboard got the correct board copy from
+// renderGame()'s initial statusText, then had it overwritten with "Select a
+// multiplier, then tap a number" the moment the screen re-rendered, telling
+// them to use controls that are not visible. One helper, called from every
+// site, so the two wordings can't drift apart again.
+function padOrBoardHint(suffix){
+  const base = boardInputActive() ? 'Tap the board to score' : 'Select a multiplier, then tap a number';
+  return suffix ? `${base}. ${suffix}` : `${base}.`;
 }
 
 function applyDartMode(){
@@ -9851,8 +9985,18 @@ function renderSlots(){
       }
       else sub = `${d.value} pts`;
     }
-    const div=document.createElement('div');
-    div.className='slot'+(d?' filled':'')+(d&&d.isTreble?' t':'')+(d&&d.isDouble?' d':'');
+    // A filled slot is a real <button> so it can be tapped (or tabbed to and
+    // ENTERed) to walk the turn back to that dart — see button.slot's own CSS
+    // comment. An empty slot has nothing to undo, so it stays an inert <div>
+    // rather than a focusable control that does nothing.
+    const div=document.createElement(d ? 'button' : 'div');
+    div.className='slot'+(d?' filled':'')+(d&&d.isTreble?' t':'')+(d&&d.isDouble?' d':'')
+      +(d && i===game.darts.length-1 ? ' latest':'');
+    if(d){
+      div.type='button';
+      div.setAttribute('aria-label', `Dart ${i+1}, ${d.label}. Undo back to this dart.`);
+      div.onclick=()=>undoToDart(i);
+    }
     div.innerHTML = d
       ? `<span class="lab">${d.label}</span><span class="pts">${sub}</span>`
       : `<span class="ph">dart ${i+1}</span>`;
@@ -12451,6 +12595,7 @@ function _finishUndo(snap, renderFn, opts){
     Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
   });
   cancelQueuedAchievementsForSnapshot(snap);
+  clearDartFlash();
   // Pop the snapshot just restored, then re-expose whatever's now on top (or
   // null if that was the only one) — allowing undo to keep reaching back
   // through every turn committed this leg/round, not just the last one.
@@ -12524,14 +12669,26 @@ function undoLastTurn(){
   _finishUndo(snap, renderGame, { restoreCurrent: true, resetDarts: true });
 }
 
-function undoDart(){
-  if(game.darts.length===0) return;
-  game.darts.pop();
+// Walks the CURRENT (uncommitted) turn back to `keep` darts. Undo has never
+// been one dart deep — undoDart() pops one per tap, and undoLastTurn() walks
+// game.turnSnapshots, a real STACK, back through every turn committed this leg
+// — but on a board-input screen nothing said so, and there was no way to reach
+// dart 1 in a single gesture. Tapping a dart in the row calls this; the Undo
+// Dart button is just the `keep = length-1` case.
+function undoToDart(keep){
+  if(!game || keep < 0 || keep >= game.darts.length) return;
+  const removed = game.darts.length - keep;
+  game.darts.length = keep;
   game.busted=false; game.won=false;
+  clearDartFlash();
   const status=document.getElementById('status');
-  status.className='status'; status.textContent='Dart removed.';
+  if(status){
+    status.className='status';
+    status.textContent = removed===1 ? 'Dart removed.' : `${removed} darts removed.`;
+  }
   renderSlots(); renderPad(); updateCheckout(false); pushLive();
 }
+function undoDart(){ undoToDart(game.darts.length - 1); }
 // Bow out (docs/open-roadmap-items.md "Forfeiting a multiplayer game"): advances
 // game.current to the next player who hasn't left (!p.dnf), wrapping — shared by
 // every multi-visit turn-based mode's own "next player" line below (X01/Cricket/
@@ -14469,14 +14626,14 @@ function renderGameShell(){
   // multiplier..." instruction is dropped in favor of a generic "Tap the
   // board to score." (plus whichever mode-specific flavor text still applies)
   // whenever dartboardMode is on — it used to show regardless of input mode.
-  const statusText = isChuckin ? `${boardInputActive() ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. No score, no pressure — just throw.`
-    : isClock ? `${boardInputActive() ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. Hit every 1-20 as a single.`
-    : isWorld ? `${boardInputActive() ? 'Tap the board to score' : 'Select a multiplier, then tap a number'}. Chip away at every lifetime outcome.`
-    : isDoublesPractice ? (boardInputActive() ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.')
+  const statusText = isChuckin ? padOrBoardHint('No score, no pressure — just throw.')
+    : isClock ? padOrBoardHint('Hit every 1-20 as a single.')
+    : isWorld ? padOrBoardHint('Chip away at every lifetime outcome.')
+    : isDoublesPractice ? padOrBoardHint()
     : isCricketGame ? (boardInputActive() ? 'Tap the board to score.' : 'Select a multiplier, then tap a target number.')
     : isCheckoutTrainer ? 'Tap out your proposed checkout, then press Submit.'
     : isKillerGame ? (boardInputActive() ? 'Tap the board to score — your own numbers to build lives, an opponent\'s to attack once you\'re a killer.' : 'Select a multiplier, then tap a number — your own to build lives, an opponent\'s to attack once you\'re a killer.')
-    : boardInputActive() ? 'Tap the board to score.' : 'Select a multiplier, then tap a number.';
+    : padOrBoardHint();
   // Rebuilding this container also resets any previous leg's results screen:
   // #game-result comes back empty+hidden and #rail-play/.oche come back
   // unhidden, so showGameResult()'s takeover never leaks into the next leg.
@@ -14486,6 +14643,7 @@ function renderGameShell(){
         <div class="rail-play" id="rail-play">
           <div class="slots" id="slots"${isPerDartMode ? ' hidden' : ''}></div>
           <div class="status" id="status">${statusText}</div>
+          <div class="dart-flash" id="dart-flash" aria-hidden="true"></div>
           <div class="turn-actions">
             <div class="undo-row">
               <button class="btn btn-ghost board-miss" id="bounce-out-btn" onclick="throwBounceOut()"${isCheckoutTrainer ? ' hidden' : ''}>Bounce Out</button>
@@ -17015,7 +17173,7 @@ function renderGameDoublesPractice(){
       status.textContent = `${game.dpLastDart.label} — no effect, keep going.`;
     } else {
       status.className = 'status';
-      status.textContent = 'Select a multiplier, then tap a number.';
+      status.textContent = padOrBoardHint();
     }
   }
   renderPad();
@@ -17189,7 +17347,7 @@ function renderGameChuckin(){
       status.textContent = `${game.chuckinLastDart.label}${game.chuckinLastDart.isTreble ? ' — treble!' : ''} · ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'} this session.`;
     } else {
       status.className = 'status';
-      status.textContent = 'Select a multiplier, then tap a number. No score, no pressure — just throw.';
+      status.textContent = padOrBoardHint('No score, no pressure — just throw.');
     }
   }
   renderPad();
@@ -17783,7 +17941,7 @@ function renderGameAroundTheClock(){
       status.textContent = `${game.atcLastDart.label} — no effect, keep going.`;
     } else {
       status.className = 'status';
-      status.textContent = 'Select a multiplier, then tap a number. Hit every 1-20 as a single.';
+      status.textContent = padOrBoardHint('Hit every 1-20 as a single.');
     }
   }
   renderPad();
@@ -17892,7 +18050,7 @@ function renderGameAroundTheWorld(){
       status.textContent = `${game.atwLastDart.label}${game.atwLastDart.isNewLifetimeOutcome ? ' — new outcome!' : ''} · ${progress} of 63.`;
     } else {
       status.className = 'status';
-      status.textContent = 'Select a multiplier, then tap a number. Chip away at every lifetime outcome.';
+      status.textContent = padOrBoardHint('Chip away at every lifetime outcome.');
     }
   }
   renderPad();

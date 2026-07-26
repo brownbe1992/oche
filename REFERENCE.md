@@ -3428,7 +3428,7 @@ scoreboard/slots/status.
 `@media (orientation:landscape) and (min-width:700px)` (a tablet held
 sideways) flips `.rail` into a real `display:flex;flex-direction:column` box
 and grid-places it beside `.oche` in a two-column grid
-(`#screen-game{display:grid;grid-template-columns:minmax(190px,300px) 1fr;
+(`#screen-game{display:grid;grid-template-columns:minmax(180px,240px) 1fr;
 grid-template-rows:auto 1fr}`) — a narrow rail column for scores/status/actions,
 full-height board column. Row 1 exists solely for Marathon Mode's persistent
 banner, which `renderMarathonBanner()` inserts before `.oche` and which
@@ -3448,14 +3448,85 @@ flex-column box sidesteps that whole class of bug.
 
 Two other landscape-only adjustments, both because the rail column is
 genuinely narrower than the old full-width scoring screen:
-- `#slots`' three dart-slot cards go from a 3-column grid to a single column
-  of compact horizontal rows (number + points side by side, not stacked).
+- `#slots`' three dart-slot cards stay a 3-column grid but shrink to compact
+  cells, so the current turn reads as one line ("T20 · 5 · D18") and costs
+  one rail row instead of three.
 - Around the Clock/Around the World's solo scoreboard row (`.pscore`, which
   packs a name block, a meta block, a remaining-count, and a wrapping
   20/63-cell outcome grid all into one flex row) switches to
   `flex-direction:column` — in a flex row that content had squeezed the
   outcome grid down to almost no width, wrapping it into dozens of rows and
   ballooning the card's height; stacked, the grid gets the rail's full width.
+  This stays the DEFAULT for `.rail .pscore`; a compact single-row strip is
+  applied as the narrower exception, selected structurally via
+  `:not(:has(#atc-live-progress, #atw-live-progress))` — i.e. "a card that
+  does not contain the wrapping outcome grid" — rather than by naming game
+  types in CSS. Where `:has()` is unsupported the exception is simply dropped
+  and every card keeps the column stack, which is the safe direction.
+
+#### Board size in landscape (2026-07): the container, not the geometry
+
+On a tablet the board is the **score-entry surface**, so it gets first call on
+space. Two things were making it small, and neither was a cap on the board:
+
+1. `body.game-active .wrap{max-width:760px}` capped the whole game screen. That
+   is correct in portrait (it is the phone's width anyway) and is left alone
+   there; the landscape media query overrides it with `max-width:none`.
+2. `buildDartboard()`'s SVG is `preserveAspectRatio="xMidYMid meet"`, so it fits
+   the **shorter** of its container's two dimensions. With the cap in place
+   column 2 measured 422 × 753, so *width* was binding and the board drew at
+   400 × 400 inside a 731px-tall well — the dead space above and below it.
+
+Releasing the cap (plus trimming the rail's max width 300 → 240 and the gaps)
+makes height the binding constraint instead. Measured on an iPad Air 4
+(1180 × 820): board **400px → 739px**, a 1.8× linear increase.
+
+**No board geometry changed.** `BOARD_GEOM`'s radii, the sector paths and the
+ring boundaries are untouched, and the SVG scales as a whole via its viewBox, so
+every double and treble covers exactly the same fraction of the board it always
+did and no hit area is larger than the shape drawn under it. The accuracy
+improvement is the scale, not the target. `backend/test/frontend.landscape-scoring.test.js`
+pins the radius table for this reason.
+
+#### Board-tap confirmation, the tappable dart row, and undo depth
+
+- **`#dart-flash`** — on every board tap, `throwDartBoard()` calls
+  `flashDartScore(dartLabel(sector, mult))`, which shows the registered score
+  (e.g. `T20`) at ~72px in one fixed spot in the rail, holds 1.5s, then fades.
+  It lives in `throwDartBoard()` and not `throwDart()` on purpose: a **Pad** tap
+  needs no confirmation (the button has the score written on it), a **board** tap
+  does. `dartFlashTimer` is module-level so a second tap cancels the first tap's
+  fade rather than racing it. Cleared outright by `undoToDart()` and
+  `_finishUndo()` — a score left glowing over a turn that no longer contains it
+  reads as a dart that just registered. `aria-hidden`, because it repeats what
+  `#slots` and `#status` already say; a live region here would announce every
+  dart twice. `display:none` at base, `display:flex` only inside the landscape
+  media query, so the portrait stack is unchanged.
+- **Tappable dart row.** `renderSlots()` builds a filled slot as a
+  `<button>` (empty slots stay inert `<div>`s — nothing to undo, so nothing to
+  focus) whose `onclick` calls **`undoToDart(i)`**, walking the current turn back
+  to and including that dart. The most recent dart carries `.slot.latest`, a gold
+  inset ring rather than a colour swap, because `.slot.t`/`.slot.d` already spend
+  red/green on treble/double and `body.colorblind` remaps exactly those two.
+- **Undo depth was never one dart.** `undoDart()` is now just
+  `undoToDart(game.darts.length - 1)`; `undoLastTurn()` walks
+  `game.turnSnapshots`, a real stack maintained by `_finishUndo()`, back through
+  **every turn committed this leg**. Nothing on screen said so, and there was no
+  single gesture that reached dart 1 — that is what the tappable row fixes. The
+  undo logic itself is unchanged.
+
+#### `padOrBoardHint()` — the input hint matches the input on screen
+
+`padOrBoardHint(suffix)` returns "Tap the board to score" or "Select a
+multiplier, then tap a number" from `boardInputActive()`, plus an optional
+mode-specific tail. `renderGame()` built this correctly, but the four solo
+per-dart modes — Just Chuckin' It, Doubles Practice, Around the Clock, Around
+the World — each re-render their own status line and hardcoded the **Pad**
+wording there. Because those modes re-render after *every dart*, a household
+playing on the dartboard saw the correct copy for exactly as long as it took to
+throw one dart, and was then told to use a multiplier row that is not on screen.
+Every hint site now calls the one helper so the two wordings cannot drift apart
+again.
 
 **Whole-session summaries clear the scoreboard —
 `showGameResult({wholeSession:true})`.** Keeping `#scoreboard` alive is right
