@@ -313,6 +313,9 @@
   .lane.out{opacity:.5}
   .lane-arrow{width:2.4vmin;font-size:2.8vmin;color:var(--gold);flex:none;text-align:center}
   .lane:not(.on) .lane-arrow{opacity:0}
+  /* The ▸ means "throwing". A finished leg has nobody throwing, so a result
+     lane marks its winner with the gold edge and the trophy in the name only. */
+  .lane.result .lane-arrow{opacity:0}
   .lane-who{width:34vmin;flex:none;min-width:0}
   .lane-name{font-weight:600;font-size:4.3vmin;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .lane.on .lane-name{color:#fff}
@@ -403,6 +406,42 @@
   body.orientation-portrait .strip{height:auto;flex-wrap:wrap;padding:2vmin 0}
   body.orientation-portrait .strip-need{padding-top:1.6vmin}
 
+
+  /* ---- post-leg / post-match result view (2026-07) --------------------
+     The TV counterpart to the controller's "Trophy Cabinet" panels, in the
+     Lower Third's own language.
+
+     It exists because the two treatments this moment used to get were fighting
+     each other: a full-screen black banner announcing "LEG COMPLETE" sat ON TOP
+     OF the summary cards for the same 3.5 seconds those numbers were worth
+     reading, then vanished. So the result is now composed in place instead of
+     covering what it announces, and the banner is suppressed whenever there is
+     a result view to show.
+
+     The lanes stay exactly where they were during play — same order, same
+     positions — so nobody has to re-find themselves when the leg ends. What
+     changes is what each lane carries: no longer what you have left, but what
+     it cost you. */
+  .verdict{flex:none;display:flex;align-items:baseline;gap:2.4vmin;padding:2.6vmin 4.3vmin 2vmin;
+    border-bottom:1px solid var(--wire)}
+  .verdict .v{font-family:'Bebas Neue';font-size:9vmin;line-height:.82;color:var(--gold);letter-spacing:.03em}
+  .verdict .cost{font-size:2.4vmin;color:var(--muted)}
+  .verdict .cost b{color:var(--cream);font-weight:600}
+  /* The tally band takes the throw strip's place — the strip's slot persists so
+     the screen doesn't jump, but its job changes from "what is being thrown" to
+     "what this leg produced". */
+  .tallies{flex:none;height:14vmin;display:flex;align-items:center;gap:2.4vmin;padding:0 4.3vmin;
+    border-top:.2vmin solid var(--gold);background:linear-gradient(180deg,rgba(217,180,106,.09) 0%,rgba(217,180,106,.02) 100%)}
+  .tallies.hidden{display:none!important}
+  .tly{display:flex;align-items:center;gap:1.2vmin;background:rgba(0,0,0,.24);border:1px solid var(--wire);
+    border-radius:1.2vmin;padding:1.2vmin 2vmin}
+  .tly .em{font-size:2.6vmin;line-height:1}
+  .tly .v{font-family:'Bebas Neue';font-size:4.4vmin;line-height:1;color:var(--cream)}
+  .tly .k{font-size:1.7vmin;color:var(--muted)}
+  .tly.zero .v{color:#4d514a}
+  .tly.next{margin-left:auto;border-color:rgba(217,180,106,.4);background:rgba(217,180,106,.08)}
+  .tly.next .k{color:var(--gold);font-weight:600}
+
   /* leg summary cards (shown between legs) */
   .sum-card{position:relative;background:var(--surface);border:1px solid var(--wire);border-radius:2vmin;
     padding:3vmin 3.2vmin;display:flex;flex-direction:column;gap:2.4vmin;justify-content:center;overflow:hidden}
@@ -447,7 +486,11 @@
     <div class="live"><span class="dot" id="dot"></span><span id="livetext">live</span></div>
   </div>
 
+  <div class="verdict hidden" id="verdict"></div>
+
   <div class="grid" id="grid"></div>
+
+  <div class="tallies hidden" id="tallies"></div>
 
   <div class="strip hidden" id="strip">
     <div class="strip-darts" id="strip-darts"></div>
@@ -494,6 +537,8 @@ const statBusts  = document.getElementById('stat-busts');
 
 
 const standing   = document.getElementById('standing');
+const verdict    = document.getElementById('verdict');
+const tallies    = document.getElementById('tallies');
 const strip      = document.getElementById('strip');
 const stripDarts = document.getElementById('strip-darts');
 const stripVisit = document.getElementById('strip-visit');
@@ -2108,7 +2153,8 @@ function cricketMarkGlyph(n, numberLabel){
 // One lane. `o` is { active, session, out, name, sub, recent, stats, cells,
 // big, bigUnit, bigSmall, lead } — every field optional except name.
 function laneHtml(o){
-  const cls = 'lane' + (o.active ? ' on' : '') + (o.session ? ' session' : '') + (o.out ? ' out' : '');
+  const cls = 'lane' + (o.active ? ' on' : '') + (o.session ? ' session' : '') + (o.out ? ' out' : '')
+    + (o.result ? ' result' : '');
   const who = `<div class="lane-who">
       <div class="lane-name">${esc(o.name)}</div>
       ${o.sub ? `<div class="lane-sub">${esc(o.sub)}</div>` : ''}
@@ -2199,6 +2245,105 @@ function defaultStripSpec(s){
       small: route.length > 14,
     } : null,
   };
+}
+
+
+/* ---- the post-leg / post-match result view -------------------------------
+   Composed from the same laneHtml() the live board uses, so the lanes stay in
+   the positions they held during play and only their contents change. */
+
+// camelCase field name -> a label a person would say out loud. Used for the
+// generic fallback below, so a mode that hasn't declared resultStats() yet
+// still shows real numbers with real labels rather than nothing.
+function humaniseKey(k){
+  return String(k).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase();
+}
+const RESULT_LABELS = { avg:'average', darts:'darts', busts:'busts', points:'points',
+  closed:'numbers closed', totalRuns:'runs', totalPoints:'points', total:'total',
+  totalCp:'composure points', rating:'rating', running:'final score', kills:'kills',
+  number:'their number', walkedOut:'walked out', outcomes:'outcomes hit',
+  trebles:'trebles', doubles:'doubles', misses:'misses', durationSec:'time' };
+
+// Every numeric/text field the mode's own legSummary row carries, minus the two
+// that are structural rather than statistical. A mode overrides this by
+// declaring resultStats(p, s) when it wants a different order or wording.
+function resultStatsFromRow(p){
+  return Object.keys(p)
+    .filter(k => k !== 'name' && k !== 'won' && p[k] != null && p[k] !== '')
+    .map(k => ({ v: k === 'durationSec' ? fmtDuration(p[k]) : p[k],
+                 k: RESULT_LABELS[k] || humaniseKey(k) }));
+}
+function fmtDuration(sec){
+  const n = num(sec);
+  return `${Math.floor(n/60)}:${String(n%60).padStart(2,'0')}`;
+}
+
+// "LEG 3 TO BEN" / "BEN WINS THE MATCH" / "LEG 18 COMPLETE" — what a
+// commentator would say, stated once and large. s.message is the controller's
+// own wording for this exact moment (already solo-practice aware), so it is the
+// source rather than something re-derived here and liable to drift from it.
+function verdictText(s){
+  if(s.done) return s.doneHeading || 'GAME OVER';
+  if(s.message) return s.message;
+  // A leg-summary push can arrive with no wording (the controller only sends a
+  // message on the push that ANNOUNCES the result; later pushes carry the same
+  // summary with message:''). Naming the winner beats a bare "LEG COMPLETE"
+  // that a two-player room has to work out for itself.
+  const winner = (s.legSummary || []).find(r => r.won);
+  if(winner && (s.legSummary || []).length > 1) return `${winner.name} takes the leg`;
+  return 'LEG COMPLETE';
+}
+
+function renderResultView(renderer, s, L){
+  const rows = s.legSummary || [];
+  const statsFor = typeof renderer.resultStats === 'function'
+    ? (p => renderer.resultStats(p, s)) : resultStatsFromRow;
+  const winner = rows.find(r => r.won);
+
+  // The verdict line pairs the result with what it cost — the two facts that
+  // belong in the same breath, and the reason this isn't just a heading.
+  const cost = [];
+  if(winner){
+    if(winner.darts != null) cost.push(`<b>${num(winner.darts)}</b> darts`);
+    if(winner.avg  != null) cost.push(`<b>${esc(winner.avg)}</b> average`);
+  }
+  verdict.innerHTML = `<span class="v">${esc(verdictText(s))}</span>` +
+    (cost.length ? `<span class="cost">${cost.join(' · ')}</span>` : '');
+  verdict.classList.remove('hidden');
+
+  const laneHtmlFor = (p, i) => {
+    const stats = statsFor(p) || [];
+    // The headline of a result lane is the FIRST stat the mode names — its own
+    // answer to "how did that go" (an average in X01, points in Cricket, runs
+    // in Baseball) — with the rest running across the lane beside it.
+    const head = stats[0] || null;
+    return laneHtml({
+      result: true,
+      active: !!p.won && rows.length > 1,
+      name: p.name + (p.won && rows.length > 1 ? ' 🏆' : ''),
+      sub: head ? head.k : '',
+      stats: stats.slice(1),
+      big: head ? head.v : null,
+      bigSmall: head ? String(head.v).length > 5 : false,
+    });
+  };
+  grid.className = 'lanes';
+  grid.style.gridTemplateColumns = '';
+  grid.innerHTML = rows.map(laneHtmlFor).join('');
+
+  // The tally band, in the app's established emoji vocabulary — the same
+  // counters the top bar carries during play, restated at result scale because
+  // this is the moment they are actually read.
+  const t = [
+    { em:'🎯', v:num(s.gameOneEighties), k: num(s.gameOneEighties)===1 ? '180' : '180s' },
+    { em:'🐟', v:num(s.gameBigFish),     k:'big fish' },
+    { em:'💥', v:num(s.gameBusts),       k:'busts' },
+  ];
+  tallies.innerHTML = t.map(x =>
+    `<span class="tly${x.v ? '' : ' zero'}"><span class="em" aria-hidden="true">${x.em}</span>` +
+    `<span class="v">${x.v}</span><span class="k">${esc(x.k)}</span></span>`).join('') +
+    (s.done ? '' : `<span class="tly next"><span class="k">Next leg coming up</span></span>`);
+  tallies.classList.remove('hidden');
 }
 
 /* ---- voice announcements ----
@@ -2363,6 +2508,7 @@ function render(s){
     fmtEl.innerHTML=''; banner.classList.remove('show'); bannerKey='';
     gameStats.classList.add('hidden');
     strip.classList.add('hidden'); lastStripKey='';
+    verdict.classList.add('hidden'); tallies.classList.add('hidden');
     standing.classList.add('hidden'); lastStandingKey='';
     return;
   }
@@ -2419,15 +2565,7 @@ function render(s){
     && typeof renderer.scorecard === 'function' && !s.legSummary;
 
   if(s.legSummary){
-    grid.className = 'grid';
-    grid.style.gridTemplateColumns = `repeat(${isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3)}, 1fr)`;
-    // doubles_practice/chuckin/around_the_clock/around_the_world declare no
-    // summary() (they never broadcast a legSummary in normal play) — fall
-    // back to the X01-shaped default rather than throwing on an undefined
-    // call, matching the "X01 shape as the default" convention index.html's
-    // own legSummaryX01() already establishes for this exact data.
-    const summaryFn = typeof renderer.summary === 'function' ? renderer.summary : renderers.x01.summary;
-    grid.innerHTML = s.legSummary.map(p=>summaryFn(p, L)).join('');
+    renderResultView(renderer, s, L);
   } else if(hasStage){
     // The mode takes the whole area rather than a row per player — Around the
     // Clock and Around the World, whose board-shaped dial the owner chose over
@@ -2453,6 +2591,7 @@ function render(s){
     grid.innerHTML = s.players.map((p,i)=>renderer.card(p, i, s, L)).join('');
   }
 
+  if(!s.legSummary){ verdict.classList.add('hidden'); tallies.classList.add('hidden'); }
   renderStrip(renderer, s, L);
 
   // Scorecard/lane/stage layouts render no .score elements at all — skip the
@@ -2479,8 +2618,17 @@ function render(s){
 
   handleVoiceEvents(s);
 
-  // result banners (leg / set / game) — show once per message
-  if(s.message && s.message !== bannerKey){
+  // Result banners (leg / set / game). SUPPRESSED whenever a result view is on
+  // screen: the banner is a full-screen black overlay, and it used to sit on top
+  // of the very summary it was announcing for the same 3.5 seconds those numbers
+  // were worth reading. The result view says the same thing, larger, without
+  // hiding anything — so the banner is now only for the moments that have no
+  // result view of their own (a set win, a message with no legSummary behind it).
+  if(s.legSummary){
+    bannerKey = s.message || '';
+    banner.classList.remove('show');
+    clearTimeout(bannerTimer);
+  } else if(s.message && s.message !== bannerKey){
     bannerKey = s.message;
     document.getElementById('banner-big').textContent = s.done ? (s.doneHeading || 'GAME OVER') : s.message;
     document.getElementById('banner-sub').textContent = s.done ? s.message
