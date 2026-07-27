@@ -1,8 +1,9 @@
 # Checkout Trainer — "Route Recall" Sub-Mode Design Roadmap
 
-> Status (2026-07): **Build-order step 1 is done and both blocking design
-> decisions are made** (see "Resolved" below); steps 3-7 — the core loop, data
-> model, stats, ladders — are not built. This is a new third sub-mode for Checkout
+> Status (2026-07): **✅ BUILT AND SHIPPED.** Every build-order step below is done.
+> Two things the design got wrong were corrected on the way and are called out in
+> place: the proposed enumeration alphabet (§"Resolved") and the assumption that
+> only straight-out explodes (same section). This is the third sub-mode for Checkout
 > Trainer (`docs/archive/checkout-trainer-roadmap.md`, fully shipped — Freeform
 > and Checkout Blitz), proposed by the owner: "given a number, try to list all
 > of the possible checkouts." Filed as its own doc rather than reopening the
@@ -281,6 +282,87 @@ Per `CLAUDE.md`'s standing conventions, not yet addressed beyond this sketch:
   No new cross-player leaderboard is proposed here, so no new "server is the
   source of truth" concern beyond what Checkout Trainer already established.
 
+## What shipped (2026-07)
+
+**Setup.** A third button in Checkout Trainer's sub-mode toggle, plus a dart-ceiling
+toggle (1 / up to 2 / up to 3) that appears only for this sub-mode. A pinned target
+from "Drill this checkout" now *keeps* Route Recall rather than forcing Freeform —
+"drill everything I know about checking out 100" is exactly what a pin plus this
+sub-mode means, and this doc predicted it would be the pin's natural home. Trick
+questions are forced off: a bogey number has no routes, so a hunt for one would open
+on an empty board with nothing to do.
+
+**Core loop.** `submitRouteRecall()`. The target is held across submissions — the one
+structural difference from every other mode in the app — and the three outcomes are:
+
+| outcome | recorded | told |
+|---|---|---|
+| illegal | a turn with `bust=1` | which of *too many darts / past zero / doesn't reach / finishes off a double / that's a miss* |
+| duplicate | **nothing at all** | "Already got that one — D20" |
+| new | a turn with `checkout=1` | the route, and the tally |
+
+A duplicate recording nothing is deliberate twice over: re-entering a route by
+accident must cost nothing, and it also means "routes found" is simply the count of
+`checkout=1` turns rather than something that has to be de-duplicated at read time.
+
+**The found list is always on screen.** Without it, "have I already said T20 T20
+D20?" makes this a memory test about a memory test.
+
+**Data model** (this doc's open grouping question, resolved): `games.config.mode =
+'route_recall'` plus `config.routeCeiling`; `turns.set_no` is the hunt number and
+`turns.leg_no` the submission within it. **No new column** — `set_no` is already a
+free-standing per-turn grouping integer and this sub-mode has no concept of sets to
+conflict with it, which is exactly the "weigh it against reusing an existing column
+before adding one" the open question asked for.
+
+**Stats.** Best Route Coverage %, Toughest Full Clear and Routes Named (lifetime),
+all in `getRouteRecallStats()`. Coverage is a fraction of a *real* denominator — the
+target's complete route set at that hunt's ceiling — so 100% genuinely means every
+one. "Toughest" full clear means the most ROUTES, not the biggest target: the route
+count is what made it hard. The per-hunt arithmetic runs in JS over a grouped query
+rather than in SQL, because the denominator depends on the hunt's ceiling *and* the
+player's out-mode and only `allCheckoutRoutes()` knows it.
+
+**Isolation, which is the part with no visible symptom.** Route Recall shares the
+`checkout_trainer` game type, and its `checkout=1` means "a route you had not named
+yet" while Freeform/Blitz's means "a legal answer to this round". Every Freeform and
+Blitz statistic is therefore scoped with `NOT_ROUTE_RECALL`, or a Route Recall hunt
+would silently move a player's Freeform accuracy. The exclusion uses `IS NOT
+'route_recall'` rather than `!=` on purpose: `config.mode` is absent on rows written
+before this sub-mode existed, and `!= NULL` is NULL, which would have erased every
+pre-existing Checkout Trainer statistic instead.
+
+**Ladder and badge.** `ROUTE_RECALL_MILESTONE_LADDERS` counts routes named (25 /
+100 / 300 / 800 / 2000), deliberately its own ladder rather than feeding Freeform's
+attempts ladder — those count different things, and merging them would let one Route
+Recall session vault a player up a ladder that measures targets answered. 🗺️
+**Cartographer** is the flagship: every route of a target that had 10 or more, in one
+hunt. The floor is what stops it firing on "every route for 40 at one dart", which is
+one route.
+
+**Answered: do Route Recall rounds feed Freeform's lifetime ladders?** No — see
+Isolation above. Same reasoning the archived doc used to keep Blitz out of the
+session-endurance ladder: a ladder should measure one thing.
+
+**Coverage.** `backend/test/scoring.route-recall-grading.test.js` (14 cases,
+including a sweep asserting that *every* route the enumerator lists grades as `new` —
+otherwise a hunt could display a total it is impossible to reach),
+`backend/test/db.route-recall-stats.test.js` (8, including the isolation and the
+legacy-row case), and the verify-ui `route-recall` check (16), which plays real hunts
+and pins the things unit tests cannot see: that the target does not move on, that the
+found list is rendered, that a duplicate is not styled as a mistake, and that the
+revealed and open-ended tiers really do differ on screen.
+
+**One defect found by its own tests.** The grader initially reported "that goes past
+zero" for a route that landed exactly on zero off a single — `evaluateVisit()`'s
+`bust` covers both mistakes. Telling a player their arithmetic was wrong when it was
+their finish is both false and the wrong lesson, so the rejection reasons now
+distinguish `overshoots` / `short` / `bad-finish`.
+
+**Not built, deliberately: a timed variant.** This doc's own sequencing argument —
+prove the untimed core loop first, exactly as Blitz was sequenced after Freeform —
+still applies, and now has a mode to be proven against.
+
 ## Suggested build order
 
 1. `allCheckoutRoutes(rem, doubleOut, maxDarts)` in `frontend/scoring.js`,
@@ -311,21 +393,21 @@ Per `CLAUDE.md`'s standing conventions, not yet addressed beyond this sketch:
   rather than an impossible checklist.
 - ~~**Reveal the total up front, or keep a hidden running count?**~~ **Resolved:
   both, by tier** — revealed at 1-2 darts, hidden at 3.
-- **Timed variant?** Freeform has an untimed and a timed (Blitz) sibling —
+- ~~**Timed variant?**~~ **Deferred on this doc's own reasoning** — prove the untimed
+  core loop in real play first, exactly as Blitz was sequenced after Freeform. Original
+  note: Freeform has an untimed and a timed (Blitz) sibling —
   worth deciding whether Route Recall eventually gets its own timed variant
   ("find as many routes as you can for this one target in 60 seconds") or
   stays untimed-only, matching how Blitz itself was explicitly sequenced
   *after* Freeform was "proven and actually played a few times" in the
   archived doc's own build order — the same "prove the untimed core loop
   first" sequencing likely applies here too.
-- **Does a route found here count toward Freeform's existing lifetime
-  ladders** (Lifetime Attempts, Lifetime Optimal Answers, Best Optimal
-  Streak)? Sketched as an open case-by-case decision above, not resolved.
+- ~~**Does a route found here count toward Freeform's existing lifetime ladders?**~~
+  **Resolved: no**, and the stats are scoped to enforce it — see "Isolation" above.
 - **Exact ladder thresholds and the one-off badge's own threshold** (10+
   routes suggested above) are first-pass placeholders, not final — tune
   against actual play once the mode exists, same as every other threshold
   in every other Checkout Trainer ladder.
-- **Grouping mechanism for "routes submitted against the same target"**
-  (`turns.route_recall_round` sketched above) is a first-pass idea, not a
-  committed schema decision — whoever builds this should weigh it against
-  reusing an existing per-turn grouping column before adding a new one.
+- ~~**Grouping mechanism for "routes submitted against the same target"**~~
+  **Resolved: `turns.set_no`**, an existing free-standing per-turn grouping integer.
+  No new column, exactly the outcome this question asked to be weighed first.

@@ -1183,6 +1183,13 @@
      as a disclosure button and as a heading. It must contribute no styling of its
      own; the <summary> already carries .pp-section-title. */
   .pp-sum-h{font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;margin:0;display:inline}
+  /* Route Recall's "found so far" chips. Deliberately plain and dense — this list
+     grows to dozens of entries inside one hunt, and it is a reference the player
+     scans, not a set of controls. */
+  .ct-found-list{display:flex;flex-wrap:wrap;gap:6px}
+  .ct-found{display:inline-block;padding:3px 8px;border:1px solid var(--wire);border-radius:6px;
+    font-size:13px;font-variant-numeric:tabular-nums;background:var(--surface)}
+  body.paper-mode .ct-found{border-color:rgba(0,0,0,.25);background:rgba(0,0,0,.04);color:#1a1a1a}
   /* every player-profile section becomes a real panel — previously .pp-section only
      added spacing, so the chart/heatmap (the two things worth featuring) looked
      identical to a two-line text list like "Practice — Legs Thrown". */
@@ -1718,9 +1725,18 @@
               <div class="seg" role="group" aria-label="Checkout Trainer sub-mode">
                 <button id="checkout-trainer-mode-freeform" aria-pressed="true" onclick="setCheckoutTrainerMode('freeform')">Freeform</button>
                 <button id="checkout-trainer-mode-blitz" aria-pressed="false" onclick="setCheckoutTrainerMode('blitz')">⏱️ Checkout Blitz (60s)</button>
+                <button id="checkout-trainer-mode-route_recall" aria-pressed="false" onclick="setCheckoutTrainerMode('route_recall')">🗺️ Route Recall</button>
               </div>
             </div>
             <p class="pp-meta" id="checkout-trainer-mode-desc" style="margin:10px 0 0"></p>
+            <div class="opts" style="margin:10px 0 0" id="checkout-trainer-ceiling-row" hidden>
+              <div class="seg" role="group" aria-label="Route Recall dart limit">
+                <button id="checkout-trainer-ceiling-1" aria-pressed="false" onclick="setRouteRecallCeiling(1)">1 dart</button>
+                <button id="checkout-trainer-ceiling-2" aria-pressed="true" onclick="setRouteRecallCeiling(2)">Up to 2 darts</button>
+                <button id="checkout-trainer-ceiling-3" aria-pressed="false" onclick="setRouteRecallCeiling(3)">Up to 3 darts</button>
+              </div>
+            </div>
+            <p class="pp-meta" id="checkout-trainer-ceiling-desc" style="margin:10px 0 0" hidden></p>
             <div class="opts" style="margin:10px 0 0">
               <div class="seg" role="group" aria-label="Checkout Trainer difficulty">
                 <button id="checkout-trainer-difficulty-under40" aria-pressed="false" onclick="setCheckoutTrainerDifficulty('under40')">Under 40</button>
@@ -2861,7 +2877,7 @@ function makeDart(sector, mult){
 let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, mode:'h2h',
   gameType:'x01', cricketPreset:'classic', cricketCustomNumbers:[], cricketVariant:'standard', ghostLeg:null,
   doublesTargets:[], loadoutByName:{}, leagueFixtureId:null, pendingFixtures:[],
-  checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false,
+  checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false, routeRecallCeiling:2,
   checkoutTrainerPin:null,
   // Killer (docs/game-modes-roadmap.md "Killer"): how many lives it takes
   // to become a killer — the only thing this mode's own setup step configures
@@ -5089,12 +5105,49 @@ function clearCheckoutTrainerPin(){
 // button rather than being their own top-level modes.
 function setCheckoutTrainerMode(sub){
   setup.checkoutTrainerMode = sub;
-  setPressed({freeform:'checkout-trainer-mode-freeform', blitz:'checkout-trainer-mode-blitz'}, sub);
+  setPressed({freeform:'checkout-trainer-mode-freeform', blitz:'checkout-trainer-mode-blitz',
+    route_recall:'checkout-trainer-mode-route_recall'}, sub);
   document.getElementById('checkout-trainer-mode-desc').textContent = sub==='blitz'
     ? "A 60-second sprint: answer as many targets as you can. Optimal answers score 2 points, legal-but-not-optimal score 1, illegal score 0 — speed alone won't win, accuracy matters more."
+    : sub==='route_recall'
+    ? 'One target at a time, and you keep naming DIFFERENT ways to check it out until you run dry or move on. Not "what is the best route" — "how many do you actually know".'
     : 'Untimed — work through targets at your own pace, with the answer revealed after every attempt. Runs until you end the session.';
+  // The dart ceiling is Route Recall's own difficulty axis and means nothing to
+  // the other two sub-modes, which are always 3-dart.
+  const row = document.getElementById('checkout-trainer-ceiling-row');
+  const desc = document.getElementById('checkout-trainer-ceiling-desc');
+  if(row) row.hidden = sub !== 'route_recall';
+  if(desc) desc.hidden = sub !== 'route_recall';
+  if(sub === 'route_recall') setRouteRecallCeiling(setup.routeRecallCeiling || 2);
   const startBtn = document.getElementById('setup-step2-continue');
-  if(startBtn && setup.mode === 'checkout_trainer') startBtn.textContent = sub==='blitz' ? 'Start Blitz' : 'Start training';
+  if(startBtn && setup.mode === 'checkout_trainer'){
+    startBtn.textContent = sub==='blitz' ? 'Start Blitz' : sub==='route_recall' ? 'Start recalling' : 'Start training';
+  }
+}
+
+/* Route Recall's dart ceiling (docs/archive/checkout-trainer-route-recall-roadmap.md).
+   This is not just a difficulty dial — it changes what the drill IS, which is
+   the owner's resolution of that doc's "reveal the total?" question, taken
+   against the real route counts:
+
+     1-2 darts — the complete set is small enough to actually finish (the worst
+       target at 2 darts is 40, with 36 routes). The total is shown up front and
+       there is a finish line to cross.
+     3 darts   — 81 of the 162 finishable targets have 200+ routes, and target 58
+       has 730. "Find them all" is not a task there, so this tier does not
+       pretend it is: no total, no finish line, just how many you can name. */
+function setRouteRecallCeiling(n){
+  setup.routeRecallCeiling = Number(n) || 2;
+  setPressed({1:'checkout-trainer-ceiling-1', 2:'checkout-trainer-ceiling-2', 3:'checkout-trainer-ceiling-3'},
+    setup.routeRecallCeiling);
+  const desc = document.getElementById('checkout-trainer-ceiling-desc');
+  if(desc){
+    desc.textContent = setup.routeRecallCeiling >= 3
+      ? 'Up to three darts. Some targets have hundreds of routes, so this tier is open-ended — no total, no finish line, just how many you can name before you move on.'
+      : setup.routeRecallCeiling === 2
+      ? "Up to two darts. Small enough to finish: you'll be told how many exist, and there's a completion to chase."
+      : 'Single darts only — every target that can be checked out in one. Short and sharp; you\'ll be told how many exist.';
+  }
 }
 
 // Checkout Trainer's difficulty-tier toggle (docs/archive/checkout-trainer-roadmap.md
@@ -9197,6 +9250,11 @@ const BADGE_INFO = {
   checkout_trainer_perfect_minute: { icon:'💎', label:'Perfect Minute', desc:'Every round in one Checkout Blitz run (5+ rounds) graded optimal.', checkoutTrainer:true },
   checkout_trainer_photo_finish:   { icon:'📸', label:'Photo Finish', desc:'Submit a legal Checkout Blitz round with under 1 second left on the clock.', checkoutTrainer:true },
   checkout_trainer_bogey_buster:   { icon:'💣', label:'Bogey Buster', desc:'With trick questions on, correctly call "no possible checkout" on a bogey number.', checkoutTrainer:true },
+  // Route Recall's one-off flagship (docs/archive/checkout-trainer-route-recall-roadmap.md).
+  // The 10-route floor is what stops it firing on a trivially small hunt — "every
+  // route for 40 at a 1-dart ceiling" is one route, and clearing it is not
+  // cartography.
+  route_recall_cartographer:       { icon:'🗺️', label:'Cartographer', desc:'In one Route Recall hunt, find every single route for a target that has 10 or more of them.', checkoutTrainer:true },
   // Guided Around the Clock / Around the World (docs/game-modes-roadmap.md) —
   // deliberately distinct badges from the existing passive around_the_clock/
   // around_the_world above (2026-07 decision): completing a guided drill session
@@ -9841,6 +9899,13 @@ const CHECKOUT_TRAINER_PB_SPEC = { emptyMsg: 'Not enough attempts recorded yet.'
   { key:'bestStreak', label:'Best Optimal Streak', truthy:true },
   { key:'bestScore', label:'Best Checkout Blitz Score' },
   { key:'lifetimeAvgScore', label:'Avg Checkout Blitz Score', fmt:v=>v.toFixed(1), guard:false },
+  // Route Recall's three (docs/archive/checkout-trainer-route-recall-roadmap.md). Best
+  // Coverage is a percentage of a REAL denominator — the target's complete route
+  // set at that hunt's ceiling — so 100% genuinely means "every one of them".
+  { key:'routeRecallBestCoveragePct', label:'Best Route Coverage', fmt:v=>`${v.toFixed(1)}%` },
+  { key:'routeRecallToughestFullClear', label:'Toughest Full Clear',
+    fmt:v=>`${v.target} · all ${v.routes} routes`, guard:true },
+  { key:'routeRecallRoutesNamed', label:'Routes Named (lifetime)', truthy:true },
 ] };
 // Fastest completion only (mirrors Doubles Practice/Chuckin's "best round"/"best
 // session" minimalism) — no winStreak/recentForm/lifetime, this mode never "wins".
@@ -10920,6 +10985,34 @@ const CHECKOUT_BLITZ_MILESTONE_LADDERS = [
     ] },
 ];
 registerMilestoneLadders(CHECKOUT_BLITZ_MILESTONE_LADDERS, {checkoutTrainer:true});
+// Route Recall's volume ladder (docs/archive/checkout-trainer-route-recall-roadmap.md).
+// Counts ROUTES NAMED, not rounds answered, which is the metric this sub-mode is
+// actually about — a single rich target can yield dozens in one sitting, so the
+// thresholds are spaced well above the attempts ladder's. Deliberately a separate
+// ladder rather than feeding the Freeform attempts ladder: those two count
+// different things, and merging them would let one Route Recall session vault a
+// player up a ladder that is supposed to measure targets answered.
+const ROUTE_RECALL_MILESTONE_LADDERS = [
+  { metric:'routes', idPrefix:'route_recall_routes_', statNoun:'lifetime routes named',
+    descFor: t => `Name ${t.toLocaleString()} distinct checkout routes in Route Recall.`,
+    tiers: [
+      { threshold:25,   label:'Sketching the Map', icon:'✏️' },
+      { threshold:100,  label:'Route Finder',      icon:'🧭' },
+      { threshold:300,  label:'Way Ahead',         icon:'🛣️' },
+      { threshold:800,  label:'Every Road In',     icon:'🕸️' },
+      { threshold:2000, label:'Atlas',             icon:'🗺️' },
+    ] },
+];
+registerMilestoneLadders(ROUTE_RECALL_MILESTONE_LADDERS, {checkoutTrainer:true});
+// The floor for 🗺️ Cartographer — see its BADGE_INFO entry.
+const ROUTE_RECALL_CARTOGRAPHER_MIN = 10;
+// Called after every Route Recall submission. Reads base + session exactly as
+// checkCheckoutTrainerMilestones() does, for the same reason: the lifetime figure
+// is fetched once at game start, never re-queried per submission.
+function checkRouteRecallMilestones(p){
+  const ladder = ROUTE_RECALL_MILESTONE_LADDERS.find(l=>l.metric==='routes');
+  checkChuckinMilestoneTier(ladder, p.name, (p.lifetimeRoutesBase||0) + p.routesFound);
+}
 // Called after every attempt from submitCheckoutAttempt() (both Freeform and
 // Checkout Blitz — a round is a round, per the roadmap doc's explicit ruling
 // that Lifetime Attempts/Optimal/Streak count both modes). Session Endurance
@@ -12895,6 +12988,17 @@ function askEndGame(){
       if(p.attempts >= 15 && p.optimalCount === p.attempts){
         awardOnceBadge(p.name, 'checkout_trainer_perfectionist', 'checkout_trainer_perfectionist', null, { icon:'🌟', headline:'PERFECTIONIST', statLine:`${p.attempts} for ${p.attempts}, every answer optimal` }, {cacheCheck:true});
       }
+    }
+    // Route Recall: bank the hunt still in progress. Every route found is already
+    // recorded server-side turn by turn, so no statistic depends on this — what it
+    // fixes is the session's own last target being the one that never appears in
+    // its "targets done" count, which would look like a bug rather than a boundary.
+    if(game && game.gameType === 'checkout_trainer' && game.config.mode === 'route_recall'){
+      const p = game.players[0];
+      bankRouteRecallHunt(p);
+      const cleared = p.hunts.filter(h=>h.complete).length;
+      announce(`Session over. ${p.routesFound} route${p.routesFound===1?'':'s'} named across ${p.hunts.length} target${p.hunts.length===1?'':'s'}`
+        + (cleared ? `, ${cleared} cleared completely.` : '.'));
     }
     // Clear the game and push an inactive snapshot so any /display scoreboard stops
     // showing the abandoned match as "live" — otherwise liveSnapshot() keeps
@@ -15499,6 +15603,10 @@ function renderGameShell(){
   const isDoublesPractice = !!(game && game.gameType === 'doubles_practice');
   const isChuckin = !!(game && game.gameType === 'chuckin');
   const isCheckoutTrainer = !!(game && game.gameType === 'checkout_trainer');
+  // Route Recall keeps ONE target across many submissions, so unlike the other two
+  // sub-modes it needs a way to say "I'm done with this one" — nothing else in the
+  // app has that shape, hence its own control rather than a reused one.
+  const isRouteRecall = !!(isCheckoutTrainer && game.config && game.config.mode === 'route_recall');
   const isClock = !!(game && game.gameType === 'around_the_clock');
   const isWorld = !!(game && game.gameType === 'around_the_world');
   const isKillerGame = !!(game && game.gameType === 'killer');
@@ -15543,7 +15651,8 @@ function renderGameShell(){
               <button class="btn btn-ghost" id="undo-btn" onclick="undoDart()"${isPerDartMode ? ' hidden' : ''}>Undo Dart</button>
             </div>
             <button class="btn btn-ghost" id="declare-unsolvable-btn" onclick="declareUnsolvable()"${(isCheckoutTrainer && game && game.config && game.config.trickQuestions) ? '' : ' hidden'}>🚫 No possible checkout</button>
-            <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>${isCheckoutTrainer ? 'Submit checkout' : 'Enter turn'}</button>
+            <button class="btn btn-ghost" id="route-recall-next-btn" onclick="nextRouteRecallTarget()"${isRouteRecall ? '' : ' hidden'}>➡️ Move to a new target</button>
+            <button class="btn btn-primary" id="enter-btn" onclick="enterTurn()"${isPerDartMode ? ' hidden' : ''}>${isRouteRecall ? 'Submit route' : isCheckoutTrainer ? 'Submit checkout' : 'Enter turn'}</button>
             <button class="btn btn-primary" id="dp-next-round-btn" onclick="startNextRound()" hidden>Start next round</button>
           </div>
         </div>
@@ -16418,7 +16527,9 @@ const GAME_TYPES = {
     // below); the dark Trophy Cabinet panel would fight it. Same reasoning as
     // Chuckin's above for suppressing the X01-shaped fallback too.
     noCompletionStats: true,
-    category: (setup, config) => config.mode === 'blitz' ? 'Checkout Blitz' : 'Checkout Trainer (Freeform)',
+    category: (setup, config) => config.mode === 'blitz' ? 'Checkout Blitz'
+      : config.mode === 'route_recall' ? `Route Recall (${config.routeCeiling || 3}-dart)`
+      : 'Checkout Trainer (Freeform)',
     // "No live scoreboard, deliberate" (its roadmap) — pushLive() skips this
     // mode entirely; see the flag's comment there.
     noLiveDisplay: true,
@@ -16463,10 +16574,20 @@ const GAME_TYPES = {
     // the same "store it even though it is single-valued for now" precedent
     // tournament_rounds and legs_per_set already set.
     buildConfig: (setup) => ({
-      mode: setup.checkoutTrainerPin ? 'freeform' : setup.checkoutTrainerMode,
+      // A pin forces Freeform for Blitz's sake (grinding one known number against
+      // a clock is not a speed test) but NOT for Route Recall: "drill everything I
+      // know about checking out 100" is exactly what a pinned target plus this
+      // sub-mode means, and the roadmap called that out as its natural home.
+      mode: (setup.checkoutTrainerPin && setup.checkoutTrainerMode === 'blitz')
+        ? 'freeform' : setup.checkoutTrainerMode,
       durationSec: (!setup.checkoutTrainerPin && setup.checkoutTrainerMode==='blitz') ? 60 : null,
       difficulty: setup.checkoutTrainerDifficulty || 'full',
-      trickQuestions: setup.checkoutTrainerPin ? false : !!setup.checkoutTrainerTricks,
+      // Route Recall never carries trick questions: a bogey number has no routes
+      // at all, so a hunt for one would open on an empty board with nothing to do.
+      trickQuestions: (setup.checkoutTrainerPin || setup.checkoutTrainerMode === 'route_recall')
+        ? false : !!setup.checkoutTrainerTricks,
+      routeCeiling: setup.checkoutTrainerMode === 'route_recall'
+        ? (setup.routeRecallCeiling || 2) : null,
       pinnedTarget: setup.checkoutTrainerPin || null }),
     playerSnapshot: playerSnapshotCheckoutTrainer,
     statDefs: CHECKOUT_TRAINER_STAT_DEFS,
@@ -18639,7 +18760,12 @@ function newMatchPlayerCheckoutTrainer(name, config){
   const p = { name, score: pickCheckoutTarget(doubleOut, undefined, config && config.difficulty, (config && config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0, config && config.pinnedTarget), doubleOut,
     attempts:0, legalCount:0, optimalCount:0, currentStreak:0,
     lifetimeAttemptsBase:0, lifetimeOptimalBase:0,
-    sessionRounds:[] };
+    sessionRounds:[],
+    // Route Recall only (docs/archive/checkout-trainer-route-recall-roadmap.md). foundKeys
+    // is THIS hunt's finds, cleared whenever a new target is served; hunts is the
+    // whole session's record, which is what the completion screen and the coverage
+    // stats read. routesFound is a session-wide running total across hunts.
+    foundKeys:new Set(), hunts:[], routesFound:0, lifetimeRoutesBase:0 };
   // Fetched once at game start (not re-queried per attempt), same "avoid a
   // network round-trip per dart" reasoning newMatchPlayerChuckin() documents —
   // checkCheckoutTrainerMilestones() computes lifetime attempts/optimal-answers
@@ -18663,7 +18789,11 @@ function playerSnapshotCheckoutTrainer(p){
     optimalCount:p.optimalCount||0, currentStreak:p.currentStreak||0 };
 }
 function throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced){
-  if(game.darts.length>=3 || game.busted || game.won || game.blitzEnded) return;
+  // Route Recall's dart ceiling is the hunt's own rule, so it caps entry here as
+  // well as being enforced at grading — a 2-dart hunt should not let a third dart
+  // be staged at all, only to reject it on Submit.
+  const cap = (game.config.mode === 'route_recall') ? routeRecallCeiling() : 3;
+  if(game.darts.length>=cap || game.busted || game.won || game.blitzEnded) return;
   // Checkout Blitz: a hard deadline — the instant the wall clock passes it, no
   // further dart can be entered, whether this would start a fresh round or
   // continue one already mid-entry (docs/archive/checkout-trainer-roadmap.md "Core loop
@@ -18691,8 +18821,8 @@ function throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced){
   } else if(ev.win){
     game.won=true;
     status.className='status win'; status.textContent="That's a finish! Press Submit to grade it.";
-  } else if(game.darts.length>=3){
-    status.className='status'; status.textContent='Three darts thrown — press Submit.';
+  } else if(game.darts.length>=cap){
+    status.className='status'; status.textContent=`${cap} dart${cap===1?'':'s'} entered — press Submit.`;
   } else {
     status.className='status'; status.textContent=`Leaves ${ev.newScore}. Tap another dart, or press Submit now.`;
   }
@@ -18703,6 +18833,12 @@ function throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced){
 // and Checkout Blitz share this exact round-serving behavior; Blitz layers a
 // deadline check on top, see the Checkout Blitz section below).
 function submitCheckoutAttempt(){
+  // Route Recall grades a completely different question — "is this one you have
+  // NOT already named?" rather than "is this legal, and is it optimal?" — so it
+  // gets its own commit path rather than a third set of branches threaded through
+  // this one. Everything they genuinely share (the dart-entry path, the pad, the
+  // paper theme, the undo snapshot shape) is still shared.
+  if(game.config.mode === 'route_recall') return submitRouteRecall();
   if(game.darts.length===0){ document.getElementById('status').textContent='Tap out a proposed checkout first, then press Submit.'; return; }
   // Checkout Blitz: the same hard deadline throwDartCheckoutTrainer() enforces on
   // dart entry, checked again here — a player can tap out every dart of a legal
@@ -18778,6 +18914,135 @@ function submitCheckoutAttempt(){
     (game.config && game.config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0, game.config && game.config.pinnedTarget);
   renderGameCheckoutTrainer();
 }
+/* ---------- Route Recall (docs/archive/checkout-trainer-route-recall-roadmap.md) ----------
+
+   A "hunt" is one target, held across as many submissions as it takes to run dry
+   or move on — the opposite of Freeform, which serves a new target every attempt.
+
+   The three outcomes and what each records:
+     illegal   — a turn with bust=1. Told why, costs nothing but the attempt.
+     duplicate — NOTHING is recorded. Deliberate: re-entering a route by accident
+                 must not cost anything, and it also means "routes found" is
+                 simply the count of checkout=1 turns rather than something that
+                 has to be de-duplicated at read time.
+     new       — a turn with checkout=1, and the route joins this hunt's found set.
+
+   Grouping (this doc's own open question, resolved): `turns.set_no` is the hunt
+   number and `turns.leg_no` the submission within it. No new column — `set_no` is
+   already a free-standing per-turn grouping integer, and this mode has no concept
+   of sets to conflict with it. */
+function routeRecallCeiling(){ return (game.config && game.config.routeCeiling) || 3; }
+// The complete route set for the hunt in progress. Recomputed rather than cached
+// on `game`: allCheckoutRoutes() is a pure function of three values that only
+// change when a new target is served, and a stale cached total is exactly the bug
+// that would make a hunt uncompletable.
+function routeRecallRoutes(){
+  const p = game.players[0];
+  return allCheckoutRoutes(p.score, p.doubleOut, routeRecallCeiling());
+}
+// Whether this tier tells the player how many exist. See setRouteRecallCeiling().
+function routeRecallRevealsTotal(){ return routeRecallCeiling() <= 2; }
+
+function submitRouteRecall(){
+  const p = game.players[0];
+  if(game.darts.length === 0){
+    document.getElementById('status').textContent = 'Tap out a route for ' + p.score + ', then press Submit.';
+    return;
+  }
+  const grade = gradeRouteSubmission({ target:p.score, doubleOut:p.doubleOut,
+    ceiling:routeRecallCeiling(), darts:game.darts, foundKeys:p.foundKeys });
+
+  // A duplicate is a no-op by design — no turn, no counter, no undo entry. Say so
+  // and clear the darts so the next route can be tapped straight in.
+  if(grade.status === 'duplicate'){
+    game.lastResult = { routeRecall:true, status:'duplicate', route:grade.labels.join(' ') };
+    game.darts = []; game.busted = false; game.won = false;
+    announce(`Already found — ${grade.labels.join(' ')}.`);
+    return renderGameCheckoutTrainer();
+  }
+
+  pushTurnSnapshot({ target:p.score, attempts:p.attempts, legalCount:p.legalCount,
+    routesFound:p.routesFound, foundKeys:new Set(p.foundKeys),
+    sessionRoundsLen:p.sessionRounds.length, legNo:game.legNo, setNo:game.setNo,
+    badgeReverts:[], voided:false });
+
+  p.attempts += 1;
+  if(grade.status === 'new'){
+    p.legalCount += 1;
+    p.routesFound += 1;
+    p.foundKeys.add(grade.key);
+  }
+  p.sessionRounds.push({ target:p.score, legal:grade.status === 'new',
+    optimal:false, usedDarts:grade.labels.length, route:grade.labels.join(' ') });
+
+  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
+    scored:0, bust:grade.status !== 'new', checkout:grade.status === 'new',
+    checkoutPoints:null, legWon:false, targetScore:p.score,
+    darts: mapDartsForRecord(game.darts) });
+
+  const progress = routeHuntProgress(p.score, p.doubleOut, routeRecallCeiling(), p.foundKeys.size);
+  game.lastResult = Object.assign({ routeRecall:true, status:grade.status,
+    route:grade.labels.join(' '), reason:grade.reason }, progress);
+
+  if(grade.status === 'new'){
+    announce(routeRecallRevealsTotal()
+      ? `New route — ${grade.labels.join(' ')}. ${progress.found} of ${progress.total} found.`
+      : `New route — ${grade.labels.join(' ')}. ${progress.found} found.`);
+  } else {
+    announce(`Not a route for ${p.score}. ${routeRecallRejectionText(grade.reason, routeRecallCeiling())}`);
+  }
+
+  checkRouteRecallMilestones(p);
+  // 🗺️ Cartographer — every route of a genuinely route-rich target, in one hunt.
+  // Gated on the target having had 10+ to find, so clearing "40 at one dart"
+  // (exactly one route) can never earn it.
+  if(progress.complete && progress.total >= ROUTE_RECALL_CARTOGRAPHER_MIN){
+    awardOnceBadge(p.name, 'route_recall_cartographer', 'route_recall_cartographer', null,
+      { icon:'🗺️', headline:'CARTOGRAPHER', statLine:`Every one of the ${progress.total} routes for ${p.score}` },
+      {cacheCheck:true});
+  }
+
+  game.legNo += 1;
+  game.darts = []; game.busted = false; game.won = false;
+  renderGameCheckoutTrainer();
+}
+
+// Why a submission was rejected, in the player's terms rather than the grader's.
+function routeRecallRejectionText(reason, ceiling){
+  if(reason === 'too-many-darts') return `That is more than ${ceiling} dart${ceiling===1?'':'s'} — this hunt is ${ceiling}-dart routes only.`;
+  if(reason === 'overshoots') return 'That goes past zero.';
+  if(reason === 'bad-finish') return 'That adds up, but it has to finish on a double.';
+  if(reason === 'short') return "That doesn't reach the target.";
+  if(reason === 'miss') return 'A miss is not part of a route.';
+  return 'That is not a legal route.';
+}
+
+// "Move to a new target" — ends the hunt in progress, banks it, and serves the
+// next. An incomplete hunt is still banked: partial coverage is the whole point
+// of the open-ended tier, and discarding it would make the session summary lie.
+function nextRouteRecallTarget(){
+  if(!game || game.gameType !== 'checkout_trainer' || game.config.mode !== 'route_recall') return;
+  const p = game.players[0];
+  bankRouteRecallHunt(p);
+  game.setNo += 1;             // the hunt number — see the grouping note above
+  game.legNo = 1;
+  game.darts = []; game.busted = false; game.won = false;
+  game.lastResult = null;
+  p.foundKeys = new Set();
+  p.score = pickCheckoutTarget(p.doubleOut, undefined, game.config && game.config.difficulty, 0,
+    game.config && game.config.pinnedTarget);
+  announce(`New target: ${p.score}.`);
+  renderGameCheckoutTrainer();
+}
+// Records the hunt in progress onto p.hunts. Called both by nextRouteRecallTarget()
+// and by the end-of-session path, so the last hunt is never silently dropped.
+function bankRouteRecallHunt(p){
+  if(!p.foundKeys.size && !game.lastResult) return;   // nothing happened on this target
+  const progress = routeHuntProgress(p.score, p.doubleOut, routeRecallCeiling(), p.foundKeys.size);
+  p.hunts.push({ target:p.score, ceiling:routeRecallCeiling(),
+    found:progress.found, total:progress.total, coverage:progress.coverage, complete:progress.complete });
+}
+
 // The trick-question variant's second answer path (docs/archive/checkout-trainer-roadmap.md
 // "Trick-question difficulty variant") — the player calls the current target a bogey
 // number instead of tapping out a route. Mirrors submitCheckoutAttempt() step for
@@ -18858,7 +19123,79 @@ function undoLastTurnCheckoutTrainer(){
 
   _finishUndo(snap, renderGameCheckoutTrainer, { resetDarts: true, msg: 'Last attempt undone.' });
 }
+/* Route Recall's own scoring screen. The shape of the information is different
+   enough from Freeform's that a set of branches inside that renderer would have
+   been most of a second renderer anyway: there is no "was that optimal?" verdict
+   here, and the thing the player needs on screen at all times is the list of what
+   they have already named — otherwise "have I said T20 T20 D20 yet?" is a memory
+   test about the memory test. */
+function renderGameRouteRecall(){
+  const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
+  renderSlots();
+  const p = game.players[0];
+  const ceiling = routeRecallCeiling();
+  const progress = routeHuntProgress(p.score, p.doubleOut, ceiling, p.foundKeys.size);
+  const reveal = routeRecallRevealsTotal();
+
+  const row = document.createElement('div');
+  row.className = 'pscore active';
+  // The tally is the one number that matters, so it takes the big slot the
+  // remaining score occupies in every other mode. Revealed tiers show "N/M";
+  // the open-ended tier shows just N, with no denominator to imply a finish line.
+  row.innerHTML = `
+    <div>
+      <div class="nm">${escapeHtml(p.name)} <span class="nm-out">🗺️ Route Recall · ${ceiling} dart${ceiling===1?'':'s'} · ${p.doubleOut?'double out':'single out'}</span></div>
+      <div class="turnflag">▸ target ${p.score}</div>
+    </div>
+    <div class="meta">
+      <div class="avgs">${p.routesFound} route${p.routesFound===1?'':'s'} this session${p.hunts.length?` · ${p.hunts.length} target${p.hunts.length===1?'':'s'} done`:''}</div>
+      <div class="standing">${reveal ? `${progress.found} of ${progress.total}` : `${progress.found} found`}</div>
+    </div>
+    <div class="rem-wrap">
+      <div class="rem">${progress.found}${reveal ? `<span style="font-size:.5em;opacity:.6">/${progress.total}</span>` : ''}</div>
+    </div>`;
+  if(sb) sb.appendChild(row);
+
+  // What has already been named, always on screen.
+  const found = [...p.foundKeys].map(k => k.replace('|', ' ').trim()).sort();
+  const list = document.createElement('div');
+  list.className = 'pp-section';
+  list.style.cssText = 'margin-top:8px';
+  list.innerHTML = `
+    <h3 class="pp-section-title">Found so far${reveal ? ` — ${progress.found} of ${progress.total}` : ''}</h3>
+    ${found.length
+      ? `<div class="ct-found-list">${found.map(r=>`<span class="ct-found">${escapeHtml(r)}</span>`).join('')}</div>`
+      : `<p class="pp-meta" style="margin:0">Nothing yet. Tap out any legal way to check out ${p.score} in ${ceiling} dart${ceiling===1?'':'s'} or fewer.</p>`}`;
+  if(sb) sb.appendChild(list);
+
+  const status = document.getElementById('status');
+  if(status){
+    const r = game.lastResult;
+    if(progress.complete){
+      status.className = 'status win';
+      status.textContent = `🎉 Every route found — all ${progress.total} of them for ${p.score}. Move to a new target.`;
+    } else if(r && r.status === 'new'){
+      status.className = 'status win';
+      status.textContent = `✅ New route — ${r.route}.` + (reveal ? ` ${r.found} of ${r.total}.` : ` ${r.found} found.`);
+    } else if(r && r.status === 'duplicate'){
+      // Explicitly NOT the bust styling: this costs nothing and must not read
+      // like a mistake (docs/archive/checkout-trainer-route-recall-roadmap.md).
+      status.className = 'status';
+      status.textContent = `↩️ Already got that one — ${r.route}. Try another way.`;
+    } else if(r && r.status === 'illegal'){
+      status.className = 'status bust';
+      status.textContent = `❌ ${routeRecallRejectionText(r.reason, ceiling)}`;
+    } else {
+      status.className = 'status';
+      status.textContent = reveal
+        ? `${progress.total} route${progress.total===1?'':'s'} exist for ${p.score} in ${ceiling} dart${ceiling===1?'':'s'}. Name them.`
+        : `How many ways can you check out ${p.score} in ${ceiling} darts? Name as many as you can.`;
+    }
+  }
+  renderPad();
+}
 function renderGameCheckoutTrainer(){
+  if(game.config.mode === 'route_recall') return renderGameRouteRecall();
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
   renderSlots();   // game.darts was just cleared/changed by the caller — a stale route
                    // left on display would contradict the fresh target (and a

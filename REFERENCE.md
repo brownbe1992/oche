@@ -5985,7 +5985,7 @@ below).
 and `routeKey(labels)` (`frontend/scoring.js`, 2026-07). Every other checkout
 function in the app finds ONE route and stops; these answer "what are ALL of
 them?", which is what a "name every way to check this out" drill needs
-(`docs/checkout-trainer-route-recall-roadmap.md`, build-order step 1 — the
+(`docs/archive/checkout-trainer-route-recall-roadmap.md`, build-order step 1 — the
 sub-mode itself is not built).
 
 - The alphabet is the **full 62-segment board** (`CO_SEGMENTS`: S1-20, D1-20,
@@ -6012,6 +6012,66 @@ ceiling the worst target is 40 with **36** routes; at 3 darts it is 58 with
 independent brute-force oracle across all 180 targets × both out-modes × all
 three ceilings.
 
+### Route Recall (third sub-mode, 2026-07)
+
+`docs/archive/checkout-trainer-route-recall-roadmap.md`. Freeform asks "what is *a*
+legal route, and is it the best one?"; Route Recall asks **"how many different ways
+do you know?"** — one target held across many submissions until the player runs dry
+or moves on.
+
+**Config**: `games.config.mode = 'route_recall'` (a third value, not a fourth
+`game_type`) plus `config.routeCeiling` (1, 2 or 3). `trickQuestions` is forced
+`false` — a bogey number has no routes, so a hunt for one would open with nothing to
+find. A pinned target from "Drill this checkout" **keeps** this sub-mode (unlike
+Blitz, which a pin forces back to Freeform): drilling one number is exactly what
+this mode is for.
+
+**Grouping**: `turns.set_no` is the **hunt number**, `turns.leg_no` the submission
+within it. No new column — `set_no` is already a free-standing per-turn grouping
+integer and this sub-mode has no sets to conflict with it.
+
+**The three outcomes** (`gradeRouteSubmission()`, `frontend/scoring.js`):
+
+| outcome | `turns` row | why |
+|---|---|---|
+| **illegal** | `bust=1` | reason is one of `too-many-darts` / `overshoots` / `short` / `bad-finish` / `miss` / `empty`. `overshoots` and `bad-finish` are deliberately distinct: `evaluateVisit()`'s `bust` covers both, and telling a player their arithmetic was wrong when it was their *finish* is false. |
+| **duplicate** | **none** | a route already named costs nothing — no turn, no counter, no undo entry. This is also what makes "routes found" simply the count of `checkout=1` turns rather than something de-duplicated at read time. |
+| **new** | `checkout=1` | joins the hunt's found set. |
+
+Route identity is `routeKey()`'s canonical form, so submitting the same route with
+its setup darts in a different order is recognised as a duplicate, while the same
+darts with a *different finishing dart* is correctly a different route.
+
+**The dart ceiling is not only a difficulty dial** — it changes what the drill is,
+because of the real route counts (see the enumeration section above):
+
+- **1-2 darts**: the complete set is reachable (worst case 36, for 40 at two darts).
+  The total is shown up front, `routeHuntProgress().complete` fires a "🎉 Every route
+  found!" moment, and coverage is a fraction of a real denominator.
+- **3 darts**: 81 of 162 finishable targets have 200+ routes. No total is shown, no
+  finish line is implied, and the tally is a bare count.
+
+**Stats** (`getRouteRecallStats()`, `backend/db.js`): `routesNamed`, `huntsPlayed`,
+`bestCoveragePct` (best single hunt's found ÷ that target's real total at that
+hunt's ceiling), and `toughestFullClear` (the fully-cleared hunt with the most
+ROUTES — the route count is what made it hard, not the target's face value; ties
+break to the higher target). The per-hunt arithmetic runs in JS over a grouped
+query, because the denominator depends on both the hunt's ceiling and the player's
+out-mode and only `allCheckoutRoutes()` knows it.
+
+**Isolation from Freeform/Blitz — load-bearing.** `checkout=1` means different
+things in the two contexts ("a route you had not named yet" vs "a legal answer to
+this round"), so every Freeform/Blitz statistic carries `NOT_ROUTE_RECALL`.
+That fragment is `AND json_extract(g.config,'$.mode') IS NOT 'route_recall'` —
+`IS NOT`, not `!=`, because `config.mode` is absent on rows written before this
+sub-mode existed and `!= NULL` is NULL, which would erase every pre-existing
+Checkout Trainer statistic instead of excluding nothing.
+
+**Badges**: `ROUTE_RECALL_MILESTONE_LADDERS` (routes named: 25/100/300/800/2000) —
+its own ladder, not merged into Freeform's attempts ladder, since they count
+different things. 🗺️ **Cartographer**: every route of a target that had
+`ROUTE_RECALL_CARTOGRAPHER_MIN` (10) or more, in one hunt.
+
 **Game type**: `checkout_trainer`, one of `KNOWN_GAME_TYPES` (`backend/db.js`).
 Every dart-count attempt is its own 1-3 dart `turns` row — the same per-dart-
 turn shape Doubles Practice/Just Chuckin' It already use — reusing
@@ -6024,9 +6084,10 @@ no persistent "remaining score" state to derive it from afterward.
 `turns.declared_unsolvable INTEGER NOT NULL DEFAULT 0` — `1` marks a
 trick-question round answered by declaring "no possible checkout" (see
 **Trick questions** below); the only turn shape allowed to carry zero dart
-rows. `games.config.mode`: `'freeform' | 'blitz'` — a mode flag, not a second
-`game_type`, since both sub-modes share identical target selection and grading
-and differ only in pacing/scoring (the same relationship X01's own H2H-vs-
+rows. `games.config.mode`: `'freeform' | 'blitz' | 'route_recall'` — a mode flag, not a
+second `game_type`, since the sub-modes share identical target selection and dart
+entry and differ only in pacing/scoring (Route Recall differing most — see its own
+section above). `games.config.routeCeiling`: 1-3 for Route Recall, `null` otherwise (the same relationship X01's own H2H-vs-
 Practice split has within one `game_type`). `games.config.durationSec`: fixed
 at `60` for Blitz, `null` for Freeform. `games.config.difficulty`: one of
 `'under40' | 'under100' | 'over100' | 'full'` (default `'full'`) — set once at

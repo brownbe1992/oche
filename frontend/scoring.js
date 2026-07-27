@@ -681,7 +681,7 @@ function _checkoutHintCompute(rem, doubleOut, maxDarts){
 }
 
 /* ---------- Exhaustive checkout-route enumeration ----------
-   `docs/checkout-trainer-route-recall-roadmap.md` build-order step 1. Every
+   `docs/archive/checkout-trainer-route-recall-roadmap.md` build-order step 1. Every
    checkout function above finds ONE route and stops; Route Recall is the first
    thing in this app that needs the COMPLETE set for a target, to answer "have
    you already found this one?" and "are there any left?".
@@ -883,6 +883,59 @@ function gradeCheckoutAttempt(target, doubleOut, darts){
   const usedDarts = darts.length;
   const optimal = legal && optimalDarts != null && usedDarts === optimalDarts;
   return { legal, usedDarts, optimalDarts, optimal, hint };
+}
+
+/* ---------- Route Recall grading (docs/archive/checkout-trainer-route-recall-roadmap.md) ----------
+   Checkout Trainer's third sub-mode asks a different question from the other two:
+   not "is this route legal, and is it the best one?" but "is this a route you have
+   not already named?". So the grade is three-way rather than two-way, and the third
+   outcome — a legal route the player already found — is explicitly NOT a failure:
+   re-entering a route by accident must cost nothing.
+
+   `foundKeys` is whatever the caller has been collecting (a Set, an array, or
+   anything with `.has`/`.includes`); this function neither owns nor mutates it. */
+function gradeRouteSubmission({ target, doubleOut, ceiling, darts, foundKeys }) {
+  const max = ceiling || 3;
+  const labels = (darts || []).map(d => dartLabel(d.sector, d.mult));
+  if (!labels.length) return { status: 'illegal', reason: 'empty', key: null, labels };
+  // A miss is not a route. Caught before evaluateVisit(), which would score it as a
+  // legitimate 0 and could then call a 2-dart route with a miss in it "3 darts".
+  if (labels.includes('Miss')) return { status: 'illegal', reason: 'miss', key: null, labels };
+  // The ceiling is a rule of THIS hunt, not of darts: at a 2-dart ceiling a
+  // perfectly legal 3-dart finish is still not an answer to the question asked.
+  if (labels.length > max) return { status: 'illegal', reason: 'too-many-darts', key: null, labels };
+
+  // Legality itself is the ordinary X01 rule, through the ordinary X01 evaluator —
+  // a checkout is a checkout, and this mode does not get its own opinion about it.
+  const ev = evaluateVisit({ score: target, doubleOut }, darts, null);
+  if (!ev.win) {
+    // evaluateVisit()'s `bust` covers two different mistakes — going past zero,
+    // and landing exactly on zero off something that is not a double. Telling a
+    // player "that goes past zero" about 20+20 on 40 is simply false, and it is
+    // the wrong lesson besides: the arithmetic was right, the finish was not.
+    const sum = darts.reduce((n, x) => n + (x.value != null ? x.value : 0), 0);
+    return { status: 'illegal', key: null, labels,
+      reason: sum > target ? 'overshoots'
+        : sum === target ? 'bad-finish'
+        : 'short' };
+  }
+
+  const key = routeKey(labels);
+  const has = foundKeys && (typeof foundKeys.has === 'function'
+    ? foundKeys.has(key) : (foundKeys.includes ? foundKeys.includes(key) : false));
+  return { status: has ? 'duplicate' : 'new', key, labels, reason: null };
+}
+
+// How a hunt stands: how many of the target's routes have been found, out of how
+// many exist. `total` is 0 for an unfinishable target, and `complete` is
+// deliberately false there rather than vacuously true — there is nothing to find,
+// which is not the same as having found everything.
+function routeHuntProgress(target, doubleOut, ceiling, foundCount) {
+  const total = allCheckoutRoutes(target, doubleOut, ceiling || 3).length;
+  const found = Math.min(foundCount || 0, total);
+  return { found, total,
+    coverage: total ? +((found / total) * 100).toFixed(1) : 0,
+    complete: total > 0 && found >= total };
 }
 
 // Grades a "no possible checkout" declaration — the trick-question variant's
@@ -2607,7 +2660,7 @@ if (typeof module !== 'undefined' && module.exports) {
     isHatTrick, isBullseyeGauntlet, isDoubleTrouble, isWhereDidItGo, isSoCloseShot,
     isBustedMaximum, isTontitledToNothing, isNoCigar, isTripleBullCheckout, isBullseyeFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
-    CO_SEGMENTS, allCheckoutRoutes, routeKey,
+    CO_SEGMENTS, allCheckoutRoutes, routeKey, gradeRouteSubmission, routeHuntProgress,
     pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
     CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,

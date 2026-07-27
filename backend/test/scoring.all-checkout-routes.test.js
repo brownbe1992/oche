@@ -1,5 +1,5 @@
 'use strict';
-// allCheckoutRoutes() — docs/checkout-trainer-route-recall-roadmap.md build-order step 1.
+// allCheckoutRoutes() — docs/archive/checkout-trainer-route-recall-roadmap.md build-order step 1.
 //
 // That doc's own testing note is the reason this file is as heavy as it is: a wrong
 // enumeration "would silently corrupt every 'already found?'/'is this complete?' check

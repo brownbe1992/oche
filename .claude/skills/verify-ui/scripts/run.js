@@ -26,6 +26,7 @@ const CHECKS = {
   'resume-fidelity': './checks/resume-fidelity',
   'pad-reuse': './checks/pad-reuse',
   'profile-a11y': './checks/profile-a11y',
+  'route-recall': './checks/route-recall',
   'live-scoreboard': './checks/live-scoreboard',
   'live-shell': './checks/live-shell',
   'home-settings': './checks/home-settings',

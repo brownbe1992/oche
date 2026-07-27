@@ -37,7 +37,7 @@ const { checkoutHint, dartLabel,
   makeDartCore, PRESSURE_ROUNDS, generatePressureCard, computePressureRoundResult,
   pressureMissPenaltyForCard, pressureComposureRating, rebuildPressureChamberState,
   doubleElimStructure,
-  resolveBoardColors } = require('../frontend/scoring.js');
+  resolveBoardColors, allCheckoutRoutes } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -4835,13 +4835,65 @@ function getCheckoutTrainerStatBubbles(playerName, mode) {
   if (!p) return null;
   const scope = _scope({ mode, gameType: 'checkout_trainer' });
 
-  const totalAttempts = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope}`).get(p.id)?.v ?? 0;
-  const legalCount = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.checkout=1 ${scope}`).get(p.id)?.v ?? 0;
-  const optimalCount = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.leg_won=1 ${scope}`).get(p.id)?.v ?? 0;
+  // NOT_ROUTE_RECALL: the third sub-mode shares this game_type but answers a
+  // different question — its checkout=1 means "a route you hadn't named yet",
+  // not "a legal answer to the round" — so folding it in would quietly move a
+  // player's Freeform accuracy every time they played a Route Recall hunt.
+  const totalAttempts = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope} ${NOT_ROUTE_RECALL}`).get(p.id)?.v ?? 0;
+  const legalCount = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.checkout=1 ${scope} ${NOT_ROUTE_RECALL}`).get(p.id)?.v ?? 0;
+  const optimalCount = db.prepare(`SELECT COUNT(*) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.leg_won=1 ${scope} ${NOT_ROUTE_RECALL}`).get(p.id)?.v ?? 0;
   const accuracyPct = totalAttempts > 0 ? (legalCount / totalAttempts * 100) : null;
   const optimalPct = totalAttempts > 0 ? (optimalCount / totalAttempts * 100) : null;
 
-  return { totalAttempts, legalCount, optimalCount, accuracyPct, optimalPct };
+  return Object.assign({ totalAttempts, legalCount, optimalCount, accuracyPct, optimalPct },
+    getRouteRecallStats(playerName, mode));
+}
+
+/* ---------- Route Recall stats (docs/archive/checkout-trainer-route-recall-roadmap.md) ----------
+
+A "hunt" is one target held across many submissions, grouped by (game_id, set_no)
+— `set_no` is this sub-mode's hunt counter (that doc's grouping question, resolved
+by reusing an existing free-standing per-turn integer rather than adding a column).
+
+Coverage needs a DENOMINATOR that only `allCheckoutRoutes()` can supply, and it
+depends on the hunt's own ceiling and the player's own out-mode, so the per-hunt
+arithmetic is done in JS over a small grouped result rather than in SQL. The
+volume is a household's practice history, not a warehouse. */
+function getRouteRecallStats(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return { routesNamed: 0, huntsPlayed: 0, bestCoveragePct: null, toughestFullClear: null };
+  const scope = _scope({ mode, gameType: 'checkout_trainer' });
+
+  const rows = db.prepare(`
+    SELECT t.game_id AS gameId, t.set_no AS huntNo, t.target_score AS target,
+           SUM(CASE WHEN t.checkout = 1 THEN 1 ELSE 0 END) AS found,
+           json_extract(g.config,'$.routeCeiling') AS ceiling,
+           gp.out_mode AS outMode
+      FROM turns t
+      JOIN games g ON g.id = t.game_id
+      JOIN game_players gp ON gp.game_id = t.game_id AND gp.player_id = t.player_id
+     WHERE t.player_id = ? ${scope} ${ROUTE_RECALL_ONLY}
+     GROUP BY t.game_id, t.set_no, t.target_score
+  `).all(p.id);
+
+  let routesNamed = 0, bestCoveragePct = null, toughestFullClear = null;
+  for (const r of rows) {
+    routesNamed += r.found || 0;
+    const total = allCheckoutRoutes(r.target, r.outMode !== 'single', Number(r.ceiling) || 3).length;
+    if (!total) continue;
+    const pct = Math.min(100, (r.found / total) * 100);
+    if (bestCoveragePct == null || pct > bestCoveragePct) bestCoveragePct = pct;
+    // "Toughest FULL clear" is the hardest target every route of which was found —
+    // measured by how many routes it had, not by the target's face value, since
+    // that is what made it hard. Ties break to the higher target.
+    if (r.found >= total && (toughestFullClear == null || total > toughestFullClear.routes
+        || (total === toughestFullClear.routes && r.target > toughestFullClear.target))) {
+      toughestFullClear = { target: r.target, routes: total, ceiling: Number(r.ceiling) || 3 };
+    }
+  }
+  return { routesNamed, huntsPlayed: rows.length,
+    bestCoveragePct: bestCoveragePct == null ? null : +bestCoveragePct.toFixed(1),
+    toughestFullClear };
 }
 
 // Personal Bests analog: toughest checkout ever solved optimally (a single
@@ -4863,16 +4915,24 @@ function getCheckoutTrainerPersonalBests(playerName, mode) {
   // shouldn't set a "toughest ever" record the random target pool didn't
   // actually produce — scoped by the game row's config, no schema change needed
   // since every turn in a pinned game already shares the same pinnedTarget.
-  const toughestCheckout = db.prepare(`SELECT MAX(t.target_score) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.leg_won=1 AND t.declared_unsolvable=0 AND json_extract(g.config,'$.pinnedTarget') IS NULL ${scope}`).get(p.id)?.v ?? null;
+  const toughestCheckout = db.prepare(`SELECT MAX(t.target_score) AS v FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? AND t.leg_won=1 AND t.declared_unsolvable=0 AND json_extract(g.config,'$.pinnedTarget') IS NULL ${scope} ${NOT_ROUTE_RECALL}`).get(p.id)?.v ?? null;
 
-  const rows = db.prepare(`SELECT t.leg_won AS legWon FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope} ORDER BY t.id`).all(p.id);
+  const rows = db.prepare(`SELECT t.leg_won AS legWon FROM turns t JOIN games g ON g.id=t.game_id WHERE t.player_id=? ${scope} ${NOT_ROUTE_RECALL} ORDER BY t.id`).all(p.id);
   let bestStreak = 0, current = 0;
   for (const r of rows) {
     if (r.legWon) { current += 1; if (current > bestStreak) bestStreak = current; }
     else current = 0;
   }
 
-  return { toughestCheckout, bestStreak };
+  const rr = getRouteRecallStats(playerName, mode);
+  return { toughestCheckout, bestStreak,
+    // Route Recall's own two records, alongside rather than merged into the
+    // Freeform ones above — "the toughest checkout you can solve" and "the target
+    // whose every route you know" are different achievements about different
+    // skills, and averaging them would describe neither.
+    routeRecallBestCoveragePct: rr.bestCoveragePct,
+    routeRecallToughestFullClear: rr.toughestFullClear,
+    routeRecallRoutesNamed: rr.routesNamed };
 }
 
 // Checkout Blitz's arcade-style high-score table — one row per player, their
@@ -6150,6 +6210,14 @@ const NOT_HYPOTHETICAL_DARTS = `AND g.game_type NOT IN ('chuckin','checkout_trai
 // stat, full stop (explicit product decision, not inferred from the chuckin
 // precedent this constant otherwise mirrors).
 const NOT_CHECKOUT_TRAINER = `AND g.game_type != 'checkout_trainer'`;
+// Route Recall shares the checkout_trainer game_type (its own roadmap's decision —
+// a mode flag, not a fourth game type), but it answers a completely different
+// question, so its rows must not land in Freeform/Blitz's accuracy or optimal
+// rates. `IS NOT` rather than `!=` deliberately: config.mode is absent on rows
+// written before this sub-mode existed, and `!=` against NULL is NULL, which would
+// exclude exactly the history these stats are made of.
+const NOT_ROUTE_RECALL   = `AND json_extract(g.config,'$.mode') IS NOT 'route_recall'`;
+const ROUTE_RECALL_ONLY  = `AND json_extract(g.config,'$.mode') = 'route_recall'`;
 
 // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): a handicapped
 // player's own game_players.start_score overrides games.config.startingScore
