@@ -2732,6 +2732,31 @@ describe('Dead Man Walking (docs/archive/dead-man-walking-roadmap.md)', () => {
       assert.equal(r.walkedOutCount, 2, 'rounds 1 and 2 walked out; round 3 missed entirely');
       assert.equal(r.done, true);
     });
+    // roundResults feeds the completion panel's fifteen-round shelf, which has to
+    // say WHICH rounds were survived, at what target, in how many darts — none of
+    // which the walkedOutRounds booleans alone can carry.
+    test('roundResults logs the target and dart count of every settled round, in order', () => {
+      const turns = [
+        v(0, 1, 1, [[20, 2]]),           // round 1 (target 40): D20, walked out in 1 dart
+        v(0, 1, 2, [[20, 3]]),           // round 2 (target 32): T20 overshoots — executed on dart 1
+        v(0, 1, 3, [[7, 3], [20, 2]]),   // round 3 (target 61): T7 + D20, walked out in 2 darts
+      ];
+      const r = rebuildDeadManWalkingState({ rounds, turns });
+      assert.deepEqual(r.roundResults, [
+        { target: 40, walkedOut: true,  darts: 1 },
+        { target: 32, walkedOut: false, darts: 1 },
+        { target: 61, walkedOut: true,  darts: 2 },
+      ]);
+      assert.deepEqual(r.roundResults.map(x => x.walkedOut), r.walkedOutRounds,
+        'the two views of the same settled history must never disagree');
+    });
+    test('a round still in progress contributes nothing to roundResults', () => {
+      // Only SETTLED rounds belong on the shelf — a half-thrown round would show
+      // up as a completed one, with a dart count that is still climbing.
+      const r = rebuildDeadManWalkingState({ rounds, turns: [ v(0, 1, 1, [[5, 1]]) ] });
+      assert.deepEqual(r.roundResults, []);
+      assert.equal(r.dartsUsedThisRound, 1, 'the live round is reported separately, as it always was');
+    });
   });
 
   describe('CHALLENGE_CHECKOUTS (shared with Daily Challenge, docs/archive/dead-man-walking-roadmap.md "Cold start")', () => {

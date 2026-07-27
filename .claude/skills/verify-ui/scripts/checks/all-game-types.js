@@ -86,6 +86,32 @@ module.exports = async function run() {
       rep.ok(`${key}: accepts a dart without erroring`, pageErrors.length === errsBefore,
         pageErrors.slice(errsBefore).join('; '));
 
+      // The mode's leg/game-complete panel, rendered against the REAL player
+      // objects this mode just built. Source-level tests can't catch a spec that
+      // reads a field the live factory never creates — that is exactly how Dead
+      // Man Walking's own achievement fields shipped missing (BUG-34), and a
+      // completion panel is the worst place to discover it, since it only paints
+      // once the game is already over and unrepeatable.
+      const panel = await page.evaluate(() => {
+        try {
+          const gt = GAME_TYPES[game.gameType];
+          if (!gt.completionPanel) return { skipped: true, declared: !!gt.noCompletionStats };
+          const html = gameCompletionPanelHtml(game.players[0].name, 'game');
+          return { skipped: false, length: html.length, hasHero: html.includes('lc-head') };
+        } catch (err) {
+          return { error: String(err && err.message || err) };
+        }
+      });
+      if (panel.error) {
+        rep.ok(`${key}: completion panel renders`, false, panel.error);
+      } else if (panel.skipped) {
+        rep.ok(`${key}: no completion panel, and says so`, panel.declared,
+          panel.declared ? 'noCompletionStats' : 'declares NEITHER — its completion screen would be blank');
+      } else {
+        rep.ok(`${key}: completion panel renders`, panel.length > 0 && panel.hasHero,
+          `${panel.length} chars, hero=${panel.hasHero}`);
+      }
+
       // Leave the game so the next iteration starts from a clean screen.
       await page.evaluate(() => { try { game = null; } catch {} show('home'); });
       await page.waitForTimeout(200);

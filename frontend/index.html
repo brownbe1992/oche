@@ -545,7 +545,9 @@
      11px text up in the live scoreboard). Hierarchy here is deliberate: the two
      averages are the hero band, the session's checkouts are the trophy shelf
      below them, and the flat rows that remain are genuinely secondary. */
-  .lc-heads{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px;text-align:left}
+  /* auto-fit, not a fixed 1fr 1fr: X01/Cricket/Killer H2H run up to 4 players, and
+     each of them gets their own hero card and their own stat column here. */
+  .lc-heads{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:18px;text-align:left}
   .lc-head{background:var(--surface);border:1px solid var(--wire);border-radius:12px;
     padding:13px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}
   /* This leg is the one you just threw, so it leads. */
@@ -570,8 +572,25 @@
   /* A zero is information (no 180s today), so it stays on screen — just dimmed
      so it never competes with a real number. */
   .lc-t.zero .lc-n2{color:#4d514a}
-  .lc-split{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;text-align:left}
+  .lc-split{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:14px;text-align:left}
+  /* A shelf cell that carries a STATE, not just a number — closed/open, hit/
+     missed, walked out/executed. Colour is never the only signal: every cell
+     also carries a caption, so the state survives colorblind mode and a
+     screen reader alike. */
+  .lc-co.st{display:flex;flex-direction:column;align-items:center;gap:1px;padding:5px 10px;min-width:52px}
+  .lc-co.st .lc-cap{font-family:'Inter',system-ui,sans-serif;font-size:9px;font-weight:600;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .lc-co.ok{border-color:#1f4d2c;background:#122318;color:#7fd79a}
+  .lc-co.ok .lc-cap{color:#5d9a72}
+  .lc-co.no{border-color:#4a2328;background:#241618;color:var(--bust)}
+  .lc-co.no .lc-cap{color:#a76a70}
+  .lc-co.dim{color:#4d514a}
+  .lc-co.dim .lc-cap{color:#3c4038}
   @media(max-width:600px){.lc-heads,.lc-split{grid-template-columns:1fr}}
+  /* A long shelf (Bob's 27's twenty doubles, The Gauntlet's twenty stations,
+     Dead Man Walking's fifteen rounds) scrolls inside its own box rather than
+     pushing the panel's own height past the screen. */
+  .lc-cos.lc-long{max-height:196px;overflow-y:auto}
 
   /* ---- practice leg stats panel ---- */
   .prac-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:20px;text-align:left}
@@ -7707,6 +7726,10 @@ async function startGame(){
     game.dmwWalkedOutCount = 0;
     game.dmwCurrentStreak = 0;
     game.dmwBestStreak = 0;
+    // Per-round outcome log — {target, walkedOut, darts} per settled round, in
+    // order. The completion panel's shelf needs to say WHICH rounds were
+    // survived; dmwWalkedOutCount only says how many.
+    game.dmwRoundResults = [];
     const p = game.players[0];
     p.score = first ? first.target : 0;
     p.doubleOut = true;
@@ -13394,7 +13417,7 @@ function enterTurnCricket(){
   const _snap = { pi:game.current, marks:Object.assign({}, p.marks),
     playersPoints: game.players.map(pl => ({ points:pl.points, gamePointsReceived:pl.gamePointsReceived })),
     legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
-    legWorstPointsDeficit:p.legWorstPointsDeficit,
+    legWorstPointsDeficit:p.legWorstPointsDeficit, roundMarksLen:p.legRoundMarks.length,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     badgeReverts:[], voided:false };
   pushTurnSnapshot(_snap);
@@ -13457,6 +13480,7 @@ function enterTurnCricket(){
   // 9 Marks: 3 darts, each a treble on an in-play number — the maximum possible
   // marks in one visit, same framing as 180 being the max possible X01 visit score.
   const marksThisVisit = game.darts.reduce((s,d)=> s + (_inPlayNumbers.includes(d.sector) ? d.mult : 0), 0);
+  p.legRoundMarks.push(marksThisVisit);
   if(game.darts.length===3 && marksThisVisit===9){
     queueBadge('cricket9marks', p.name);
     awardRecurringBadge(p.name, 'cricket9marks', 'cricket9marks',
@@ -13502,6 +13526,10 @@ function undoLastTurnCricket(){
   });
   p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
   p.legWorstPointsDeficit = snap.legWorstPointsDeficit;
+  // Per-visit marks log feeding the leg-complete panel's MPR hero and best-round
+  // tally. Truncate rather than pop: same discipline as currentLegTurns below,
+  // so a snapshot taken before the push and one taken after both restore right.
+  p.legRoundMarks.length = snap.roundMarksLen;
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
@@ -14499,75 +14527,502 @@ function startNextSet(){ startNextLeg(true); }
 
 function statRow(label,val,sm){ return `<div class="prac-row"><span class="prac-row-label">${label}</span><span class="prac-row-val${sm?' sm':''}">${val}</span></div>`; }
 
-// The solo-practice leg-complete panel (/frontend-design direction D, "Trophy
-// Cabinet", 2026-07). Structure, in priority order:
-//   1. the two three-dart averages as a hero band — leg first, since that's the
-//      leg you just threw;
-//   2. the session's checkouts as a shelf of chips, best enlarged, because in a
-//      practice session the run of finishes IS the scoreboard;
-//   3. emoji tallies in the app's established vocabulary (💯 ton+, 🎯 180s,
-//      🐟 Big Fish, 🔥 best visit);
-//   4. everything genuinely secondary, in two quiet columns.
+/* ---------- Completion panels — one renderer, a spec per game type ----------
+   Every game type's leg/run/match-complete screen is the same four-part shape
+   (chosen by the owner from four /frontend-design directions, 2026-07):
+
+     hero    the one or two headline numbers — the mode's answer to "how did
+             that go", and always the largest thing on the panel;
+     shelf   the mode's own unit of achievement, laid out as a row of cells:
+             X01's checkouts, Cricket's seven numbers, Bob's 27's twenty
+             doubles, Dead Man Walking's fifteen rounds, Baseball's nine
+             innings. Optional — Around the Clock genuinely has nothing per-
+             number worth listing, and omitting the shelf there is the point of
+             making it optional rather than forcing every mode into one mould;
+     tallies emoji counts in the app's established vocabulary;
+     columns everything genuinely secondary, in two quiet stacks.
+
+   A mode supplies a SPEC, not markup — declared as GAME_TYPES.<type>.completionPanel
+   (game, winner, kind) — so the layout, the class names and the accessibility
+   behaviour are written once here instead of fifteen times. Same
+   derive-from-the-registry discipline items 39/41/46 applied elsewhere; the old
+   approach (a bespoke `${xSummary}` string per mode, concatenated into
+   finishUnit()'s template) is exactly what let Cricket ship with no panel at all
+   and the rest drift into five different shapes. */
+
+// A shelf cell. `state` is 'ok' | 'no' | 'dim' | null — and is ALWAYS paired
+// with a caption, so the state is never carried by colour alone.
+function shelfCell(label, caption, state){
+  const cls = 'lc-co st' + (state ? ' ' + state : '');
+  return `<span class="${cls}">${escapeHtml(String(label))}` +
+    `<span class="lc-cap">${escapeHtml(String(caption))}</span></span>`;
+}
+
+function completionPanelHtml(spec){
+  if(!spec) return '';
+  const heroes = (spec.heroes||[]).map((h,i)=>`
+    <div class="lc-head ${i===0?'lead':'alt'}">
+      <div><div class="lc-k">${escapeHtml(h.title)}</div>
+        ${h.sub ? `<div class="lc-sub">${escapeHtml(h.sub)}</div>` : ''}</div>
+      <div class="lc-n"${h.small ? ' style="font-size:34px"' : ''}>${escapeHtml(String(h.value))}</div>
+    </div>`).join('');
+
+  const shelf = spec.shelf && spec.shelf.cells && spec.shelf.cells.length ? `
+    <div class="lc-sect">
+      <span class="lc-eyebrow">${escapeHtml(spec.shelf.title)}</span>
+      <div class="lc-cos${spec.shelf.long ? ' lc-long' : ''}">${spec.shelf.cells.map(c =>
+        c.plain ? `<span class="lc-co${c.best?' best':''}">${escapeHtml(String(c.label))}</span>`
+                : shelfCell(c.label, c.caption, c.state)).join('')}</div>
+    </div>` : '';
+
+  // Tallies can stand alone (Around the Clock has no shelf), so they get their
+  // own section wrapper when there is no shelf to hang under.
+  const tallies = (spec.tallies||[]).length ? `
+    <div class="${shelf ? 'lc-tally' : 'lc-sect'}"${shelf ? ' style="margin-top:12px"' : ''}>
+      ${shelf ? '' : `<span class="lc-eyebrow">${escapeHtml(spec.talliesTitle||'At a glance')}</span><div class="lc-tally" style="margin-top:0">`}
+      ${spec.tallies.map(t=>`<div class="lc-t${t.value ? '' : ' zero'}">` +
+        `<span class="lc-em" aria-hidden="true">${t.emoji}</span>` +
+        `<span class="lc-n2">${escapeHtml(String(t.value))}</span>` +
+        `<span class="lc-l2">${escapeHtml(t.label)}</span></div>`).join('')}
+      ${shelf ? '' : '</div>'}
+    </div>` : '';
+
+  // `rows` is the declarative form ([label, value, strong]); `rowsHtml` takes
+  // already-rendered statRow() strings, which is what lets every H2H mode reuse
+  // its existing GAME_TYPES.h2hRows here (see h2hPanelColumns()) instead of
+  // restating the same per-player rows a second time in its panel spec.
+  const columns = (spec.columns||[]).length ? `
+    <div class="lc-split">${spec.columns.map(col=>`
+      <div class="prac-col"><div class="prac-col-title">${escapeHtml(col.title)}</div>
+        ${col.rowsHtml ? col.rowsHtml.join('') : col.rows.map(r=>statRow(r[0], r[1], r[2])).join('')}</div>`).join('')}
+    </div>` : '';
+
+  return `<div class="lc-heads">${heroes}</div>${shelf}${tallies}${columns}`;
+}
+
+// The panel for the game type currently in play, or '' if it doesn't declare
+// one. `kind` is 'leg' | 'set' | 'game', so a mode can show a different panel
+// mid-match than it does at the end.
+function gameCompletionPanelHtml(winner, kind){
+  const gt = GAME_TYPES[game.gameType];
+  if(!gt || !gt.completionPanel) return '';
+  return completionPanelHtml(gt.completionPanel(game, winner, kind));
+}
+
+// X01 solo practice — the panel every other mode's spec is modelled on
+// (/frontend-design direction D, "Trophy Cabinet", chosen by the owner 2026-07).
+// Returns a SPEC for completionPanelHtml(); see that function's header for the
+// four-part shape and why it's a spec rather than markup.
+//
 // The averages come from the player's own canonical legPoints/legAvgDarts and
 // gamePoints/gameAvgDarts — the same fields the live scoreboard's "leg · game"
 // line reads — rather than being recomputed from the turn list, so this panel
 // can never disagree with the number shown during play.
-function practiceLegPanelHtml(p, game){
+function x01PracticePanelSpec(game){
+  const p   = game.players[0];
   const leg = pracAggregate(game.currentLegTurns||[]);
   const ses = pracAggregate(game.sessionTurns||[]);
+  const legs = game.legNo;
   const pct = v => v == null ? '—' : v + '%';
-  const first9 = pracFirst9Average(game.currentLegTurns||[]);
-  const legsPlayed = game.legNo;
   const list = ns => ns.length ? ns.join(' · ') : '—';
-  const tally = (emoji, n, label) =>
-    `<div class="lc-t${n ? '' : ' zero'}"><span class="lc-em" aria-hidden="true">${emoji}</span>` +
-    `<span class="lc-n2">${n}</span><span class="lc-l2">${label}</span></div>`;
+  const first9 = pracFirst9Average(game.currentLegTurns||[]);
+  const plural = (n, one, many) => `${n} ${n===1?one:many}`;
 
-  const chips = ses.checkouts.length
-    ? ses.checkouts.map((c,i)=>`<span class="lc-co${i===0?' best':''}">${c}</span>`).join('')
-    : '<span class="lc-co" style="color:#4d514a">no finishes yet</span>';
+  return {
+    heroes: [
+      { title: 'This leg', sub: `3-dart average · ${plural(leg.darts,'dart','darts')}`,
+        value: avgStr(p.legPoints, p.legAvgDarts) },
+      { title: `Session · ${plural(legs,'leg','legs')}`, sub: `3-dart average · ${plural(ses.darts,'dart','darts')}`,
+        value: avgStr(p.gamePoints, p.gameAvgDarts) },
+    ],
+    shelf: {
+      title: `Checkouts this session — ${ses.checkouts.length} finish${ses.checkouts.length===1?'':'es'}`,
+      cells: ses.checkouts.length
+        ? ses.checkouts.map((c,i)=>({ label:c, plain:true, best:i===0 }))
+        : [{ label:'no finishes yet', plain:true }],
+    },
+    tallies: [
+      { emoji:'💯', value:ses.tonPlus,     label:'ton+ visits' },
+      { emoji:'🎯', value:ses.oneEighties, label: ses.oneEighties===1?'180':'180s' },
+      { emoji:'🐟', value:ses.bigFish,     label:'big fish' },
+      { emoji:'🔥', value:ses.bestVisit,   label:'best visit' },
+    ],
+    columns: [
+      { title:'This leg', rows:[
+        ['First 9 average', first9 == null ? '—' : first9.toFixed(1)],
+        ['Best visits', list(leg.topVisits), leg.topVisits.length>2],
+        ['Checkout'+(leg.checkouts.length===1?'':'s'), list(leg.checkouts)],
+        ['Busts', leg.busts],
+        ['Trebleless visits', pct(leg.treblelessPct)],
+      ]},
+      { title:'Session', rows:[
+        ['Darts per leg', legs ? (ses.darts/legs).toFixed(1) : '—'],
+        ['Best visits', list(ses.topVisits), ses.topVisits.length>2],
+        ['Legs played', legs],
+        ['Busts', ses.busts],
+        ['Trebleless visits', pct(ses.treblelessPct)],
+      ]},
+    ],
+  };
+}
 
-  return `
-    <div class="lc-heads">
-      <div class="lc-head lead">
-        <div><div class="lc-k">This leg</div>
-          <div class="lc-sub">3-dart average · ${leg.darts} dart${leg.darts===1?'':'s'}</div></div>
-        <div class="lc-n">${avgStr(p.legPoints, p.legAvgDarts)}</div>
-      </div>
-      <div class="lc-head alt">
-        <div><div class="lc-k">Session · ${legsPlayed} leg${legsPlayed===1?'':'s'}</div>
-          <div class="lc-sub">3-dart average · ${ses.darts} dart${ses.darts===1?'':'s'}</div></div>
-        <div class="lc-n">${avgStr(p.gamePoints, p.gameAvgDarts)}</div>
-      </div>
-    </div>
-    <div class="lc-sect">
-      <span class="lc-eyebrow">Checkouts this session — ${ses.checkouts.length} finish${ses.checkouts.length===1?'':'es'}</span>
-      <div class="lc-cos">${chips}</div>
-      <div class="lc-tally">
-        ${tally('💯', ses.tonPlus, 'ton+ visits')}
-        ${tally('🎯', ses.oneEighties, ses.oneEighties===1?'180':'180s')}
-        ${tally('🐟', ses.bigFish, 'big fish')}
-        ${tally('🔥', ses.bestVisit, 'best visit')}
-      </div>
-    </div>
-    <div class="lc-split">
-      <div class="prac-col">
-        <div class="prac-col-title">This leg</div>
-        ${statRow('First 9 average', first9 == null ? '—' : first9.toFixed(1))}
-        ${statRow('Best visits', list(leg.topVisits), leg.topVisits.length>2)}
-        ${statRow('Checkout'+(leg.checkouts.length===1?'':'s'), list(leg.checkouts))}
-        ${statRow('Busts', leg.busts)}
-        ${statRow('Trebleless visits', pct(leg.treblelessPct))}
-      </div>
-      <div class="prac-col">
-        <div class="prac-col-title">Session</div>
-        ${statRow('Darts per leg', legsPlayed ? (ses.darts/legsPlayed).toFixed(1) : '—')}
-        ${statRow('Best visits', list(ses.topVisits), ses.topVisits.length>2)}
-        ${statRow('Legs played', legsPlayed)}
-        ${statRow('Busts', ses.busts)}
-        ${statRow('Trebleless visits', pct(ses.treblelessPct))}
-      </div>
-    </div>`;
+/* ---------- Panel spec helpers, shared by every mode's completionPanel ----------
+   The X01 practice panel above is the template: hero, shelf, tallies, columns.
+   Everything below exists so the other twelve modes state only what is genuinely
+   their own (what their headline number is, what their shelf counts) and inherit
+   the rest. */
+
+// The player whose card the shelf shows — the winner, or the only player in a
+// solo drill. A shelf is one player's own run of attempts (Bob's 27's twenty
+// doubles, The Gauntlet's twenty stations); pooling two players' rows into one
+// strip would make it unreadable, so the shelf title always names whose it is.
+function panelLeadPlayer(winner){
+  return game.players.find(p => p.name === winner) || game.players[0];
+}
+// The winner's name with the marker, but only when there was somebody to beat —
+// a solo drill's "winner" is just the person who was throwing.
+function panelPlayerTitle(p, winner){
+  return game.players.length > 1 && p.name === winner ? `${p.name} 🎯` : p.name;
+}
+// One hero card per player, winner first — completionPanelHtml() gives the first
+// hero the gold lead treatment, and on a completion screen the result is the
+// point, so seat order gives way to it. The numerals shrink at 3+ players so a
+// four-handed match's heroes still fit their cards.
+function panelHeroesByPlayer(winner, valueFor, subFor){
+  const ordered = game.players.slice().sort((a,b) => (b.name===winner) - (a.name===winner));
+  return ordered.map(p => ({ title: panelPlayerTitle(p, winner), sub: subFor(p),
+    value: valueFor(p), small: game.players.length > 2 }));
+}
+// Every scored visit of the scope, best first — the shelf for the score-based
+// H2H modes. X01's own turn records carry no player field (enterTurn() pushes a
+// shared record for the practice-stats panel), so this is honestly pooled across
+// everyone at the oche rather than pretending to be per-player.
+function panelBestVisitCells(turns, limit){
+  const top = pracAggregate(turns).topVisits.slice(0, limit || 5);
+  return top.length ? top.map((v,i) => ({ label:v, plain:true, best:i===0 }))
+                    : [{ label:'no visits yet', plain:true }];
+}
+// A settled/unsettled shelf cell, the shape nearly every drill's shelf wants:
+// a label, a caption naming the outcome in words, and a state that only ever
+// re-states what the caption already says.
+function panelResultCell(label, settled, good, caption){
+  return { label, caption, state: !settled ? 'dim' : good ? 'ok' : 'no' };
+}
+
+// --- X01 head-to-head (kind 'leg' or 'game') ---
+function x01H2hPanelSpec(game, winner, kind){
+  const scope = kind==='game' ? 'game' : 'leg';
+  const turns = scope==='game' ? (game.sessionTurns||[]) : (game.currentLegTurns||[]);
+  const agg = pracAggregate(turns);
+  const plural = (n, one, many) => `${n} ${n===1?one:many}`;
+  return {
+    heroes: panelHeroesByPlayer(winner,
+      p => scope==='game' ? avgStr(p.gamePoints, p.gameAvgDarts) : avgStr(p.legPoints, p.legAvgDarts),
+      p => `3-dart average · ${plural(scope==='game' ? (p.gameDarts||0) : (p.legDarts||0), 'dart', 'darts')}`),
+    shelf: { title: `Best visits this ${scope==='game'?'match':'leg'}`, cells: panelBestVisitCells(turns, 6) },
+    tallies: [
+      { emoji:'💯', value:agg.tonPlus,     label:'ton+ visits' },
+      { emoji:'🎯', value:agg.oneEighties, label: agg.oneEighties===1?'180':'180s' },
+      { emoji:'🏁', value:agg.checkouts.length ? agg.checkouts[0] : 0, label:'best checkout' },
+      { emoji:'💥', value:agg.busts,       label:'busts' },
+    ],
+    columns: h2hPanelColumns(winner, scope),
+  };
+}
+
+// --- Cricket ---
+// MPR is Cricket's 3-dart average, so it is the hero, exactly as the X01 panel
+// leads with its own. p.legRoundMarks is the per-visit marks log kept by
+// enterTurnCricket() — p.marks can't stand in for it, since it caps at the
+// closing 3 and hides every overkill mark scored after that.
+function cricketPanelSpec(game, winner, kind){
+  const scope = kind==='game' ? 'game' : 'leg';
+  const numbers = (game.config && game.config.numbers) || CRICKET_STANDARD_NUMBERS;
+  const mprOf = p => {
+    const rounds = p.legRoundMarks || [];
+    return rounds.length ? (rounds.reduce((s,m)=>s+m,0) / rounds.length).toFixed(2) : '—';
+  };
+  const lead = panelLeadPlayer(winner);
+  const rounds = lead.legRoundMarks || [];
+  const nineMarkRounds = rounds.filter(m => m >= 9).length;
+  const bestRound = rounds.length ? Math.max(...rounds) : 0;
+  return {
+    heroes: panelHeroesByPlayer(winner, mprOf,
+      p => `Marks per round · ${p.points||0} point${(p.points||0)===1?'':'s'}`),
+    shelf: {
+      title: 'The seven numbers',
+      cells: numbers.map(n => {
+        const closers = game.players.filter(p => (p.marks[n]||0) >= 3);
+        return panelResultCell(cricketNumberLabel(n), closers.length > 0, true,
+          closers.length === 0 ? 'open'
+            : closers.length === game.players.length ? 'all closed'
+            : closers.map(p => p.name).join(', '));
+      }),
+    },
+    tallies: [
+      { emoji:'9️⃣', value:nineMarkRounds, label: nineMarkRounds===1?'9-mark round':'9-mark rounds' },
+      { emoji:'🔥', value:bestRound,       label:'best round (marks)' },
+      { emoji:'🎯', value:rounds.length,   label:'rounds thrown' },
+    ],
+    columns: h2hPanelColumns(winner, scope),
+  };
+}
+
+// --- Baseball / Shanghai / Halve-It / The Pressure Chamber ---
+// Four round-based H2H modes with the same panel shape: the mode's running
+// total as the hero, and the winner's own scorecard as the shelf, one cell per
+// round. Their per-player columns come straight from their existing h2hRows.
+function baseballPanelSpec(game, winner, kind){
+  const lead = panelLeadPlayer(winner);
+  const innings = Math.max(9, (game.baseballInning||1) - 1);
+  const runs = Array.from({length:innings}, (_,i) => lead.inningRuns[i+1]);
+  const scored = runs.filter(r => r != null);
+  return {
+    heroes: panelHeroesByPlayer(winner, p => p.totalRuns||0,
+      p => `Runs · ${p.legDarts||0} dart${(p.legDarts||0)===1?'':'s'}`),
+    shelf: {
+      title: `${lead.name}'s innings`,
+      cells: runs.map((r,i) => panelResultCell(i+1, r != null, (r||0) > 0,
+        r == null ? 'not played' : `${r} run${r===1?'':'s'}`)),
+    },
+    tallies: [
+      { emoji:'🔥', value:scored.filter(r => r===9).length, label:'perfect innings' },
+      { emoji:'🥇', value:scored.length ? Math.max(...scored) : 0, label:'best inning' },
+      { emoji:'🚫', value:scored.filter(r => r===0).length, label:'scoreless innings' },
+    ],
+    columns: h2hPanelColumns(winner, kind==='game' ? 'game' : 'leg'),
+  };
+}
+function shanghaiPanelSpec(game, winner, kind){
+  const lead = panelLeadPlayer(winner);
+  const maxRounds = (game.config && game.config.rounds) || 7;
+  const pts = Array.from({length:maxRounds}, (_,i) => lead.roundPoints[i+1]);
+  const scored = pts.filter(v => v != null);
+  return {
+    heroes: panelHeroesByPlayer(winner, p => p.totalPoints||0,
+      p => `Points · ${p.legDarts||0} dart${(p.legDarts||0)===1?'':'s'}`),
+    shelf: {
+      title: `${lead.name}'s rounds`,
+      cells: pts.map((v,i) => panelResultCell(i+1, v != null, (v||0) > 0,
+        v == null ? 'not played' : `${v} pt${v===1?'':'s'}`)),
+    },
+    tallies: [
+      { emoji:'🥇', value:scored.length ? Math.max(...scored) : 0, label:'best round' },
+      { emoji:'🚫', value:scored.filter(v => v===0).length, label:'blank rounds' },
+    ],
+    columns: h2hPanelColumns(winner, kind==='game' ? 'game' : 'leg'),
+  };
+}
+function halveItPanelSpec(game, winner, kind){
+  const lead = panelLeadPlayer(winner);
+  const targets = (game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS;
+  // roundTotals holds the RUNNING total after each round, so a halving shows up
+  // as a drop rather than as a zero — which is exactly why the cell caption says
+  // "halved" in words instead of leaving the number to imply it.
+  const cells = targets.map((t, i) => {
+    const round = i + 1;
+    const total = lead.roundTotals[round];
+    const halved = !!(lead.roundHalved && lead.roundHalved[round]);
+    return panelResultCell(halveItTargetLabel(halveItRoundTarget(round, targets)), total != null, !halved,
+      total == null ? 'not played' : halved ? `halved · ${total}` : String(total));
+  });
+  return {
+    heroes: panelHeroesByPlayer(winner, p => p.total||0,
+      p => p.everHalved ? 'Total · halved at least once' : 'Total · never halved'),
+    shelf: { title: `${lead.name}'s card`, cells },
+    tallies: [
+      { emoji:'🪓', value:targets.filter((_,i)=> lead.roundHalved && lead.roundHalved[i+1]).length, label:'rounds halved' },
+      { emoji:'🛡️', value:lead.everHalved ? 0 : 1, label:'clean cards' },
+    ],
+    columns: h2hPanelColumns(winner, kind==='game' ? 'game' : 'leg'),
+  };
+}
+function pressureChamberPanelSpec(game, winner, kind){
+  const lead = panelLeadPlayer(winner);
+  const maxRounds = (game.config && game.config.rounds) || PRESSURE_ROUNDS;
+  const results = Array.from({length:maxRounds}, (_,i) => lead.roundResults[i+1]);
+  const count = kindOf => results.filter(r => r === kindOf).length;
+  return {
+    heroes: panelHeroesByPlayer(winner, p => p.totalCp||0,
+      p => `Composure points · ${pressureComposureRating(p.totalCp||0)}`),
+    shelf: {
+      title: `${lead.name}'s card`,
+      cells: results.map((r,i) => panelResultCell(i+1, !!r, r === 'full',
+        r == null ? 'not played' : r === 'full' ? 'full hit' : r === 'partial' ? 'partial' : 'miss')),
+    },
+    tallies: [
+      { emoji:'✅', value:count('full'),    label:'full hits' },
+      { emoji:'❌', value:count('miss'),    label:'misses' },
+      { emoji:'🔗', value:lead.bestFullHitStreak||0, label:'best streak' },
+    ],
+    columns: h2hPanelColumns(winner, kind==='game' ? 'game' : 'leg'),
+  };
+}
+
+// --- Killer ---
+// The only mode where survival, not a score, is the result — so the hero is
+// lives remaining and the shelf is the table itself, one cell per player.
+function killerPanelSpec(game, winner){
+  const survivors = game.players.filter(p => !p.eliminated);
+  return {
+    heroes: panelHeroesByPlayer(winner, p => p.eliminated ? 'OUT' : (p.lives||0),
+      p => p.eliminated ? `Number ${p.number} · eliminated` : `Lives left · number ${p.number}`),
+    shelf: {
+      title: 'The table',
+      cells: game.players.map(p => panelResultCell(p.number, true, !p.eliminated,
+        `${p.name} · ${p.kills||0} kill${(p.kills||0)===1?'':'s'}`)),
+    },
+    tallies: [
+      { emoji:'🗡️', value:game.players.reduce((s,p)=>s+(p.kills||0),0), label:'kills' },
+      { emoji:'🛡️', value:survivors.length, label:'survivors' },
+    ],
+  };
+}
+
+// --- Bob's 27 ---
+function bobs27PanelSpec(game){
+  const p = game.players[0];
+  const results = Array.from({length:20}, (_,i) => p.roundResults[i+1]);
+  const played = results.filter(r => r != null);
+  const hitRounds = played.filter(r => r > 0).length;
+  return {
+    heroes: [
+      { title: p.name, sub: p.running > 0 ? 'Final score · survived all 20' : 'Final score · went bust', value: p.running },
+      { title: 'Doubles hit', sub: `${hitRounds} of ${played.length} round${played.length===1?'':'s'} scored`,
+        value: `${hitRounds}/${played.length}` },
+    ],
+    shelf: {
+      title: 'The twenty doubles', long: true,
+      cells: results.map((r,i) => panelResultCell(`D${i+1}`, r != null, (r||0) > 0,
+        r == null ? 'not reached' : r > 0 ? `+${r}` : `−${(i+1)*2}`)),
+    },
+    // A full house is all three darts in the round's double — a gain of
+    // 3 × 2 × round. Counted over `results` (index === round − 1), never over
+    // the filtered `played`, whose indices no longer name their own round.
+    tallies: [
+      { emoji:'🎯', value:results.filter((r,i) => r != null && r === (i+1)*6).length, label:'full houses' },
+      { emoji:'🥇', value:played.length ? Math.max(...played) : 0, label:'best round' },
+      { emoji:'💀', value:played.filter(r => r === 0).length, label:'missed doubles' },
+    ],
+  };
+}
+
+// --- The Gauntlet ---
+function gauntletPanelSpec(game){
+  const p = game.players[0];
+  const misses = game.gauntletFinalMisses || [];
+  const totalScars = gauntletTotalScars(misses);
+  const clean = misses.filter(m => m === 0).length;
+  return {
+    heroes: [
+      { title: p.name, sub: `Total Scars · ${gauntletResultTier(totalScars)}`, value: totalScars },
+      { title: 'Clean stations', sub: `Best clean streak · ${game.gauntletBestCleanStreak||0}`,
+        value: `${clean}/${misses.length}` },
+    ],
+    shelf: {
+      title: 'The twenty stations', long: true,
+      cells: GAUNTLET_STATION_ORDER.map((station, i) => {
+        const m = misses[i];
+        return panelResultCell(station, m != null, m === 0,
+          m == null ? 'not reached' : m === 0 ? 'clean' : `${m} scar${m===1?'':'s'}`);
+      }),
+    },
+    tallies: [
+      { emoji:'💎', value:clean, label:'clean stations' },
+      { emoji:'🩹', value:totalScars, label:'scars' },
+      { emoji:'🔗', value:game.gauntletBestCleanStreak||0, label:'best streak' },
+    ],
+  };
+}
+
+// --- Dead Man Walking ---
+// game.dmwRoundResults is the per-round log resolveDeadManWalkingRound() keeps;
+// nothing else on the game object records which rounds were survived, only how
+// many (game.dmwWalkedOutCount).
+function deadManWalkingPanelSpec(game){
+  const p = game.players[0];
+  const results = game.dmwRoundResults || [];
+  const walkedOut = game.dmwWalkedOutCount || 0;
+  const cleared = results.filter(r => r.walkedOut);
+  return {
+    heroes: [
+      { title: p.name, sub: `Walked out of 15 · ${deadManWalkingResultTier(walkedOut)}`, value: `${walkedOut}/15` },
+      { title: 'Best streak', sub: `${dmwDifficultyLabel()} difficulty`, value: game.dmwBestStreak||0 },
+    ],
+    shelf: {
+      title: 'The fifteen rounds', long: true,
+      cells: Array.from({length:15}, (_,i) => {
+        const r = results[i];
+        return panelResultCell(r ? r.target : '·', !!r, !!(r && r.walkedOut),
+          !r ? 'not reached' : r.walkedOut ? `out in ${r.darts}` : 'executed');
+      }),
+    },
+    tallies: [
+      { emoji:'🕊️', value:walkedOut, label:'walked out' },
+      { emoji:'⚰️', value:results.length - walkedOut, label:'executed' },
+      { emoji:'🎯', value:cleared.length ? Math.max(...cleared.map(r=>r.target)) : 0, label:'highest cleared' },
+    ],
+  };
+}
+
+// --- Around the Clock ---
+// The one mode with no shelf, deliberately: twenty cells that are all "hit" by
+// definition (the game only ends when every number is) would say nothing. Its
+// tallies stand alone instead — see completionPanelHtml()'s own header.
+function aroundTheClockPanelSpec(game){
+  const p = game.players[0];
+  const darts = p.roundDarts||0;
+  const sec = Math.max(0, Math.round((Date.now() - (p.roundStartedAt||Date.now()))/1000));
+  return {
+    heroes: [
+      { title: p.name, sub: 'Darts to clear the clock', value: darts },
+      // Darts per minute needs a real elapsed minute to divide by. Under a
+      // second (a resumed clock whose start time was lost, or a scripted run)
+      // the rate is meaningless, so the card says "elapsed" rather than
+      // reporting the dart count itself as a per-minute figure.
+      { title: 'Time', sub: darts && sec >= 1 ? `${(darts/(sec/60)).toFixed(1)} darts per minute` : 'Elapsed',
+        value: `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}` },
+    ],
+    talliesTitle: 'Where the darts went',
+    tallies: [
+      { emoji:'🎯', value:p.roundTrebles||0, label: (p.roundTrebles||0)===1?'treble':'trebles' },
+      { emoji:'⭕', value:p.roundDoubles||0, label: (p.roundDoubles||0)===1?'double':'doubles' },
+      { emoji:'💨', value:p.roundMisses||0,  label: (p.roundMisses||0)===1?'miss':'misses' },
+      { emoji:'📐', value:(darts/20).toFixed(1), label:'darts per number' },
+    ],
+  };
+}
+
+// --- Around the World ---
+// 63 outcome cells would be a wall of green (the game only ends at 63/63), so
+// the shelf here counts the twenty numbers instead — three outcomes each — and
+// the bull and the miss ride in the tallies alongside them.
+function aroundTheWorldPanelSpec(game){
+  const p = game.players[0];
+  const darts = p.sessionDarts||0;
+  const hit = p.sessionHitSet || new Set();
+  const countFor = sector => [1,2,3].filter(m => hit.has(`${sector}:${m}`)).length;
+  return {
+    heroes: [
+      { title: p.name, sub: 'Darts to hit all 63 outcomes', value: darts },
+      { title: 'Outcomes', sub: `${(darts/63).toFixed(1)} darts per outcome`, value: `${hit.size}/63` },
+    ],
+    shelf: {
+      title: 'The twenty numbers — single, double, treble', long: true,
+      cells: Array.from({length:20}, (_,i) => {
+        const n = i + 1, c = countFor(n);
+        return panelResultCell(n, c > 0, c === 3, `${c}/3`);
+      }),
+    },
+    // The three outcomes that aren't one of the twenty numbers. Keys match
+    // buildOutcomeGridHtml()'s exactly — outer bull 25:1, double bull 25:2,
+    // miss 0:1 — since both read the same sessionHitSet.
+    tallies: [
+      { emoji:'🎯', value:['25:1','25:2'].filter(k => hit.has(k)).length, label:'bulls hit' },
+      { emoji:'💨', value:hit.has('0:1') ? 1 : 0, label:'miss logged' },
+      { emoji:'🌍', value:`${hit.size}/63`, label:'outcomes this session' },
+    ],
+  };
 }
 
 // Default (X01-shaped) per-player leg/game stat rows — GAME_TYPES entries
@@ -14585,23 +15040,29 @@ function h2hRowsX01(p, scope){
     statRow('Darts (leg)', p.legDarts||0),
   ];
 }
-// per-player leg/game stats shown on the H2H leg-complete and game-over
-// screens — dispatches each player's own stat rows through the current
-// mode's GAME_TYPES.h2hRows (or the X01-shaped default) so the shared
-// standing row / winner-marker title / prac-stats wrapper below is written
-// once instead of once per mode with its own player-shape fields.
-function h2hStatsHtml(winner, scope){
+// One per-player stat column, in completionPanelHtml()'s `columns` shape —
+// each player's own stat rows dispatched through the current mode's
+// GAME_TYPES.h2hRows (or the X01-shaped default), plus the shared standing row.
+// Both the completion panels and the older bare h2hStatsHtml() below read this,
+// so a mode's per-player rows are stated exactly once, in its registry entry.
+function h2hPanelColumns(winner, scope){
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   const rowsFor = GAME_TYPES[game.gameType].h2hRows || h2hRowsX01;
-  const cols = game.players.map(p=>{
+  return game.players.map(p=>{
     const rows = rowsFor(p, scope);
     if(showStanding){
       const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}` : `Legs ${p.legsWon}/${game.legsPerSet}`;
       rows.push(statRow(scope==='game' ? 'Final Standing' : 'Standing', standing, true));
     }
-    const title = p.name===winner ? `${escapeHtml(p.name)} 🎯` : escapeHtml(p.name);
-    return `<div class="prac-col"><div class="prac-col-title">${title}</div>${rows.join('')}</div>`;
-  }).join('');
+    return { title: p.name===winner ? `${p.name} 🎯` : p.name, rowsHtml: rows };
+  });
+}
+// per-player leg/game stats shown on any completion screen whose game type has
+// no completionPanel of its own — the pre-2026-07 flat two-card layout, kept as
+// the fallback for exactly that case.
+function h2hStatsHtml(winner, scope){
+  const cols = h2hPanelColumns(winner, scope).map(col=>
+    `<div class="prac-col"><div class="prac-col-title">${escapeHtml(col.title)}</div>${col.rowsHtml.join('')}</div>`).join('');
   return `<div class="prac-stats">${cols}</div>`;
 }
 
@@ -14675,16 +15136,10 @@ function finishUnit(kind, winner, opts){
   // prepended into it a few lines above would be destroyed in the same tick it
   // was built — see #screen-game's skeleton comment and showGameResult().
   const resultHost=showGameResult();
+  // The nine other per-type flags that used to sit here went with the bespoke
+  // `${bobs27Summary}`-style blocks they gated — every one of those modes now
+  // declares a GAME_TYPES.completionPanel instead, dispatched generically below.
   const isCricket = game.gameType === 'cricket';
-  const isBaseball = game.gameType === 'baseball';
-  const isShanghai = game.gameType === 'shanghai';
-  const isHalveIt = game.gameType === 'halve_it';
-  const isPressureChamber = game.gameType === 'pressure_chamber';
-  const isBobs27 = game.gameType === 'bobs_27';
-  const isGauntlet = game.gameType === 'gauntlet';
-  const isClock = game.gameType === 'around_the_clock';
-  const isKiller = game.gameType === 'killer';
-  const isDeadManWalking = game.gameType === 'dead_man_walking';
   // No matchwin moment card is built for Cricket yet (its own social/moment-card
   // pass is a later build-order step) — suppress the Share button rather than wire
   // it to a card that doesn't exist. Baseball's/Bob's 27's own matchwin cards ARE
@@ -14750,68 +15205,20 @@ function finishUnit(kind, winner, opts){
     // show('setup')), not a silent auto-start.
     const repeatGhostBtn = (game.hasGhost && game.ghostSourceLeg && !game.tournamentMatchId)
       ? `<button class="btn btn-ghost" onclick="repeatGhostLeg()">🔁 Repeat this leg</button>` : '';
-    // Bob's 27's own tiny run-summary block — h2hStatsHtml() reads X01/
-    // Baseball-shaped player fields (score/doubleOut, totalRuns/inningRuns)
-    // that don't exist on a bobs_27 player, same reasoning Cricket's own ''
-    // suppression already documents above.
-    const bobs27Summary = isBobs27 ? (()=>{
-      const p = game.players[0];
-      const survived = p.running > 0;
-      return `<div class="summary-grid" style="margin-top:14px">
-        <div class="stat-block"><div class="stat-val">${p.running}</div><div class="stat-label">Final Score</div></div>
-        <div class="stat-block"><div class="stat-val">${survived ? 'Survived' : 'D'+Object.keys(p.roundResults).length}</div><div class="stat-label">${survived ? 'All 20 Doubles' : 'Died On'}</div></div>
-      </div>`;
-    })() : '';
-    // The Gauntlet's own tiny run-summary block (docs/archive/gauntlet-roadmap.md) —
-    // same reasoning as bobs27Summary above: h2hStatsHtml() reads X01/Baseball-
-    // shaped player fields a gauntlet player doesn't have.
-    const gauntletSummary = isGauntlet ? (()=>{
-      const totalScars = gauntletTotalScars(game.gauntletFinalMisses);
-      const tier = gauntletResultTier(totalScars);
-      return `<div class="summary-grid" style="margin-top:14px">
-        <div class="stat-block"><div class="stat-val">${totalScars}</div><div class="stat-label">Total Scars</div></div>
-        <div class="stat-block"><div class="stat-val">${escapeHtml(tier)}</div><div class="stat-label">Result</div></div>
-      </div>`;
-    })() : '';
-    // Killer's own tiny match-summary block (docs/game-modes-roadmap.md
-    // "Killer") — same reasoning as bobs27Summary/gauntletSummary above:
-    // h2hStatsHtml() reads X01-shaped fields (score/legPoints) a killer player
-    // doesn't have. Shows each player's assigned number, final status, and kills.
-    const killerSummary = isKiller ? `<div class="summary-grid" style="margin-top:14px">
-        ${game.players.map(pl => `<div class="stat-block"><div class="stat-val">${pl.number}</div><div class="stat-label">${escapeHtml(pl.name)}${pl.eliminated?' — eliminated':' — survived'}${pl.kills?` · ${pl.kills} kill${pl.kills===1?'':'s'}`:''}</div></div>`).join('')}
-      </div>` : '';
-    // Dead Man Walking's own tiny run-summary block (docs/dead-man-walking-
-    // roadmap.md "Result tiers") — same reasoning as bobs27Summary/
-    // gauntletSummary above: h2hStatsHtml() reads X01-shaped per-leg fields
-    // (legPoints/legAvgDarts) a Dead Man Walking player object doesn't carry.
-    const deadManWalkingSummary = isDeadManWalking ? (()=>{
-      const walkedOut = game.dmwWalkedOutCount;
-      const tier = deadManWalkingResultTier(walkedOut);
-      return `<div class="summary-grid" style="margin-top:14px">
-        <div class="stat-block"><div class="stat-val">${walkedOut}/15</div><div class="stat-label">Walked Out</div></div>
-        <div class="stat-block"><div class="stat-val">${escapeHtml(tier)}</div><div class="stat-label">Result</div></div>
-      </div>`;
-    })() : '';
-    // Around the Clock's own tiny run-summary block (2026-07, "one clock = one
-    // game") — same reasoning as bobs27Summary/gauntletSummary above:
-    // h2hStatsHtml() reads X01-shaped fields a clock player doesn't have.
-    // Recomputes from game.players[0] rather than reading game.legSummary
-    // (not yet populated at this point in finishUnit() — set at the very end,
-    // same as every other type's summary block here).
-    const aroundTheClockSummary = isClock ? (()=>{
-      const cp = game.players[0];
-      const durationSec = Math.max(0, Math.round((Date.now() - (cp.roundStartedAt||Date.now()))/1000));
-      const mins = Math.floor(durationSec/60), secs = durationSec%60;
-      return `<div class="summary-grid" style="margin-top:14px">
-        <div class="stat-block"><div class="stat-val">${cp.roundDarts||0}</div><div class="stat-label">Darts</div></div>
-        <div class="stat-block"><div class="stat-val">${cp.roundTrebles||0}</div><div class="stat-label">Trebles</div></div>
-        <div class="stat-block"><div class="stat-val">${cp.roundDoubles||0}</div><div class="stat-label">Doubles</div></div>
-        <div class="stat-block"><div class="stat-val">${cp.roundMisses||0}</div><div class="stat-label">Misses</div></div>
-        <div class="stat-block"><div class="stat-val">${mins}:${String(secs).padStart(2,'0')}</div><div class="stat-label">Time</div></div>
-      </div>`;
-    })() : '';
-    const heading = opts.heading || 'GAME OVER';
-    const subtext = opts.subtext || `${escapeHtml(winner)} takes the match. Stats saved.`;
+    // The mode's own completion panel (GAME_TYPES.<type>.completionPanel), or —
+    // for a mode that declares none — the old flat per-player stat cards. Every
+    // mode whose player object ISN'T X01-shaped now declares a panel, so the
+    // fallback can no longer be reached with fields it doesn't understand; the
+    // two that legitimately show nothing here say so via noCompletionStats.
+    const gamePanel = gameCompletionPanelHtml(winner, 'game')
+      || (GAME_TYPES[game.gameType].noCompletionStats ? '' : h2hStatsHtml(winner, 'game'));
+    // Same reasoning as the solo banner text above, applied to the heading and
+    // subtext: "GAME OVER — Ben takes the match" reads oddly for the only person
+    // in the room finishing a solo drill. Modes that pass their own opts.heading
+    // (CLOCK COMPLETE, WORLD COMPLETE) are untouched.
+    const heading = opts.heading || (soloPractice ? 'SESSION COMPLETE' : 'GAME OVER');
+    const subtext = opts.subtext
+      || (soloPractice ? 'Stats saved.' : `${escapeHtml(winner)} takes the match. Stats saved.`);
     game.doneHeading = opts.heading || null; // mirrored to /display via liveSnapshot()
     resultHost.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${heading}</div>
@@ -14821,7 +15228,7 @@ function finishUnit(kind, winner, opts){
         ${nextBtn}
         ${repeatGhostBtn}
         ${matchShareBtn}
-      </div>${newGameLink}${isCricket || isBobs27 || isGauntlet || isKiller || isDeadManWalking || isClock ? '' : h2hStatsHtml(winner,'game')}${bobs27Summary}${gauntletSummary}${killerSummary}${deadManWalkingSummary}${aroundTheClockSummary}</div>`;
+      </div>${newGameLink}${gamePanel}</div>`;
   } else {
     const next = kind==='set' ? 'Next set' : 'Next leg';
     const fn   = kind==='set' ? 'startNextSet()' : 'startNextLeg()';
@@ -14839,7 +15246,9 @@ function finishUnit(kind, winner, opts){
     // panel is actively misleading for the 3 filler-starting-score formats
     // (Bullseye Gauntlet/Treble Run/Steady Hand), whose 3-dart average is computed
     // against a meaningless countdown, not the real challenge result.
-    const legPanel = isCricket || isKiller || kind!=='leg' || lastLegWasChallenge ? '' : GAME_TYPES[game.gameType].h2hRows ? h2hStatsHtml(winner) : game.practice ? practiceLegPanelHtml(game.players[0], game) : h2hStatsHtml(winner);
+    const legPanel = kind!=='leg' || lastLegWasChallenge ? ''
+      : (gameCompletionPanelHtml(winner, 'leg')
+         || (GAME_TYPES[game.gameType].noCompletionStats ? '' : h2hStatsHtml(winner)));
     const challengeShareBtn = lastLegWasChallenge
       ? `<button class="btn btn-ghost" onclick="shareMomentCard('dailychallenge')">📤 Share</button>` : '';
     // A Daily Challenge attempt never has a "next leg" — it's a single-shot,
@@ -15391,6 +15800,12 @@ const GAME_TYPES = {
     // engine never busts/wins mid-challenge) as if it were a real target.
     // null for every ordinary X01 game (activeChallenge is null except during
     // an actual challenge attempt), so normal X01 play is untouched.
+    // Solo practice gets the "Trophy Cabinet" dual-scope panel (this leg vs the
+    // whole session); an H2H leg or match gets a per-player one instead, since
+    // "this session" means nothing when two people are trading legs.
+    completionPanel: (game, winner, kind) =>
+      game.practice && game.players.length === 1 && kind === 'leg'
+        ? x01PracticePanelSpec(game) : x01H2hPanelSpec(game, winner, kind),
     liveModeState: (game) => {
       if(!activeChallenge || !game.players[0] || activeChallenge.player !== game.players[0].name) return null;
       const p = game.players[0];
@@ -15436,6 +15851,7 @@ const GAME_TYPES = {
     // liveSnapshot()'s modeState so a new field here never needs a matching
     // backend ALLOWED_LIVE_KEYS entry (the exact sync point BUG-28 and the
     // killerLives/checkoutLadder* bug both silently missed).
+    completionPanel: cricketPanelSpec,
     liveModeState: game => ({ cricketVariant: game.config.variant || 'standard' }),
     resume: (ctx) => {
       const { names, config, players, state } = ctx;
@@ -15481,6 +15897,7 @@ const GAME_TYPES = {
     statDefs: BASEBALL_STAT_DEFS,
     personalBestsSpec: BASEBALL_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyBaseball,
+    completionPanel: baseballPanelSpec,
     liveModeState: game => ({ baseballInning: game.baseballInning || 1 }),
     resume: (ctx) => {
       const { names, players, state } = ctx;
@@ -15517,6 +15934,7 @@ const GAME_TYPES = {
     statDefs: SHANGHAI_STAT_DEFS,
     personalBestsSpec: SHANGHAI_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyShanghai,
+    completionPanel: shanghaiPanelSpec,
     liveModeState: game => ({ shanghaiRound: game.shanghaiRound || 1, shanghaiMaxRounds: (game.config && game.config.rounds) || 7 }),
     resume: (ctx) => {
       const { config, players, state } = ctx;
@@ -15554,6 +15972,7 @@ const GAME_TYPES = {
     statDefs: HALVE_IT_STAT_DEFS,
     personalBestsSpec: HALVE_IT_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyHalveIt,
+    completionPanel: halveItPanelSpec,
     // The FULL target sequence (not just the live round's own target) — /display
     // has no shared scoring.js module to derive per-row labels from, so it needs
     // every round's target up front to render the whole scorecard grid.
@@ -15597,6 +16016,7 @@ const GAME_TYPES = {
     statDefs: PRESSURE_CHAMBER_STAT_DEFS,
     personalBestsSpec: PRESSURE_CHAMBER_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyPressureChamber,
+    completionPanel: pressureChamberPanelSpec,
     // The FULL 15-round card sequence up front (target+modifier for every
     // round), plus which round is live and its own wall-clock No Warmup
     // deadline — same "display.html has no shared scoring.js module"
@@ -15629,6 +16049,10 @@ const GAME_TYPES = {
   doubles_practice: {
     id: 'doubles_practice',
     label: 'Doubles Practice',
+    // Perpetual — a round ends, the next begins, and only "End Game" stops it
+    // (askEndGame()), which abandons rather than completing. Nothing here ever
+    // reaches finishUnit(), so there is no completion screen to panel.
+    noCompletionStats: true,
     category: (setup, config) => `Doubles Practice (${config.doubles.map(doublesTargetLabel).join(', ')})`,
     ctorArg: 'config',
     newMatchPlayer: newMatchPlayerDoublesPractice,
@@ -15658,6 +16082,12 @@ const GAME_TYPES = {
   chuckin: {
     id: 'chuckin',
     label: "Just Chuckin' It",
+    // No completion panel, and no fallback stat cards either: this mode has no
+    // round, leg or game boundary at all (throwDartChuckin() never resolves a
+    // unit), so it never reaches a completion screen — and if some future path
+    // ever did bring it here, its player object carries none of the X01-shaped
+    // fields h2hStatsHtml() reads.
+    noCompletionStats: true,
     category: () => "Just Chuckin' It",
     newMatchPlayer: newMatchPlayerChuckin,
     // Per-dart, no round/leg-ending condition at all (throwDartChuckin()) — every
@@ -15685,6 +16115,10 @@ const GAME_TYPES = {
   checkout_trainer: {
     id: 'checkout_trainer',
     label: 'Checkout Trainer',
+    // This mode has its own bespoke, paper-themed results screen (see paperTheme
+    // below); the dark Trophy Cabinet panel would fight it. Same reasoning as
+    // Chuckin's above for suppressing the X01-shaped fallback too.
+    noCompletionStats: true,
     category: (setup, config) => config.mode === 'blitz' ? 'Checkout Blitz' : 'Checkout Trainer (Freeform)',
     // "No live scoreboard, deliberate" (its roadmap) — pushLive() skips this
     // mode entirely; see the flag's comment there.
@@ -15751,6 +16185,7 @@ const GAME_TYPES = {
       doubles: game.players[0].roundDoubles||0, misses: game.players[0].roundMisses||0,
       durationSec: Math.max(0, Math.round((Date.now() - (game.players[0].roundStartedAt||Date.now()))/1000)),
       won: true }],
+    completionPanel: aroundTheClockPanelSpec,
     // roundOver/roundEndReason are shared with Doubles Practice's liveModeState above.
     liveModeState: game => ({ atcLastDart: game.atcLastDart || null,
       roundOver: !!game.roundOver, roundEndReason: game.roundEndReason || null }),
@@ -15786,6 +16221,7 @@ const GAME_TYPES = {
     legSummary: (game) => [{ name: game.players[0].name,
       outcomes: game.players[0].sessionHitSet ? game.players[0].sessionHitSet.size : 0,
       darts: game.players[0].sessionDarts||0, won: true }],
+    completionPanel: aroundTheWorldPanelSpec,
     liveModeState: game => ({ atwLastDart: game.atwLastDart || null,
       roundOver: !!game.roundOver }),
     soloOnly: true,
@@ -15812,6 +16248,7 @@ const GAME_TYPES = {
     statDefs: BOBS_27_STAT_DEFS,
     personalBestsSpec: BOBS27_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyBobs27,
+    completionPanel: bobs27PanelSpec,
     liveModeState: game => ({ bobs27Round: game.bobs27Round || 1 }),
     // Always solo — there's no opponent to play head-to-head against, same
     // reasoning as Doubles Practice/Checkout Trainer/both guided drills.
@@ -15829,6 +16266,9 @@ const GAME_TYPES = {
   checkout_ladder: {
     id: 'checkout_ladder',
     label: 'Checkout Ladder',
+    // Perpetual, same as Doubles Practice: resolveCheckoutLadderAttempt() hands
+    // straight to startNextLeg(), never to finishUnit().
+    noCompletionStats: true,
     category: () => '121 Checkout Ladder',
     newMatchPlayer: newMatchPlayerCheckoutLadder,
     // evaluateVisit() (the shared X01 evaluator) is reused UNMODIFIED — see
@@ -15869,6 +16309,7 @@ const GAME_TYPES = {
     evaluateVisit: () => { throw new Error('gauntlet has no per-visit evaluateVisit — see enterTurnGauntlet()'); },
     resetForNextLeg: resetPlayerForNextLegGauntlet,
     playerSnapshot: playerSnapshotGauntlet,
+    completionPanel: gauntletPanelSpec,
     statDefs: GAUNTLET_STAT_DEFS,
     personalBestsSpec: GAUNTLET_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyGauntlet,
@@ -15910,6 +16351,7 @@ const GAME_TYPES = {
     statDefs: KILLER_STAT_DEFS,
     personalBestsSpec: KILLER_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyKiller,
+    completionPanel: killerPanelSpec,
     liveModeState: game => ({ killerLives: game.killerLives || KILLER_DEFAULT_LIVES }),
     // The inverse of soloOnly (docs/game-modes-roadmap.md "Killer": the
     // whole mechanic needs opponents to attack) — never offered/shown as a
@@ -15934,6 +16376,7 @@ const GAME_TYPES = {
     statDefs: DEAD_MAN_WALKING_STAT_DEFS,
     personalBestsSpec: DEAD_MAN_WALKING_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyDeadManWalking,
+    completionPanel: deadManWalkingPanelSpec,
     // The round number itself rides on the generic legNo field; remaining
     // score rides inside players[] via playerSnapshot.
     liveModeState: game => ({ dmwBudget: game.dmwBudget || 0,
@@ -15953,7 +16396,7 @@ const GAME_TYPES = {
       return {
         overlay: { legNo: r.roundIndex+1, dmwTarget: r.remaining, dmwBudget: r.budget,
           dmwDartsUsedThisRound: r.dartsUsedThisRound, dmwWalkedOutCount: r.walkedOutCount,
-          dmwCurrentStreak: cur, dmwBestStreak: best },
+          dmwCurrentStreak: cur, dmwBestStreak: best, dmwRoundResults: r.roundResults },
         statusMsg: r.done
           ? `Resumed — all 15 rounds settled, ${r.walkedOutCount} Walked Out.`
           : `Resumed — round ${r.roundIndex+1} of 15 (target ${r.remaining}), ${r.walkedOutCount} Walked Out so far.`,
@@ -15989,6 +16432,12 @@ function newMatchPlayerCricket(name, config){
   const marks = {};
   (config && config.numbers || CRICKET_STANDARD_NUMBERS).forEach(n=>{ marks[n]=0; });
   return { name, marks, points:0, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,
+    // Marks scored in each visit this leg, in order — the raw material for the
+    // leg-complete panel's MPR hero and its best-round tally. Cricket's MPR is
+    // its 3-dart average, so a completion screen without it is the same gap the
+    // X01 panel had. Not derivable after the fact from p.marks (which caps at
+    // the closing 3 and hides overkill), so it has to be logged per visit.
+    legRoundMarks:[],
     legWorstPointsDeficit:0,   // largest deficit seen this leg (Comeback Kid — Cricket; direction depends on variant, see enterTurnCricket())
     gamePointsReceived:0 };    // cutthroat only: total points received across the WHOLE match (never leg-reset) — 🔪 Stone Cold's tracker
 }
@@ -15997,6 +16446,7 @@ function resetPlayerForNextLegCricket(p, game, newSet){
   (game.config.numbers || CRICKET_STANDARD_NUMBERS).forEach(n=>{ marks[n]=0; });
   p.marks = marks; p.points = 0; p.legDarts = 0; p.legWorstPointsDeficit = 0;
   if(newSet) p.setDarts = 0;
+  p.legRoundMarks = [];
 }
 function playerSnapshotCricket(p){
   return {
@@ -16710,6 +17160,12 @@ function undoLastTurnDeadManWalking(){
 // existing hook to carve into for 2 of this mode's 3 outcomes.
 function resolveDeadManWalkingRound(walkedOut){
   const p = game.players[0];
+  // Logged before the target advances — game.dmwTarget is still THIS round's.
+  // No undo can reach back past this point (clearTurnSnapshots() below is the
+  // same leg-boundary rule every other game type follows), so a plain push is
+  // enough; there is no snapshot to restore it from.
+  (game.dmwRoundResults = game.dmwRoundResults || []).push({
+    target: game.dmwTarget, walkedOut: !!walkedOut, darts: game.dmwDartsUsedThisRound || 0 });
   if(walkedOut){
     game.dmwWalkedOutCount += 1;
     game.dmwCurrentStreak += 1;

@@ -317,33 +317,95 @@ passed through `opts`, because every solo practice leg comes through the generic
 `onLegWon()` path — there is no per-call site to change. The leg-complete
 subtext gains the session's leg count for the same case ("Leg 17 of this
 session · stats saved."), which is the one number that says how far into a
-practice session you are.
+practice session you are. The **game-over** heading and subtext are derived
+the same way: a solo drill or practice session ends on "SESSION COMPLETE /
+Stats saved." rather than "GAME OVER / Ben takes the match." Modes that pass
+their own `opts.heading` (CLOCK COMPLETE, WORLD COMPLETE) are untouched.
 
-### Solo practice leg-complete panel — "Trophy Cabinet" (2026-07)
+### Completion panels — one renderer, a spec per game type (2026-07)
 
-`practiceLegPanelHtml(p, game)` (`frontend/index.html`) replaced two flat
-label/value cards in which every row carried identical visual weight — nothing
-was scannable, and the **three-dart average, the single most important number in
-darts, wasn't on the panel at all** (it lived in 11px text up in the live
-scoreboard). Chosen by the owner from four `/frontend-design` directions.
+Every game type's leg/run/match-complete screen is built from **one** renderer,
+`completionPanelHtml(spec)` (`frontend/index.html`), from a **spec** the game
+type declares as `GAME_TYPES.<type>.completionPanel(game, winner, kind)`.
+`kind` is `'leg' | 'set' | 'game'`, so a mode can show a different panel
+mid-match than at the end. `gameCompletionPanelHtml(winner, kind)` is the
+dispatch; `finishUnit()` calls it in both its leg and its game-over branch.
 
-Structure, in deliberate priority order:
+Chosen by the owner from four `/frontend-design` directions (direction D,
+"Trophy Cabinet"). It replaced two flat label/value cards in which every row
+carried identical visual weight — nothing was scannable, and the **three-dart
+average, the single most important number in darts, wasn't on the panel at
+all** (it lived in 11px text up in the live scoreboard).
 
-1. **The two averages as a hero band** — this leg first (it's the leg you just
-   threw, so it gets the gold-tinted card), session beside it. Both read from
-   the player's own canonical `legPoints`/`legAvgDarts` and
-   `gamePoints`/`gameAvgDarts` — the same fields the live scoreboard's
-   "leg · game" line uses — rather than being recomputed from the turn list, so
-   this panel can never disagree with the number shown during play.
-2. **The session's checkouts as a shelf of chips**, descending, best enlarged.
-   In a practice session the run of finishes *is* the scoreboard.
-3. **Emoji tallies** in the app's established vocabulary — 💯 ton+ visits,
-   🎯 180s, 🐟 Big Fish, 🔥 best visit. A zero stays on screen (a session with no
-   180s is information) but is dimmed so it never competes with a real number.
-4. **Two quiet columns** for everything genuinely secondary: first-9 average,
-   best visits, checkouts, busts, trebleless %, darts per leg, legs played.
+**Why a spec and not markup.** The layout, the class names and the
+accessibility behaviour are written once instead of fifteen times. The old
+approach — a bespoke `${xSummary}` string per mode, concatenated into
+`finishUnit()`'s template — is exactly what let Cricket ship with no panel at
+all and let the rest drift into five different shapes. This is the same
+derive-from-the-registry discipline the rest of `GAME_TYPES` uses.
 
-**The aggregates live in `frontend/scoring.js`**, not here:
+**The four-part shape**, in deliberate priority order:
+
+1. **`heroes`** — the one or two headline numbers, always the largest thing on
+   the panel. The first hero gets the gold lead treatment. `small: true`
+   shrinks the numeral so a 3–4 player match's heroes still fit their cards.
+2. **`shelf`** — the mode's own unit of achievement, as a row of cells:
+   X01's checkouts, Cricket's seven numbers, Bob's 27's twenty doubles, The
+   Gauntlet's twenty stations, Dead Man Walking's fifteen rounds, Baseball's
+   nine innings. **Optional** — Around the Clock genuinely has nothing
+   per-number worth listing (every one of the twenty is hit by definition, or
+   the game hasn't ended), and omitting the shelf there is the point of making
+   it optional rather than forcing every mode into one mould.
+   `shelf.long: true` scrolls a 15/20-cell shelf inside its own box.
+3. **`tallies`** — emoji counts in the app's established vocabulary. A zero
+   stays on screen (a session with no 180s is information) but is dimmed so it
+   never competes with a real number.
+4. **`columns`** — everything genuinely secondary, in quiet stacks. A column
+   takes either `rows` (`[label, value, strong]` triples) or `rowsHtml`
+   (already-rendered `statRow()` strings), which is what lets every H2H mode
+   reuse its existing `GAME_TYPES.h2hRows` via `h2hPanelColumns(winner, scope)`
+   rather than restating the same per-player rows a second time.
+
+**A shelf cell never carries its state in colour alone.** `shelfCell()` pairs
+every `state` (`'ok' | 'no' | 'dim'`) with a caption that says the same thing
+in words — "clean" / "2 scars", "out in 4" / "executed", "all closed" / "open"
+— so the panel survives colourblind mode and a screen reader alike
+(`docs/accessibility-roadmap.md`).
+
+**Which mode shows what.** The shelf shows the **winner's own card** (or the
+only player's, in a solo drill), and its title names whose it is — pooling two
+players' twenty rows into one strip would be unreadable. Cricket is the
+deliberate exception: its seven numbers are genuinely cross-player, so each
+cell names who closed it.
+
+| Game type | Hero(es) | Shelf | Notable tallies |
+| --- | --- | --- | --- |
+| X01 (solo practice) | 3-dart average, this leg + this session | session checkouts, descending | ton+, 180s, Big Fish, best visit |
+| X01 (H2H) | 3-dart average per player, winner first | best visits this leg/match | ton+, 180s, best checkout, busts |
+| Cricket | **MPR** per player (Cricket's 3-dart average) | the seven numbers, who closed each | 9-mark rounds, best round, rounds thrown |
+| Baseball | runs per player | the nine innings | perfect innings, best inning, scoreless |
+| Shanghai | points per player | the rounds | best round, blank rounds |
+| Halve-It | total per player | the card, halved rounds named in words | rounds halved, clean cards |
+| The Pressure Chamber | Composure Points + rating | the fifteen rounds | full hits, misses, best streak |
+| Killer | lives left, or **OUT** | the table, one cell per player | kills, survivors |
+| Bob's 27 | final score; doubles hit | the twenty doubles | full houses, best round, missed doubles |
+| The Gauntlet | total Scars + tier; clean stations | the twenty stations | clean stations, scars, best streak |
+| Dead Man Walking | walked out of 15 + tier; best streak | the fifteen rounds, target and darts | walked out, executed, highest cleared |
+| Around the Clock | darts to clear; elapsed time | *(none, by design)* | trebles, doubles, misses, darts per number |
+| Around the World | darts to 63; outcomes | the twenty numbers, `n/3` each | bulls hit, miss logged, outcomes |
+
+**Modes with no completion panel declare `noCompletionStats: true`** rather
+than silently rendering nothing. Four do: **Just Chuckin' It** and **Doubles
+Practice** and **Checkout Ladder** never reach `finishUnit()` at all (no round,
+leg or game boundary resolves a unit — only "End Game", which abandons), and
+**Checkout Trainer** has its own bespoke paper-themed results screen. The flag
+also suppresses the X01-shaped `h2hStatsHtml()` fallback, which would read
+fields those player objects don't have. A registry entry with **neither**
+`completionPanel` nor `noCompletionStats` is a bug — a blank completion screen
+— and both `backend/test/completion-panels.test.js` and the `all-game-types`
+browser check fail on it.
+
+**The X01 practice aggregates live in `frontend/scoring.js`**, not here:
 `pracAggregate(turns)` and `pracFirst9Average(legTurns)`. Two reasons — both
 scopes (the leg, the session) go through **one** implementation, so a leg figure
 and its session counterpart can never be computed two different ways; and being
@@ -362,8 +424,28 @@ CLAUDE.md's "every new calculation" rule.
   different number wearing the same name. Returns `null` (rendered "—") for a leg
   with no darts, never `0.0`.
 
-H2H is unaffected — it keeps `h2hStatsHtml()`, whose `h2hRowsX01()` already leads
-with Leg Avg / Game Avg.
+**Per-visit tracking added for the panels.** Two logs exist only because a
+panel needs them and nothing else records them:
+
+- **`player.legRoundMarks`** (Cricket) — marks scored in each visit this leg,
+  in order, pushed by `enterTurnCricket()`. **MPR is the mean of this array.**
+  Not derivable after the fact from `player.marks`, which caps at the closing 3
+  and hides every overkill mark. Snapshotted as `roundMarksLen` and truncated by
+  `undoLastTurnCricket()`; cleared by `resetPlayerForNextLegCricket()`.
+- **`game.dmwRoundResults`** (Dead Man Walking) — `{target, walkedOut, darts}`
+  per settled round, pushed by `resolveDeadManWalkingRound()` **before** the
+  target advances. `game.dmwWalkedOutCount` only says how many rounds were
+  survived, not which. Re-derived on resume by
+  `rebuildDeadManWalkingState()`'s own `roundResults` (a superset of its
+  `walkedOutRounds` booleans, which are kept for the streak re-derivation).
+
+**Panel-spec tests** live in `backend/test/completion-panels.test.js`: the spec
+functions are lifted out of `index.html` by brace-matching (that file has no
+module boundary) and evaluated against hand-built game states, so the panels'
+*calculations* — MPR, 9-mark rounds, full houses, clean stations, perfect
+innings — are covered the same way any other formula is. The live rendering
+against real player objects is covered by the `all-game-types` browser check,
+which renders every registered mode's panel after a real dart.
 
 ### Undo — snapshot-based, one level deep
 

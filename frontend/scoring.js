@@ -2289,6 +2289,11 @@ function rebuildDeadManWalkingState({ rounds, turns }){
   // of re-scanning raw turns for a `checkout` field the resume payload
   // doesn't even carry.
   const walkedOutRounds = [];
+  // The same settled rounds, with the two things the completion panel's shelf
+  // needs that a bare boolean can't carry: which target that round was, and how
+  // many darts it took. Kept alongside walkedOutRounds rather than replacing it
+  // so the streak re-derivation above keeps its simplest possible input.
+  const roundResults = [];
   for(const ln of legNos){
     const idx = ln - 1;
     const round = rounds[idx];
@@ -2306,6 +2311,7 @@ function rebuildDeadManWalkingState({ rounds, turns }){
     }
     if(settled){
       walkedOutRounds.push(walked);
+      roundResults.push({ target: round.target, walkedOut: walked, darts: used });
       if(walked) walkedOutCount += 1;
       roundIndex = idx + 1;
       dartsUsedThisRound = 0;
@@ -2317,7 +2323,7 @@ function rebuildDeadManWalkingState({ rounds, turns }){
     }
   }
   return {
-    walkedOutCount, roundIndex, remaining, dartsUsedThisRound, walkedOutRounds,
+    walkedOutCount, roundIndex, remaining, dartsUsedThisRound, walkedOutRounds, roundResults,
     done: roundIndex >= totalRounds,
     budget: rounds[roundIndex] ? rounds[roundIndex].par - 1 : 0,
   };
