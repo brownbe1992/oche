@@ -146,6 +146,37 @@ mobile app, etc.) should consider keyboard/focus order, color-only signals, and
 screen-reader announcements as part of its own design — not as a follow-up pass after
 the fact. See `CLAUDE.md` for the binding version of this statement.
 
+### Applied: completion panels and the live-scoreboard redesign (2026-07)
+
+Two screens were rebuilt from scratch, and the colour-only rule was designed in
+rather than audited afterwards — which is what the standing practice above is
+actually asking for.
+
+- **Every stateful cell pairs its colour with a glyph or a caption.** The
+  completion panels' `shelfCell()` never renders a `state` without a caption
+  saying the same thing in words ("clean" / "2 scars", "out in 4" /
+  "executed", "all closed" / "open"). The live board's `laneCellsHtml()` has
+  the same rule: a closed Cricket number, a halved Halve-It round, a walked-out
+  Dead Man Walking round and a lost Killer life all carry a glyph.
+- **Colourblind mode covers the new surfaces.** `.lcell.ok`/`.lcell.no` and the
+  strip's dart classes have `body.colorblind` overrides alongside the existing
+  ones, so the redesign didn't quietly create a set of signals that mode
+  doesn't reach.
+- **The active player is marked twice.** A gold edge *and* a ▸ arrow, so "whose
+  turn" never rests on colour alone at a distance.
+- **The result view stopped hiding itself.** The full-screen banner that used
+  to cover the leg summary for 3.5 seconds is suppressed when there is a result
+  to read — an occlusion problem rather than a contrast one, but the same class
+  of "the information is technically present" failure.
+
+**Still open on these screens**, and worth someone's attention: the `/display`
+board has no screen-reader story at all beyond the SVG boards' own
+`aria-label`s. It is a read-only second screen nobody is expected to navigate,
+which is the reason it has never been prioritised — but the lanes and the
+result view are now genuinely information-dense, and a live region announcing
+the verdict line would be a small, self-contained addition if it is ever
+wanted.
+
 ### Applied: landscape scoring-screen pass (2026-07)
 
 The tablet/landscape scoring layout was designed against this checklist rather than

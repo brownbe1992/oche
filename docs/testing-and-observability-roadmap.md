@@ -182,6 +182,33 @@ alone. If no runner exists yet at the point this comes up, build the minimal ver
 needed to hold that one test rather than deferring it to a separate "do testing
 properly" session. See `CLAUDE.md` for the binding version of this statement.
 
+### What the browser suite is actually for (2026-07, learned the hard way)
+
+The two suites have settled into a genuine division of labour, and the
+live-scoreboard redesign made the boundary concrete enough to write down:
+
+- **`node:test` covers arithmetic.** Every stat formula, panel spec and lane
+  figure is a pure function with a committed test. `liveLaneStats()` is built
+  on the same `pracAggregate()` the leg-complete panel uses precisely so one
+  test protects both screens at once.
+- **`verify-ui` covers *structure*, not appearance.** Nothing in it asserts a
+  colour, a font size or a pixel position — those must stay free to change.
+  What it asserts is that each mode renders the layout it declares, that a mode
+  declaring a stage draws a board, that no markup leaks into visible text, and
+  that the result view isn't covered by the banner announcing it.
+- **Both together still miss a class of bug.** The redesign shipped four
+  defects that neither suite caught and only *looking at a rendered screen*
+  revealed: a top-level payload key silently stripped by the server's
+  allowlist, markup escaped into visible tag source, a renderer left querying
+  an element that no longer existed, and a per-mode figure computed from the
+  wrong record shape. Each is now pinned by a test — but each was found by
+  screenshotting the thing, which is worth doing deliberately after any
+  rendering change rather than trusting a green suite.
+
+Practical consequence: when a change is structural, extend `verify-ui` and read
+the mode list from `GAME_TYPES` so new game types inherit coverage. When it is
+arithmetic, extend `node:test`. When it is visual, take the screenshot.
+
 ## Decisions made (2026-07, resolved rather than left open)
 
 - **Minimal shim, not real ES modules.** `frontend/scoring.js` is a dual-mode file:

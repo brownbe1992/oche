@@ -1074,11 +1074,27 @@ shared `advanceLegSetGame()` helper.
   practice-drill-only; decide whether an H2H race's completion also counts
   toward them, or gets its own win/loss tracking the way Killer's `kills`/
   `eliminated` fields do.
-- The live scoreboard's dartboard visualization (see the "big dartboard with
-  checkmarks" item elsewhere on this tracker) should be designed with 2+
-  simultaneous progress states in mind from the start, rather than retrofitted
-  — e.g. two overlaid marker styles, or a board per player, so this item and
-  that one aren't sequenced awkwardly against each other.
+- The live scoreboard's dartboard visualization **now exists and is
+  single-player by construction** (2026-07 live-scoreboard redesign, direction
+  C "The Ring" — the owner's explicit pick for both guided drills):
+  `renderers.around_the_clock.stage(s, L)` in `display.html` renders one dial
+  from `s.players[0]`, flanked by that player's figures, and takes the whole
+  screen area rather than a lane. So the "design it for 2+ from the start"
+  advice is overtaken — the retrofit this bullet hoped to avoid is now the
+  actual job, and it is a small, well-bounded one:
+
+  - `stage()` reads `s.players[0]` directly, exactly like the controller-side
+    functions this section already lists. It needs the same generalization.
+  - The layout question is now concrete rather than open: the stage is a
+    three-column flex (figures · board · figures), so **a board per player**
+    fits the existing shape naturally for two players, while overlaid marker
+    styles on one board would need a new treatment. Two players is the case
+    worth designing for; at three-plus, a board each stops fitting and the
+    mode probably wants lanes with a compact progress rail instead — which
+    `laneHtml()`/`laneCellsHtml()` already provide.
+  - Whatever is chosen, the per-player state is already in the payload
+    (`playerSnapshotAroundTheClock()` sends `hitNumbers` per player, not a
+    game-level set), so no payload change is needed for the H2H case.
 
 ## New Game / Scoring screen changes
 

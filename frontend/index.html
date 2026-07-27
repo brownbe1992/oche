@@ -15146,16 +15146,17 @@ function finishUnit(kind, winner, opts){
   // prepended into it a few lines above would be destroyed in the same tick it
   // was built — see #screen-game's skeleton comment and showGameResult().
   const resultHost=showGameResult();
-  // The nine other per-type flags that used to sit here went with the bespoke
+  // The ten per-type flags that used to sit here went with the bespoke
   // `${bobs27Summary}`-style blocks they gated — every one of those modes now
   // declares a GAME_TYPES.completionPanel instead, dispatched generically below.
-  const isCricket = game.gameType === 'cricket';
-  // No matchwin moment card is built for Cricket yet (its own social/moment-card
-  // pass is a later build-order step) — suppress the Share button rather than wire
-  // it to a card that doesn't exist. Baseball's/Bob's 27's own matchwin cards ARE
-  // built (onLegWonBaseball()/onLegWonBobs27()'s "game (match/run) complete"
-  // branches), so they keep the button.
-  const matchShareBtn = isCricket ? '' : `<button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>`;
+  //
+  // The last of them was an `isCricket` check suppressing the Share button,
+  // which is now the registry's own `noMatchShare`: a mode that builds no
+  // matchwin moment card must not offer to share one. Cricket is the only such
+  // mode today (its social/moment-card pass is a later build-order step);
+  // Baseball's and Bob's 27's cards ARE built, so they keep the button.
+  const matchShareBtn = GAME_TYPES[game.gameType].noMatchShare ? ''
+    : `<button class="btn btn-ghost" id="matchwin-share-btn" onclick="shareMomentCard('matchwin')">📤 Share</button>`;
   if(kind==='game'){
     // Marathon Mode (docs/archive/marathon-mode-roadmap.md): every leg is legsPerSet=1/
     // setsPerGame=1, so a leg win always reaches this 'game' branch immediately
@@ -15893,6 +15894,10 @@ const GAME_TYPES = {
     // backend ALLOWED_LIVE_KEYS entry (the exact sync point BUG-28 and the
     // killerLives/checkoutLadder* bug both silently missed).
     completionPanel: cricketPanelSpec,
+    // No matchwin moment card is built for this mode yet (its own social/
+    // moment-card pass is a later build-order step), so finishUnit() must not
+    // offer a Share button that would generate nothing.
+    noMatchShare: true,
     liveModeState: game => ({ cricketVariant: game.config.variant || 'standard' }),
     resume: (ctx) => {
       const { names, config, players, state } = ctx;

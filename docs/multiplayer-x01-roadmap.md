@@ -79,18 +79,25 @@ format today.
    falls through to, or a smaller X01-specific ceiling if 4 is deliberately
    chosen as the format's own cap (see "Open questions" below) rather than the
    app's general 6-player ceiling.
-2. **Live scoreboard formatting** (`display.html` / the in-app scoring
-   screen's scoreboard rendering, `renderGameX01()`/`renderers.x01` and
-   whatever the live display mirrors): X01's scoreboard was built assuming
-   exactly 2 columns/rows. Needs the same "N-player generic" treatment Cricket/
-   Baseball's scorecards already use (`renderers.cricket.scorecard()`,
-   orientation-aware per Cricket's own item 11 in `game-modes-roadmap.md`) —
-   likely a shared layout helper rather than a bespoke X01-only 3/4-player
-   variant, so a future 5th+ format doesn't need its own special case again
-   (per `CLAUDE.md`'s "right depth, not a bandaid" convention). Concretely:
-   remaining-score-per-player needs to fit 3-4 values instead of 2, and
-   whichever "who's up next" / turn-order indicator X01 currently shows needs
-   to generalize the same way Cricket's already does for 3+ players.
+2. **Live scoreboard formatting** — **the `/display` half of this is already
+   done** (2026-07 live-scoreboard redesign). The board no longer assumes two
+   columns: `renderers.x01.lane()` renders one full-width lane per player, the
+   lane container is a flex column that takes N players without configuration,
+   and the top bar's standing chips and the result view's lanes are built from
+   `s.players.map(...)` the same way. It was exercised at three players during
+   the redesign (Killer's own lanes) and needs no X01-specific variant. This is
+   exactly the "shared layout helper rather than a bespoke X01-only 3/4-player
+   variant" the original note asked for — `laneHtml()` is that helper, and it
+   arrived for a different reason.
+
+   What is **still open** here is the **in-app scoring screen**
+   (`renderGameX01()`, `frontend/index.html`), which was not touched by the
+   redesign and still renders the 2-player `.pscore` shape. Concretely:
+   remaining-score-per-player needs to fit 3-4 values instead of 2, and the
+   "who's up next" indicator needs to generalize the way Cricket's already
+   does for 3+ players. The landscape pass (2026-07) also gave that screen a
+   compact score strip sized for two, which will need re-checking at four.
+
 3. **Turn-order display / checkout suggestions**: confirm the existing
    turn-rotation engine's "next player" logic needs no change (Cricket/
    Baseball/Shanghai/Halve-It already prove it doesn't), and that checkout

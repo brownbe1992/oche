@@ -921,6 +921,31 @@ Deferred because it touches all 15 game types' hot-path turn loop across 4
 functions (~60 dispatch points) — real behavior-risk if a single branch is
 transcribed wrong, needs full per-type live verification before landing.
 
+**Update (2026-07, after the live-scoreboard redesign).** Two things changed
+in this item's favour, and one caution is now evidence-backed rather than
+theoretical:
+
+- **`display.html`'s own equivalent is done.** Its per-type `card()`/
+  `scorecard()` dispatch was replaced by `lane()`/`stage()` registry members
+  and the fourteen old renderers deleted. That is the same transformation this
+  item proposes, carried out on the read-only screen where a wrong branch
+  costs a bad frame rather than a wrong score — a useful rehearsal, and the
+  reason the remaining risk here is specifically about the *turn loop*, not
+  about registry dispatch as a technique.
+- **The verification cost dropped.** The verify-ui suite now drives every
+  registered mode through start → dart → render → completion (`all-game-types`,
+  `live-shell`, 148 assertions between them), reading the mode list from
+  `GAME_TYPES` itself. The "full per-type live verification" this deferral
+  asks for is now largely a suite run rather than a manual matrix.
+- **But the caution stands, and the redesign proved why.** Converting
+  `display.html` surfaced four defects that no test caught and only looking at
+  rendered output revealed — including a renderer left pointing at an element
+  that no longer existed, and a payload field silently stripped by the server's
+  allowlist. A `throwDart`/`enterTurn` conversion has no equivalent "look at
+  it" check: a mis-transcribed branch there produces a *wrong score*, which
+  looks perfectly normal on screen. Land it one function at a time, and add the
+  scoring assertions before the refactor, not after.
+
 ### Item 65 — Generalize `rebuild*State()`'s shared replay-loop shape (`scoring.js`)
 
 `rebuildX01State`/`rebuildCricketState`/`rebuildBaseballState`/
@@ -959,20 +984,38 @@ visual state (mark glyphs/aria-labels, target highlighting) beyond plain
 `disabled` toggling, so the toggle-only-what-changed logic is more involved
 per pad than the generic fallback pad was.
 
-### Item 68 — `finishUnit()`'s per-type match-summary special cases → a `matchSummaryHtml` registry member
+### Item 68 — `finishUnit()`'s per-type match-summary special cases → a registry member ✅ DONE (2026-07)
 
-`finishUnit()`'s GAME OVER branch hand-builds `isCricket`/`isBaseball`/.../
-`isDeadManWalking` flags, then bolts on four near-identical ad hoc "tiny
-match-summary" IIFEs (`bobs27Summary`, `gauntletSummary`, `killerSummary`,
-`deadManWalkingSummary`) plus a separate `isCricket`-only Share-button
-suppression and an exclusion list gating which types skip `h2hStatsHtml()`
-entirely — each justified by its own comment repeating "h2hStatsHtml() reads
-X01-shaped fields this player object doesn't have." Shape: a single
-`GAME_TYPES.matchSummaryHtml(game, winner)` member (absent/null for the
-X01-shaped types, which fall back to `h2hStatsHtml()`), replacing both the
-summary IIFEs and the exclusion list with one registry lookup. Deferred:
-touches the GAME OVER screen for every non-X01-shaped type; needs a full
-match-completion live check per type.
+**Done, as `GAME_TYPES.<type>.completionPanel(game, winner, kind)`** — a
+superset of what this item asked for, shipped as part of the completion-panel
+work rather than as a standalone refactor.
+
+What went: the four ad hoc summary IIFEs (`bobs27Summary`, `gauntletSummary`,
+`killerSummary`, `deadManWalkingSummary`) plus a fifth added later
+(`aroundTheClockSummary`), the `h2hStatsHtml()` exclusion list, and all ten
+`isCricket`/`isBaseball`/… flags — the last of which (a Share-button
+suppression) became its own registry member, `noMatchShare`, since "this mode
+builds no matchwin moment card" is a fact about the mode, not about Cricket.
+
+Three deliberate differences from the sketch above:
+
+- **A spec, not HTML.** `completionPanel` returns `{heroes, shelf, tallies,
+  columns}` and one renderer builds the markup, so the layout and the
+  accessibility behaviour are written once instead of once per mode.
+- **Leg scope too, not just GAME OVER.** The same member serves the
+  leg-complete screen, which is where the panels are actually seen most.
+- **Every mode declares one, or declares why not.** `noCompletionStats: true`
+  marks the four that legitimately show nothing (Just Chuckin' It, Doubles
+  Practice and Checkout Ladder never reach `finishUnit()`; Checkout Trainer has
+  its own paper-themed results screen). An entry declaring neither is a test
+  failure in both suites — the deferral note above worried about silent
+  breakage, and this is what replaced that worry.
+
+The full per-type live check the deferral asked for was done: every registered
+mode's panel is rendered against real player objects in the verify-ui
+`all-game-types` check.
+
+See `REFERENCE.md` §2 "Completion panels" for the shipped contract.
 
 ### Item 69 — `startNextLeg()`'s parallel hardcoded round-counter reset chain
 
