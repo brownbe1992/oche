@@ -5547,10 +5547,15 @@ function getAroundTheClockPersonalBests(playerName, mode) {
   return { bestCompletionDarts };
 }
 
-// Home page leaderboards for Around the Clock — no mode param on either (always
-// practice=1 by construction, same reasoning as Doubles Practice's Home boards).
+// Home page leaderboards for Around the Clock. Both are **drill** boards and are
+// scoped to practice explicitly: since the H2H race variant shipped
+// (docs/game-modes-roadmap.md "Around the Clock — H2H variant") this mode is no
+// longer practice=1 by construction, and a race is a different achievement from
+// a solo run against the clock — you clear 20 numbers while somebody else is
+// also throwing, and the darts you took says as much about them as about you.
+// The race's own board is getAroundTheClockWinLeaderboard() below.
 function getAroundTheClockFastestLeaderboard() {
-  const scope = _scope({ gameType: 'around_the_clock' });
+  const scope = _scope({ mode: 'practice', gameType: 'around_the_clock' });
   const rows = db.prepare(`
     SELECT p.name AS name, COUNT(d.id) AS darts, MAX(t.created_at) AS created_at
     FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id JOIN darts d ON d.turn_id=t.id
@@ -5568,7 +5573,7 @@ function getAroundTheClockFastestLeaderboard() {
 }
 
 function getAroundTheClockCompletionsLeaderboard() {
-  const scope = _scope({ gameType: 'around_the_clock' });
+  const scope = _scope({ mode: 'practice', gameType: 'around_the_clock' });
   const rows = db.prepare(`
     SELECT p.name AS name, COUNT(*) AS completions FROM (
       SELECT t.player_id
@@ -5581,6 +5586,11 @@ function getAroundTheClockCompletionsLeaderboard() {
   `).all();
   return rows.sort((a, b) => b.completions - a.completions);
 }
+
+// The H2H race's own board — the eighth caller of the shared win/loss body, and
+// the counterpart to the two drill boards above: those rank how well you clear
+// the clock alone, this ranks how often you cleared it before somebody else did.
+function getAroundTheClockWinLeaderboard() { return _winLeaderboard('around_the_clock'); }
 
 function getAroundTheWorldDrillStatBubbles(playerName, mode) {
   const p = getPlayer(playerName);
@@ -9439,6 +9449,7 @@ module.exports = {
   getKillerStatBubbles, getKillerPersonalBests, getKillerWinLeaderboard,
   getAroundTheClockStatBubbles, getAroundTheClockPersonalBests,
   getAroundTheClockFastestLeaderboard, getAroundTheClockCompletionsLeaderboard,
+  getAroundTheClockWinLeaderboard,
   getAroundTheWorldDrillStatBubbles, getAroundTheWorldPersonalBests, getAroundTheWorldLeaderboard,
   getTopFinishes, getTopFinishesAll, getDartWeights, clearPlayerStats, resetStats, wipeAllData, deleteLastTurn, getFullDatabaseExport, getPlayerExport, getPlayerCsvExport, importPlayerExport, getMergePreview, mergePlayers,
   getOnThisDay,

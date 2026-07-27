@@ -1080,17 +1080,17 @@
        Scores are deliberately smaller than portrait's: this screen is optimised
        for entering darts at arm's length from the board, not for reading a total
        from across the room. */
-    body.game-active .rail .pscore:not(:has(#atc-live-progress, #atw-live-progress)){
+    body.game-active .rail .pscore:not(:has(.atc-live-progress, #atw-live-progress)){
       flex-direction:row; align-items:center; flex-wrap:wrap; gap:6px 10px; padding:6px 10px;
     }
-    body.game-active .rail .pscore:not(:has(#atc-live-progress, #atw-live-progress)) .rem-wrap{
+    body.game-active .rail .pscore:not(:has(.atc-live-progress, #atw-live-progress)) .rem-wrap{
       margin-left:auto; align-items:flex-end;
     }
-    body.game-active .rail .pscore:not(:has(#atc-live-progress, #atw-live-progress)) .rem{font-size:32px}
+    body.game-active .rail .pscore:not(:has(.atc-live-progress, #atw-live-progress)) .rem{font-size:32px}
     /* order:3 puts the meta line BELOW the name+score row rather than between
        them — without it the full-basis meta block wraps first and pushes the
        remaining score onto a third line of its own. */
-    body.game-active .rail .pscore:not(:has(#atc-live-progress, #atw-live-progress)) .meta{
+    body.game-active .rail .pscore:not(:has(.atc-live-progress, #atw-live-progress)) .meta{
       order:3; flex-basis:100%; min-width:0; text-align:left; margin-left:0;
     }
     /* The current-turn dart row: "T20 · 5 · D18" on one line, most recent
@@ -3953,15 +3953,31 @@ const HOME_COMBO_SPECS={
     hasCache(){ return !!homeData.deadManWalking; },
     fallback(){ homeData.deadManWalking={leaderboard:[]}; },
   },
-  around_the_clock:{ perMode:false,
-    fetch(){
+  // Dual since the race variant shipped: the Practice tab keeps the two drill
+  // boards (both now practice-scoped server-side), the H2H tab gets the race's
+  // own win-rate board — the same split every other dual type already has.
+  around_the_clock:{ perMode:true,
+    fetch(mode){
+      if(mode === 'h2h'){
+        return Backend.get('/api/stats/around-the-clock-wins').then(wins=>{
+          if(!homeData.aroundTheClock) homeData.aroundTheClock={};
+          homeData.aroundTheClock.wins=wins; homeData.aroundTheClock.h2h={};
+        });
+      }
       return Promise.all([
         Backend.get('/api/stats/around-the-clock-fastest'),
         Backend.get('/api/stats/around-the-clock-completions'),
-      ]).then(([fastest,completions])=>{ homeData.aroundTheClock={fastest,completions}; });
+      ]).then(([fastest,completions])=>{
+        if(!homeData.aroundTheClock) homeData.aroundTheClock={};
+        Object.assign(homeData.aroundTheClock, { fastest, completions, practice:{} });
+      });
     },
-    hasCache(){ return !!homeData.aroundTheClock; },
-    fallback(){ homeData.aroundTheClock={fastest:[],completions:[]}; },
+    hasCache(mode){ return !!(homeData.aroundTheClock && homeData.aroundTheClock[mode]); },
+    fallback(mode){
+      if(!homeData.aroundTheClock) homeData.aroundTheClock={};
+      if(mode==='h2h'){ homeData.aroundTheClock.h2h={}; if(!homeData.aroundTheClock.wins) homeData.aroundTheClock.wins=[]; }
+      else Object.assign(homeData.aroundTheClock, { practice:{}, fastest:homeData.aroundTheClock.fastest||[], completions:homeData.aroundTheClock.completions||[] });
+    },
   },
   around_the_world:{ perMode:false,
     fetch(){ return Backend.get('/api/stats/around-the-world-progress').then(progress=>{ homeData.aroundTheWorld={progress}; }); },
@@ -4733,6 +4749,21 @@ function renderHomeTabBodyAroundTheClock(){
   const data=homeData.aroundTheClock;
   if(!data){ el.innerHTML=`<p class="pp-meta">Loading…</p>`; return; }
 
+  // The H2H tab ranks races won; the Practice tab ranks solo runs against the
+  // clock. Two different achievements, kept apart on purpose — clearing 20
+  // numbers while somebody else is throwing is not the same feat as clearing
+  // them fastest alone, so neither board borrows from the other.
+  if(homeTab==='h2h'){
+    el.innerHTML=`
+      <div class="pp-section">
+        <div class="pp-section-title">Most Race Wins</div>
+        ${leaderboardSectionHtml(data.wins||[], {
+          score:r=>`${r.won}/${r.played}`, meta:r=>`${r.rate}%`, emptyMsg:'No races played yet.',
+        })}
+      </div>`;
+    return;
+  }
+
   const fastBoard=data.fastest||[];
   const fastLeaderboard=leaderboardSectionHtml(fastBoard, {
     score:r=>`${r.darts} darts`, meta:r=>fmtDate(r.createdAt), emptyMsg:'None recorded yet.',
@@ -4952,7 +4983,12 @@ function setMode(mode){
   // the drill's own type underneath, and startGame() (which reads
   // setup.gameType, not any control) would silently build that drill's game
   // type regardless of what Step 1's ledger visibly shows.
-  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking'];
+  // Around the Clock is deliberately NOT here any more: since the race variant
+  // shipped it is a dual type (practice OR h2h), reached the same way X01 and
+  // Cricket are — setMode('practice'|'h2h') + setGameType(). Leaving it in this
+  // list would reset setup.gameType back to 'x01' the instant setMode('practice')
+  // ran, silently starting an X01 game from the Around the Clock ledger row.
+  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking'];
   if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setup.gameType = 'x01';
   // Daily Challenge's underlying gameType is per-FORMAT (CHALLENGE_FORMAT_DEFS),
   // not hardcoded to X01 — today every format resolves to 'x01', but this reads
@@ -6549,8 +6585,8 @@ const NEW_GAME_MODE_OPTIONS = [
     blurb:"No dartboard needed — the app gives you a target score, you tap out the fewest-darts checkout from memory, and it's graded instantly against the objectively optimal route. A pure recall drill, not a throwing game.",
     apply(){ setMode('checkout_trainer'); } },
   { key:'around_the_clock', label:'Around the Clock',
-    blurb:'Hit every number, 1 through 20, as a single — in any order. Live progress shows exactly which numbers you still need. The clock is complete the moment all 20 are hit.',
-    apply(){ setMode('around_the_clock'); } },
+    blurb:'Hit every number, 1 through 20, as a single — in any order. Live progress shows exactly which numbers you still need. Play it solo, where the clock is complete the moment all 20 are hit, or add players for a race: three darts each, turn about, and the first to clear all 20 takes the leg.',
+    apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('around_the_clock'); } },
   { key:'around_the_world', label:'Around the World',
     blurb:"Chip away at all 63 lifetime dart outcomes — every number 1-20 as a single, double, and treble, plus outer bull, double bull, and a miss. Tracks the same lifetime progress as your Player Profile, across as many sessions as it takes. No round to finish — throw for as long as you like.",
     apply(){ setMode('around_the_world'); } },
@@ -6898,7 +6934,7 @@ function maxPlayersForSetup(){
 // The 6 game types playable either solo or head-to-head — the only ones whose
 // setup.mode ('practice' vs 'h2h') needs re-deriving as Step 2's player count
 // changes (every other key's mode is fixed regardless of player count).
-const SETUP_DUAL_MODE_KEYS = ['x01','cricket','baseball','shanghai','halve_it','pressure_chamber'];
+const SETUP_DUAL_MODE_KEYS = ['x01','cricket','baseball','shanghai','halve_it','pressure_chamber','around_the_clock'];
 function resyncSetupModeForPlayerCount(){
   const key = currentSetupOptionKey();
   if(!SETUP_DUAL_MODE_KEYS.includes(key)) return;
@@ -7521,7 +7557,7 @@ async function startGame(){
   // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
   // otherwise the two "players" wouldn't actually be racing the same leg.
   const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
-  const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_clock', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
+  const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
   // docs/bug-roadmap.md BUG-22: a practice Baseball "leg" is a complete, standalone
   // 9-inning game (evaluateVisitBaseball() decides its outcome unconditionally,
   // unlike X01/Cricket's open-ended countdown legs) — so, like every drill mode
@@ -14546,6 +14582,13 @@ function startNextLeg(newSet){
   if(game.gameType === 'halve_it') game.halveItRound = 1;
   if(game.gameType === 'pressure_chamber'){ game.pressureChamberRound = 1; game.pressureChamberDeadline = null; game._pcTimerRound = null; game.pressureDeclared = null; stopPressureChamberNoWarmupTimer(); }
   if(game.gameType === 'checkout_ladder') game.checkoutLadderVisits = 0;
+  // The race variant reaches this function (a solo clock never does — it ends
+  // the whole game). roundOver gates every further dart, so a leg that starts
+  // with it still true is a leg nobody can throw in.
+  if(game.gameType === 'around_the_clock'){
+    game.roundOver = false; game.roundEndReason = null;
+    game.atcLastDart = null; game.atcVisitDarts = 0;
+  }
   game.legSummary = null;
   game.currentLegTurns = [];
   game.legVisitLogs = [];
@@ -15006,7 +15049,34 @@ function deadManWalkingPanelSpec(game){
 // The one mode with no shelf, deliberately: twenty cells that are all "hit" by
 // definition (the game only ends when every number is) would say nothing. Its
 // tallies stand alone instead — see completionPanelHtml()'s own header.
-function aroundTheClockPanelSpec(game){
+function aroundTheClockPanelSpec(game, winner, kind){
+  // A race leads with the same figure the solo run does — darts to clear the
+  // clock — but one hero per player, so the margin is the story. The loser's
+  // dart count is their progress, not a completion, which is why their shelf
+  // line says how far they got rather than how fast they finished.
+  if(game.players.length > 1){
+    const w = panelLeadPlayer(winner);
+    return {
+      heroes: panelHeroesByPlayer(winner, p => p.roundDarts||0,
+        p => (p.hitSet && p.hitSet.size >= 20)
+          ? 'Darts to clear the clock'
+          : `Darts · ${p.hitSet ? p.hitSet.size : 0} of 20 cleared`),
+      shelf: { title: 'The twenty numbers', cells: Array.from({length:20}, (_,i)=>{
+        const n = i + 1;
+        const got = game.players.filter(p => p.hitSet && p.hitSet.has(n));
+        return panelResultCell(String(n), got.length > 0, got.some(p => p.name === w.name),
+          got.length === 0 ? 'nobody'
+            : got.length === game.players.length ? 'everyone'
+            : got.map(p => p.name).join(', '));
+      }) },
+      tallies: [
+        { emoji:'🎯', value:w.roundTrebles||0, label:'trebles (winner)' },
+        { emoji:'💨', value:w.roundMisses||0,  label:'misses (winner)' },
+        { emoji:'📐', value:((w.roundDarts||0)/20).toFixed(1), label:'darts per number' },
+      ],
+      columns: h2hPanelColumns(winner, kind==='game' ? 'game' : 'leg'),
+    };
+  }
   const p = game.players[0];
   const darts = p.roundDarts||0;
   const sec = Math.max(0, Math.round((Date.now() - (p.roundStartedAt||Date.now()))/1000));
@@ -16268,19 +16338,42 @@ const GAME_TYPES = {
     // scoreboard's renderers.around_the_clock.summary(), display.html) — the
     // one-clock-one-game redesign's whole point was to make this moment feel
     // like every other game's finish, not a silent state change.
-    legSummary: (game) => [{ name: game.players[0].name,
-      darts: game.players[0].roundDarts||0, trebles: game.players[0].roundTrebles||0,
-      doubles: game.players[0].roundDoubles||0, misses: game.players[0].roundMisses||0,
-      durationSec: Math.max(0, Math.round((Date.now() - (game.players[0].roundStartedAt||Date.now()))/1000)),
-      won: true }],
+    // One row per player, winner flagged — a race's summary is a comparison,
+    // and a solo run is just the one-row case of the same shape.
+    legSummary: (game, winner) => game.players.map(p => ({ name: p.name,
+      darts: p.roundDarts||0, trebles: p.roundTrebles||0,
+      doubles: p.roundDoubles||0, misses: p.roundMisses||0,
+      hit: p.hitSet ? p.hitSet.size : 0,
+      durationSec: Math.max(0, Math.round((Date.now() - (p.roundStartedAt||Date.now()))/1000)),
+      won: winner == null ? true : p.name === winner })),
     completionPanel: aroundTheClockPanelSpec,
+    h2hRows: (p) => [
+      statRow('Numbers hit', `${p.hitSet ? p.hitSet.size : 0} / 20`),
+      statRow('Darts', p.roundDarts||0),
+      statRow('Trebles · misses', `${p.roundTrebles||0} · ${p.roundMisses||0}`, true),
+    ],
     // roundOver/roundEndReason are shared with Doubles Practice's liveModeState above.
     liveModeState: game => ({ atcLastDart: game.atcLastDart || null,
       roundOver: !!game.roundOver, roundEndReason: game.roundEndReason || null }),
-    // Solo, same reasoning as Doubles Practice — no H2H equivalent.
-    soloOnly: true,
+    // Dual: the solo drill against the clock, or a race to clear it first
+    // (docs/game-modes-roadmap.md "Around the Clock — H2H variant"). Neither
+    // soloOnly nor h2hOnly — the same shape X01 and Cricket have.
     resume: (ctx) => {
       const { players, state } = ctx;
+      // A race needs the whole-match rebuild: each side's clock comes from its
+      // own darts, but the leg/set tree — which resets everyone's clock, and
+      // whose turn it is on the resumed visit — is a property of the match.
+      if(players.length > 1){
+        const r = rebuildAroundTheClockRaceState({ names: players.map(p=>p.name),
+          legsPerSet: state.legsPerSet, dartsPerVisit: ATC_DARTS_PER_VISIT, turns: state.turns });
+        players.forEach((p,i)=> Object.assign(p, r.players[i], { name: p.name }));
+        return {
+          overlay: { legNo: r.legNo, setNo: r.setNo, current: r.current, starter: r.starter,
+            atcVisitDarts: r.visitDarts },
+          statusMsg: `Resumed — ${players[r.current].name} to throw, ` +
+            players.map(p=>`${p.name} ${p.hitSet.size}/20`).join(' · ') + '.',
+        };
+      }
       const r = rebuildAroundTheClockState({ turns: state.turns });
       Object.assign(players[0], { hitSet:r.hitSet, roundDarts:r.roundDarts,
         roundTrebles:r.roundTrebles, roundDoubles:r.roundDoubles, roundMisses:r.roundMisses });
@@ -18757,35 +18850,57 @@ function renderBlitzResults(){
    point is "how long this took start to finish," and consistent with every
    other elapsed-time reading in this app being wall-clock, not play-time. */
 function newMatchPlayerAroundTheClock(name){
+  // legsWon/setsWon: the race variant plays real best-of-N, so these carry the
+  // same meaning they do in every other head-to-head mode. A solo clock never
+  // increments them (it ends the whole game on completion) but still needs them
+  // present — the scoreboard row prints a standing, and `undefined/3` is what a
+  // missing one looks like on screen.
   return { name, hitSet: new Set(), roundDarts:0, roundTrebles:0, roundDoubles:0, roundMisses:0,
-    roundStartedAt: Date.now(), sessionRounds:[] };
+    roundStartedAt: Date.now(), sessionRounds:[], legsWon:0, setsWon:0 };
 }
-// Provided only to satisfy the GAME_TYPES contract (never actually called —
-// this mode never reaches a "next leg," see the header comment above).
+// Called between legs of a RACE only — a solo clock ends the whole game the
+// moment it completes and never reaches a next leg (see the header comment).
+// roundStartedAt restarts too, so each leg's elapsed time is that leg's.
 function resetPlayerForNextLegAroundTheClock(p){
   p.hitSet = new Set(); p.roundDarts = 0; p.roundTrebles = 0; p.roundDoubles = 0; p.roundMisses = 0;
+  p.roundStartedAt = Date.now();
 }
 function playerSnapshotAroundTheClock(p){
   // hitNumbers (not just a count) so the Live Scoreboard can render exactly which
   // numbers are still outstanding, the same live-progress-grid feedback the
   // controller itself shows via buildOutcomeGridHtml().
-  return { name:p.name, hitNumbers:[...p.hitSet], hit:p.hitSet.size||0, total:20, roundDarts:p.roundDarts||0 };
+  // roundTrebles/roundDoubles/roundMisses: the Ring stage has read these since
+  // the 2026-07 redesign, but they were never sent — every board showed "0
+  // trebles, 0 misses" for a run that had plenty of both. Silent zeros, which
+  // no test catches and only looking at the screen reveals.
+  return { name:p.name, hitNumbers:[...p.hitSet], hit:p.hitSet.size||0, total:20,
+    roundDarts:p.roundDarts||0, roundTrebles:p.roundTrebles||0,
+    roundDoubles:p.roundDoubles||0, roundMisses:p.roundMisses||0,
+    legsWon:p.legsWon||0, setsWon:p.setsWon||0 };
 }
+/* A race (2+ players) throws in visits of 3, then passes the turn — solo keeps
+   its uninterrupted per-dart stream, because with one player the rotation
+   returns to the same seat and the boundary would be invisible anyway. The
+   counter lives on `game` rather than the player for exactly that reason: it
+   describes whose visit is in progress, not anything about a person. */
+const ATC_DARTS_PER_VISIT = 3;
+function atcIsRace(){ return game.players.length > 1; }
 function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
   if(game.roundOver) return;
   const dart = makeDart(sector, bounced ? 1 : mult);
   mult = 1; updateMultUI();
-  const p = game.players[0];
+  const p = game.players[game.current];
   const ev = evaluateDartAroundTheClock(dart, p.hitSet);
 
   // snapshot state before mutation so undoLastTurnAroundTheClock() can restore it.
   // badgeReverts/voided follow the same convention as every other game type's
   // snapshot (see trackBadgeForUndo()) — guided_clock is a moment-style
   // completion badge, so it DOES get revoked on undo.
-  pushTurnSnapshot({ hitSet: new Set(p.hitSet), roundDarts:p.roundDarts,
+  pushTurnSnapshot({ pi:game.current, hitSet: new Set(p.hitSet), roundDarts:p.roundDarts,
     roundTrebles:p.roundTrebles, roundDoubles:p.roundDoubles, roundMisses:p.roundMisses,
     roundOver:game.roundOver, roundEndReason:game.roundEndReason,
     atcLastDart:game.atcLastDart, sessionRoundsLen:p.sessionRounds.length,
+    atcVisitDarts:game.atcVisitDarts || 0,
     badgeReverts:[], voided:false });
 
   p.roundDarts += 1;
@@ -18795,7 +18910,10 @@ function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
   if(ev.isNewHit) p.hitSet.add(dart.sector);
   recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:0, bust: !!ev.completed, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
-  game.atcLastDart = { label:dart.label, isNewHit:ev.isNewHit, completed:ev.completed };
+  // by/hit describe the player who threw it, not whoever is at the oche when
+  // this is next read — in a race the turn may have passed in between.
+  game.atcLastDart = { label:dart.label, isNewHit:ev.isNewHit, completed:ev.completed,
+    by:p.name, hit:p.hitSet.size };
   const _snap = game.lastTurnSnapshot;
   if(ev.completed){
     game.roundOver = true;
@@ -18804,6 +18922,10 @@ function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
     announce(`Around the Clock complete! ${p.roundDarts} darts.`);
     awardOnceBadge(p.name, 'guided_clock', 'guided_clock', _snap,
       { icon:'🧭', headline:'GUIDED CLOCK', statLine:`Completed a guided Around the Clock drill in ${p.roundDarts} darts` });
+    // A race ends the LEG, not necessarily the game — best-of-N is a real
+    // format here, the same as every other head-to-head type. The solo drill
+    // below keeps its own "one clock = one game" ending untouched.
+    if(atcIsRace()){ onLegWonAroundTheClock(game.current); return; }
     // One clock = one game (2026-07): completing the clock IS the game ending,
     // the same "a run IS the game" shape Gauntlet/Bob's 27/Dead Man Walking
     // already use — mirrors their exact completion sequence (webhooks, event
@@ -18826,17 +18948,58 @@ function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
       bannerText: `${escapeHtml(p.name)} clears the clock!`, liveMessage: `${p.name} clears the clock!`,
     });
     return;
-  } else if(ev.isNewHit){
-    announce(`${dart.label}. ${p.hitSet.size} of 20 numbers hit.`);
+  }
+  // Pass the turn after three darts. Solo runs the same line — with one seat
+  // the walk returns to it, so the drill's uninterrupted stream is unchanged.
+  const race = atcIsRace();
+  let handover = '';
+  game.atcVisitDarts = (game.atcVisitDarts || 0) + 1;
+  if(game.atcVisitDarts >= ATC_DARTS_PER_VISIT){
+    game.atcVisitDarts = 0;
+    if(race){
+      advanceToNextActivePlayer(game);
+      game.turnSeq += 1;
+      handover = ` ${game.players[game.current].name} to throw.`;
+    }
+  }
+  // One announcement, not two: the live region is cleared and re-set on the
+  // same frame, so a separate handover call would replace the hit it follows
+  // rather than queue behind it (the same rule announceTurn() documents).
+  if(ev.isNewHit){
+    announce((race ? `${p.name} hits ${dart.label}. ${p.hitSet.size} of 20.`
+                   : `${dart.label}. ${p.hitSet.size} of 20 numbers hit.`) + handover);
+  } else if(handover){
+    announce(`${p.name} ${dart.label} — no effect.${handover}`);
   }
   renderGameAroundTheClock();
+}
+// A race's leg win. Everything competitive about it — legs, sets, the match
+// tree, Elo, the moment card — is the shared advanceLegSetGame() every other
+// H2H mode already routes through; nothing here is Around the Clock-specific
+// except the wording and the darts figure the card leads with.
+function onLegWonAroundTheClock(wi){
+  const w = game.players[wi];
+  const active = game.players.filter(p=>!p.dnf);
+  const opp = active.length===2 ? active.find(p=>p!==w) : null;
+  const legsAtWin = new Map(game.players.map(p => [p, p.legsWon + (p===w ? 1 : 0)]));
+  w.legsWon += 1;
+  advanceLegSetGame(w, {
+    legsAtWin, opp,
+    momentCard: () => ({ icon:'🕐', headline:'CLOCK RACE WON!', player:w.name,
+      statLine: matchWinStatLine(w, legsAtWin) }),
+  });
 }
 // Undoes the single most recently thrown dart — mirrors undoLastTurnDoublesPractice()'s
 // shape, plus revoking guided_clock if this dart earned it.
 function undoLastTurnAroundTheClock(){
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
-  const p = game.players[0];
+  // The thrower the snapshot belongs to, not whoever is at the oche now — in a
+  // race the turn may already have passed to somebody else, and restoring the
+  // hit set onto the wrong player would hand one of them the other's clock.
+  const p = game.players[snap.pi != null ? snap.pi : 0];
+  if(snap.pi != null) game.current = snap.pi;
+  game.atcVisitDarts = snap.atcVisitDarts || 0;
   p.hitSet = snap.hitSet;
   p.roundDarts = snap.roundDarts;
   p.roundTrebles = snap.roundTrebles;
@@ -18851,40 +19014,65 @@ function undoLastTurnAroundTheClock(){
 }
 function renderGameAroundTheClock(){
   const sb = document.getElementById('scoreboard'); if(sb) sb.innerHTML='';
-  const p = game.players[0];
-  const row = document.createElement('div');
-  row.className = 'pscore active';
-  row.innerHTML = `
-    <div>
-      <div class="nm">${escapeHtml(p.name)} <span class="nm-out">around the clock</span></div>
-      <div class="turnflag">▸ throwing</div>
-    </div>
-    <div class="meta">
-      <div class="avgs">${p.hitSet.size} / 20 numbers hit &nbsp;·&nbsp; ${p.roundDarts} dart${p.roundDarts===1?'':'s'} thrown</div>
-    </div>
-    <div class="rem-wrap">
-      <div class="rem">${p.hitSet.size}</div>
-    </div>
-    <div id="atc-live-progress" style="margin-top:10px"></div>`;
-  if(sb) sb.appendChild(row);
-  const progressEl = document.getElementById('atc-live-progress');
-  if(progressEl) progressEl.innerHTML = buildOutcomeGridHtml(
-    new Set([...p.hitSet].map(n=>`${n}:1`)), { cells: 'numbers', live: true });
+  const race = atcIsRace();
+  const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+  // One row per player — in a race everyone needs their own outstanding-numbers
+  // grid, since "which numbers are left" is the whole state of the game and
+  // reading only the current thrower's would hide the race itself.
+  game.players.forEach((p,i)=>{
+    const active = i === game.current;
+    const standing = game.setsPerGame>1 ? `Sets ${p.setsWon} · Legs ${p.legsWon}`
+      : `Legs ${p.legsWon}/${game.legsPerSet}`;
+    const row = document.createElement('div');
+    row.className = 'pscore' + (active ? ' active' : '');
+    row.innerHTML = `
+      <div>
+        <div class="nm">${escapeHtml(p.name)} <span class="nm-out">around the clock</span></div>
+        ${active ? '<div class="turnflag">▸ throwing</div>' : ''}
+      </div>
+      <div class="meta">
+        <div class="avgs">${p.hitSet.size} / 20 numbers hit &nbsp;·&nbsp; ${p.roundDarts} dart${p.roundDarts===1?'':'s'} thrown</div>
+        ${race && showStanding ? `<div class="standing">${standing}</div>` : ''}
+      </div>
+      <div class="rem-wrap">
+        <div class="rem">${p.hitSet.size}</div>
+      </div>
+      <div class="atc-live-progress" style="margin-top:10px"></div>`;
+    // A class, not an id: a race renders one of these per player, and duplicate
+    // ids would break both getElementById() and the landscape rail's :has() rule.
+    const progressEl = row.querySelector('.atc-live-progress');
+    if(progressEl) progressEl.innerHTML = buildOutcomeGridHtml(
+      new Set([...p.hitSet].map(n=>`${n}:1`)), { cells: 'numbers', live: true });
+    if(sb) sb.appendChild(row);
+  });
 
+  const cur = game.players[game.current];
   const status = document.getElementById('status');
   if(status){
     if(game.roundOver){
       status.className = 'status win';
-      status.textContent = `Around the Clock complete! ${p.roundDarts} dart${p.roundDarts===1?'':'s'}.`;
+      status.textContent = `Around the Clock complete! ${cur.roundDarts} dart${cur.roundDarts===1?'':'s'}.`;
     } else if(game.atcLastDart && game.atcLastDart.isNewHit){
       status.className = 'status win';
-      status.textContent = `Hit! ${game.atcLastDart.label}. ${p.hitSet.size} of 20 hit.`;
+      const hit = game.atcLastDart.hit != null ? game.atcLastDart.hit : cur.hitSet.size;
+      // "X to throw" only once the turn has actually passed — saying it while
+      // the same player still has darts in hand reads as an instruction to
+      // somebody who is already at the oche.
+      const passed = race && game.atcLastDart.by !== cur.name;
+      status.textContent = race
+        ? `Hit! ${game.atcLastDart.by} ${game.atcLastDart.label} — ${hit} of 20.${passed ? ` ${cur.name} to throw.` : ''}`
+        : `Hit! ${game.atcLastDart.label}. ${hit} of 20 hit.`;
     } else if(game.atcLastDart){
       status.className = 'status';
-      status.textContent = `${game.atcLastDart.label} — no effect, keep going.`;
+      const passed = race && game.atcLastDart.by !== cur.name;
+      status.textContent = race
+        ? `${game.atcLastDart.by} ${game.atcLastDart.label} — no effect.${passed ? ` ${cur.name} to throw.` : ''}`
+        : `${game.atcLastDart.label} — no effect, keep going.`;
     } else {
       status.className = 'status';
-      status.textContent = padOrBoardHint('Hit every 1-20 as a single.');
+      status.textContent = padOrBoardHint(race
+        ? `${cur.name} to throw — hit every 1-20 as a single.`
+        : 'Hit every 1-20 as a single.');
     }
   }
   renderPad();

@@ -1835,6 +1835,65 @@ function rebuildAroundTheClockState({ turns }){
   return { hitSet, roundDarts, roundTrebles, roundDoubles, roundMisses, legNo, roundOver };
 }
 
+// The race variant (docs/game-modes-roadmap.md "Around the Clock — H2H
+// variant"): 2+ players clearing their own 20-number set, whoever gets there
+// first takes the leg. Solo's rebuild above can't be reused per player and then
+// summed, because the leg/set tree is a property of the WHOLE match — who won
+// which leg decides when everyone's clock resets, and that only reads correctly
+// with all the turns in one pass.
+//
+// Turns are per-dart here (recordSingleDartTurn()), so `current` advances every
+// third dart rather than every turn — the same ATC_DARTS_PER_VISIT boundary
+// throwDartAroundTheClock() enforces live. A dart that completes a clock ends
+// the leg immediately, which is why the visit counter resets there rather than
+// carrying into the next leg's first visit.
+function rebuildAroundTheClockRaceState({ names, legsPerSet, dartsPerVisit = 3, turns }){
+  const players = names.map(name => ({ name, hitSet:new Set(), roundDarts:0,
+    roundTrebles:0, roundDoubles:0, roundMisses:0, legsWon:0, setsWon:0 }));
+  let current = 0, starter = 0, setNo = 1, legNo = 1, visitDarts = 0, seenFirst = false;
+  let pendingNewLeg = false, pendingNewSet = false;
+  const resetLeg = () => players.forEach(p => {
+    p.hitSet = new Set(); p.roundDarts = 0; p.roundTrebles = 0; p.roundDoubles = 0; p.roundMisses = 0;
+  });
+  for(const t of turns){
+    if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
+      starter = (starter + 1) % players.length;
+      current = starter; visitDarts = 0;
+      resetLeg();
+      setNo = t.setNo; legNo = t.legNo;
+    }
+    seenFirst = true;
+    pendingNewLeg = false; pendingNewSet = false;
+    current = t.playerIndex;
+    const p = players[t.playerIndex];
+    const dart = makeDartCore(t.darts[0].sector, t.darts[0].mult);
+    const ev = evaluateDartAroundTheClock(dart, p.hitSet);
+    p.roundDarts += 1;
+    if(dart.sector === 0) p.roundMisses += 1;
+    else if(dart.isTreble) p.roundTrebles += 1;
+    else if(dart.isDouble) p.roundDoubles += 1;
+    if(ev.isNewHit) p.hitSet.add(dart.sector);
+    if(ev.completed){
+      pendingNewSet = _applyLegWin(players, t.playerIndex, legsPerSet, true);
+      pendingNewLeg = true;
+      visitDarts = 0;
+    } else {
+      visitDarts += 1;
+      if(visitDarts >= dartsPerVisit){
+        visitDarts = 0;
+        current = (t.playerIndex + 1) % players.length;
+      }
+    }
+  }
+  if(pendingNewLeg){
+    starter = (starter + 1) % players.length;
+    current = starter; visitDarts = 0;
+    resetLeg();
+    if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
+  }
+  return { players, current, starter, setNo, legNo, visitDarts };
+}
+
 // Bob's 27 (solo — docs/archive/practice-ladders-roadmap.md Part A) — one
 // visit per round, round derived purely from replay position (the 1st turn is
 // round 1/D1, the 2nd is round 2/D2, ...), no starter rotation (always the one
@@ -2487,7 +2546,7 @@ if (typeof module !== 'undefined' && module.exports) {
     isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved, cricketStoneColdAchieved,
     evaluateVisitBobs27, isBobs27FullHouse, isBobs27FullAnderson,
     rebuildX01State, rebuildCricketState, rebuildBaseballState,
-    rebuildAroundTheClockState, rebuildAroundTheWorldState, rebuildBobs27State,
+    rebuildAroundTheClockState, rebuildAroundTheClockRaceState, rebuildAroundTheWorldState, rebuildBobs27State,
     rebuildCheckoutLadderState,
     GAUNTLET_STATION_ORDER, evaluateGauntletStation, gauntletTotalScars, gauntletResultTier,
     rebuildGauntletState,

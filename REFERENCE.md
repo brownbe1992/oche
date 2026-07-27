@@ -897,6 +897,39 @@ target set is **20 numbers only, no bull** — matching the existing passive
 deliberate 2026-07 decision that overrides this doc's own earlier draft
 wording of "+bull." The pure per-dart rule lives in `frontend/scoring.js`:
 
+**The head-to-head race** (2026-07, `docs/game-modes-roadmap.md` "Around the
+Clock — H2H variant"). `around_the_clock` is a **dual** type: neither
+`soloOnly` nor `h2hOnly`, reached the same way X01 and Cricket are
+(`setMode('practice'|'h2h')` + `setGameType()`, which is why it is deliberately
+absent from `drillGameTypes`/`drillModes` — either list would reset
+`setup.gameType` back to `x01` the moment `setMode('practice')` ran). With two
+or more players the rules are unchanged (20 numbers, any order, singles only,
+no bull) and only the structure differs:
+
+- **Turn order**: `ATC_DARTS_PER_VISIT = 3` darts, then
+  `advanceToNextActivePlayer()`. Solo executes the identical line — with one
+  seat the walk returns to it — so there is no solo-only branch.
+- **Winning**: the first player to clear all twenty wins the **leg**
+  (`onLegWonAroundTheClock()` → the shared `advanceLegSetGame()`), so real
+  best-of-N legs and sets apply. A **solo** clock is unchanged and still ends
+  the whole game on completion. `startNextLeg()` clears `roundOver`,
+  `roundEndReason`, `atcLastDart` and `atcVisitDarts` for this type —
+  `roundOver` gates every further dart, so a leg starting with it still true
+  would be a leg nobody could throw in.
+- **Scoring screen**: one `.pscore` row per player, each with its **own**
+  outstanding-numbers grid (hosted on `.atc-live-progress`, a class rather than
+  an id precisely because a race renders one per player).
+- **`/display`**: solo keeps the Ring stage; a race gets lanes.
+  `renderers.around_the_clock.stage()` returns `''` above one player and
+  `renderScoreboard()` falls through to `lane()` — twenty cells, cleared or
+  owed, per racer. See §7 for the stage/lane contract this established.
+- **Stats**: a race is an ordinary completed game — it counts on the
+  all-game-types win leaderboard, on its own Most Race Wins board, and (at
+  exactly two players) in Household Ratings. It never counts toward the two
+  **drill** boards, which are practice-scoped: see §3.
+
+The pure per-dart rule lives in `frontend/scoring.js`:
+
 ```js
 function evaluateDartAroundTheClock(dart, hitSet){
   const isSingleTarget = dart.sector >= 1 && dart.sector <= 20 && dart.mult === 1;
@@ -2038,8 +2071,9 @@ surface, not something a floor should hide behind "not enough games played."
 
 ### Guided Around the Clock / Around the World stats (`GAME_TYPES.around_the_clock.statDefs` / `GAME_TYPES.around_the_world.statDefs`)
 
-Two new, deliberately minimal vocabularies — neither mode has a win condition,
-so there's no "games played"/"win rate" concept. Every query is scoped via
+Two deliberately minimal vocabularies. Neither mode's **drill** form has a win
+condition, so neither has a drill "win rate" — Around the Clock's head-to-head
+race does, and it is kept on a separate board (below) rather than folded in. Every query is scoped via
 `_scope({mode, gameType:'around_the_clock'})` or `_scope({mode,
 gameType:'around_the_world'})`.
 
@@ -2056,6 +2090,19 @@ abandoned rounds, `COUNT(DISTINCT game_id||'-'||leg_no)`) and
 `completionRate` (`completions / sessionsPlayed * 100`) — both plain
 stat-bubble fields, not chart-linked (no matching `getMetricHistory()` case).
 All return `null`/`0` (not `NaN`) when no rounds have been recorded yet.
+
+**Around the Clock Home leaderboards.** `getAroundTheClockFastestLeaderboard()`
+and `getAroundTheClockCompletionsLeaderboard()` are **drill** boards and pass
+`mode: 'practice'` explicitly. They were originally written with no mode filter,
+on the reasoning that this type was "always practice=1 by construction" — the
+head-to-head race made that false, and without the scope a race's clock would
+rank as a solo run against the clock, which is a different feat (you clear
+twenty numbers while somebody else is also throwing, so the darts you took says
+as much about them as about you). The race's own board is
+`getAroundTheClockWinLeaderboard()` — `_winLeaderboard('around_the_clock')`,
+the eighth caller of that shared win/loss body — served at
+`GET /api/stats/around-the-clock-wins` and rendered on the Home page's **H2H**
+tab, while the two drill boards stay on the **Practice** tab.
 
 **Around the Clock Personal Bests** (`getAroundTheClockPersonalBests(name,
 mode)`) — a single field, `bestCompletionDarts`: the fewest darts a
@@ -2986,10 +3033,18 @@ darts in hand at 8vmin, what they are worth, and what is needed. The old
 cards that already printed them — is absorbed into the top bar as the match
 score alone; the old `.co-strip` is absorbed into the strip's third pane.
 
-**Every game type declares exactly one of two renderers**, dispatched by
-`render()` in this order: `lane() > stage()`, with `legSummary` winning over
-both. There is no third branch — the fourteen `card()`/`scorecard()` renderers
-they replaced were deleted once unreachable.
+**Every game type declares one of two renderers**, dispatched by `render()` in
+this order: `stage() > lane()`, with `legSummary` winning over both. There is no
+third branch — the fourteen `card()`/`scorecard()` renderers they replaced were
+deleted once unreachable.
+
+A mode **may declare both** and let `stage()` return `''` to fall through to
+`lane()`. `renderScoreboard()` therefore calls `stage()` **once**, up front, and
+tests its result rather than testing for the method — which is what makes "no
+stage for this state" expressible at all. Around the Clock is the case that
+needs it: its dial is the whole picture for one player, and steps aside the
+moment two of them are racing (two dials side by side would each be under half
+the size that made the dial worth choosing, and three or four stop fitting).
 
 - **`lane(p, i, s, L)`** — a full-width row per player. Stats run *across* the
   width (the resource a 16:9 screen has most of, which the card grid spent none
@@ -3004,7 +3059,8 @@ they replaced were deleted once unreachable.
 - **`stage(s, L)`** — the mode takes the whole area because the board *is* the
   content. Around the Clock and Around the World use **direction C, "The Ring"**
   (the owner's separate pick for the two guided drills): a board-shaped dial
-  centre stage with the figures flanking it. `buildWorldRing()` splits each
+  centre stage with the figures flanking it — for Around the Clock, in its solo
+  form only. `buildWorldRing()` splits each
   wedge into the three outcomes that number owes, reading outward as a real
   board does, so a part-finished number reads at a glance — which a 63-cell grid
   never did across a room. Just Chuckin' It joins them: with no score, no target

@@ -1820,7 +1820,7 @@ const renderers = {
   // generic s.players.map(renderer.card) path, same as Doubles Practice/Chuckin.
   around_the_clock: {
     strip(s, L){
-      const p = s.players[0] || {};
+      const p = s.players[s.currentIndex] || s.players[0] || {};
       const hit = Array.isArray(p.hitNumbers) ? p.hitNumbers.map(Number) : [];
       const left = [...Array(20)].map((_,k)=>k+1).filter(n => !hit.includes(n));
       return singleDartStrip((s.modeState||{}).atcLastDart,
@@ -1832,7 +1832,13 @@ const renderers = {
        stage. The old card had this board already and floated it in ~60% empty
        space with a lone dart chip; here it is the subject, with the run's own
        figures either side of it. */
+    /* The race (docs/game-modes-roadmap.md "Around the Clock — H2H variant")
+       gets lanes instead: two dials side by side would each be under half the
+       size that made the dial worth choosing, and at three or four they stop
+       fitting at all. Returning '' here is how a mode says "not this state" —
+       renderScoreboard() then falls through to lane() below. */
     stage(s, L){
+      if((s.players || []).length > 1) return '';
       const p = s.players[0] || {};
       const hit = Array.isArray(p.hitNumbers) ? p.hitNumbers.map(Number) : [];
       const darts = num(p.roundDarts);
@@ -1857,6 +1863,26 @@ const renderers = {
         right: true, name: 'Still to hit',
         chalk: left.length ? left.join(' · ') : '<em>every number hit</em>',
         stats: [{ v: left.length, k: left.length === 1 ? 'number left' : 'numbers left' }],
+      });
+    },
+    /* One lane per racer. The cells ARE the race: twenty numbers, each either
+       cleared by this player or still owed, so a glance across two lanes reads
+       who is ahead and — more usefully across a room — on what. The big numeral
+       is the count rather than the darts, because the count is what wins. */
+    lane(p, i, s, L){
+      const hit = Array.isArray(p.hitNumbers) ? p.hitNumbers.map(Number) : [];
+      const darts = num(p.roundDarts);
+      const left = 20 - hit.length;
+      return buildModeLane(p, i, s, L, {
+        big: String(hit.length), bigUnit: '/ 20',
+        sub: `${darts} dart${darts === 1 ? '' : 's'} · ` +
+             (left ? `${left} number${left === 1 ? '' : 's'} left` : 'clock clear'),
+        cells: Array.from({ length: 20 }, (_, k) => {
+          const n = k + 1;
+          return hit.includes(n)
+            ? { label: String(n), glyph: '✓', state: 'ok' }
+            : pendingCell(String(n));
+        }),
       });
     },
     // CLOCK COMPLETE — the live-scoreboard half of the "every completed game
@@ -2448,9 +2474,16 @@ function render(s){
     lastStandingKey = '';
   }
 
-  // Every game type declares exactly one of lane() or stage(). The old card()/
-  // scorecard() renderers they replaced are gone, so there is no third branch.
-  const hasStage = typeof renderer.stage === 'function' && !s.legSummary;
+  // Every game type declares lane() or stage(). The old card()/scorecard()
+  // renderers they replaced are gone, so there is no third branch.
+  //
+  // A mode MAY declare both and let stage() return '' to fall through — Around
+  // the Clock does, because its dial is the whole picture for one player and
+  // stops fitting the moment there are two of them racing. Calling stage()
+  // once here (rather than testing a flag and calling it again below) is what
+  // makes "no stage for this state" expressible at all.
+  const stageHtml = (typeof renderer.stage === 'function' && !s.legSummary) ? renderer.stage(s, L) : '';
+  const hasStage = !!stageHtml;
   const hasLane  = typeof renderer.lane  === 'function' && !s.legSummary;
 
   if(s.legSummary){
@@ -2462,7 +2495,7 @@ function render(s){
     // a picture of the board.
     grid.className = 'stage';
     grid.style.gridTemplateColumns = '';
-    grid.innerHTML = renderer.stage(s, L);
+    grid.innerHTML = stageHtml;
   } else if(hasLane){
     grid.className = 'lanes';
     grid.style.gridTemplateColumns = '';

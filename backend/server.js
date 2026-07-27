@@ -810,6 +810,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/killer-wins' && m === 'GET') return send(res, 200, db.getKillerWinLeaderboard());
     if (p === '/api/stats/around-the-clock-fastest' && m === 'GET') return send(res, 200, db.getAroundTheClockFastestLeaderboard());
     if (p === '/api/stats/around-the-clock-completions' && m === 'GET') return send(res, 200, db.getAroundTheClockCompletionsLeaderboard());
+    if (p === '/api/stats/around-the-clock-wins' && m === 'GET') return send(res, 200, db.getAroundTheClockWinLeaderboard());
     if (p === '/api/stats/around-the-world-progress' && m === 'GET') return send(res, 200, db.getAroundTheWorldLeaderboard());
     if (p === '/api/stats/big-fish'     && m === 'GET') return send(res, 200, db.getBigFishStats(url.searchParams.get('mode')));
     if (p === '/api/stats/nine-darters' && m === 'GET') return send(res, 200, db.getNineDarterStats(url.searchParams.get('mode')));

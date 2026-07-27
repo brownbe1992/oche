@@ -1029,72 +1029,87 @@ passive badges are unchanged and keep firing exactly as before, from any mode.
   per-dart-snapshot `badgeReverts`/`voided` undo-revocation mechanism every
   other moment-style badge uses, so undoing the completing dart un-earns it.
 
-### Around the Clock — H2H variant (proposed, not started)
+### Around the Clock — H2H variant (**done, 2026-07**)
 
 Not the same proposal as the "Round the Clock" backlog bullet above (§Other
 known variants) — that one additionally changes the *rule* (numbers hit
-strictly in order, 1 through 20, then bull). This item leaves today's built
+strictly in order, 1 through 20, then bull). This item left today's built
 drill's rules completely alone (20 numbers, any order, singles only, no bull —
-`evaluateDartAroundTheClock()`, `frontend/scoring.js:111-116`) and only adds a
-second player racing the same board: whoever completes their own 20-number set
-first wins the leg. If "in order + bull" is ever wanted too, that's still a
-separate, later decision — this item doesn't force it.
+`evaluateDartAroundTheClock()`, `frontend/scoring.js`) and only added other
+players racing the same board: **three darts each, turn about, and whoever
+completes their own 20-number set first takes the leg.** If "in order + bull"
+is ever wanted too, that's still a separate, later decision — this item didn't
+force it.
 
-**Why it isn't H2H today**: `GAME_TYPES.around_the_clock` declares `soloOnly:
-true` (`frontend/index.html:12724`), and every function in the mode —
-`throwDartAroundTheClock()`, `renderGameAroundTheClock()`,
-`newMatchPlayerAroundTheClock()` — reads `game.players[0]` directly. There is
-no `game.current`/turn-rotation concept in this mode at all, unlike every
-multiplayer type (X01/Cricket/…) or Killer.
+**As built.**
 
-**Closest precedent**: Killer (`docs/open-roadmap-items.md`, "H2H-only"
-counterpart to `soloOnly`) is the most recent mode built genuinely H2H-first —
-`h2hOnly: true`, per-dart cross-player evaluation (`evaluateDartKiller()`), a
-real `game.current` turn-rotation index, and best-of-N legs/sets via the
-shared `advanceLegSetGame()` helper.
+- `around_the_clock` is now a **dual** type — neither `soloOnly` nor `h2hOnly`,
+  the same shape X01 and Cricket have. The solo drill is untouched and still
+  ends the whole game the moment the clock completes ("one clock = one game");
+  a race ends the **leg**, and best-of-N legs and sets work through the shared
+  `advanceLegSetGame()` every other head-to-head mode already routes through.
+  That also means the wizard reaches it as `setMode('practice'|'h2h')` +
+  `setGameType()` rather than `setMode('around_the_clock')`, so it had to come
+  out of `drillGameTypes`/`drillModes` — left in either list, `setup.gameType`
+  would have been reset to `x01` the instant `setMode('practice')` ran, silently
+  starting an X01 game from the Around the Clock ledger row.
+- **Turn structure**: `ATC_DARTS_PER_VISIT = 3`, then
+  `advanceToNextActivePlayer()`. Solo runs the identical line — with one seat
+  the walk returns to it, so the drill's uninterrupted per-dart stream is
+  unchanged and there is no solo-only branch to keep in step.
+- **Win condition**: a race, not an elimination — first to twenty wins the leg.
+  None of Killer's lives/elimination machinery was needed, exactly as the
+  original sketch predicted.
+- **Scoring screen**: one `.pscore` row per player, each with its own
+  outstanding-numbers grid, because "which numbers are left" is the whole state
+  of the game and showing only the current thrower's would hide the race. The
+  grid host moved from `id="atc-live-progress"` to a class — a race renders one
+  per player, and duplicate ids would have broken both `getElementById()` and
+  the landscape rail's `:has()` rule.
+- **Live scoreboard**: the Ring stage stays for solo and steps aside for a
+  race. `renderers.around_the_clock.stage()` returns `''` when there is more
+  than one player, and `renderScoreboard()` falls through to a new `lane()` —
+  twenty cells per player, cleared or owed. Two dials side by side would each
+  be under half the size that made the dial worth choosing, and at three or
+  four they stop fitting at all. Expressing "not this state" at all required
+  calling `stage()` once and testing its result, rather than testing for the
+  method and calling it later; that is now the documented contract.
+- **Stats**: the two drill leaderboards (Fastest Completion, Most Completions)
+  are now explicitly `mode: 'practice'`-scoped server-side. They were written
+  when this mode was "always practice=1 by construction," which the race made
+  false — without the scope a race's clock would have ranked as a solo run
+  against the clock, which is a different feat. The race gets its own board,
+  `getAroundTheClockWinLeaderboard()` (`_winLeaderboard('around_the_clock')`,
+  the eighth caller of that shared body) on the Home page's H2H tab. Per-player
+  stat bubbles and Personal Bests already took a `mode` param and self-scope.
+- **Resume**: `rebuildAroundTheClockRaceState()` (`frontend/scoring.js`) —
+  the one genuinely new calculation, and the reason it exists rather than
+  calling the solo rebuild once per player is that the leg boundary resets
+  *every* clock, so who won which leg has to be known while walking the turns.
+  Covered by `backend/test/around-the-clock-race.test.js` (12 cases), including
+  a parity case asserting a one-player race and the solo drill read the same
+  rules.
+- **Payload fix found on the way**: `playerSnapshotAroundTheClock()` never sent
+  `roundTrebles`/`roundDoubles`/`roundMisses`, which the Ring stage has read
+  since the 2026-07 redesign — every board showed "0 trebles, 0 misses" for a
+  run that had plenty of both. Silent zeros, invisible to every test, visible
+  the moment somebody looks at the screen.
+- **Accessibility**: the race's handover is appended to the same announcement
+  as the dart that ended the visit, never spoken as a second `announce()` — one
+  live region cleared and re-set on one frame means the second call replaces
+  the first rather than queueing behind it.
 
-**What would need to change**, based on that precedent:
-- Drop `soloOnly: true`; decide whether it becomes `h2hOnly` (competitive-only,
-  like Killer) or stays optionally-solo (practice drill AND a real H2H match,
-  like X01) — leaning toward the latter, since the existing drill is worth
-  keeping exactly as-is for solo practice.
-- Generalize the per-dart/render functions off the hardcoded `game.players[0]`
-  to `game.players[game.current]`, adding real turn advancement (currently
-  absent — every dart in today's drill is thrown by the same fixed player).
-- Decide the win condition: first player to complete all 20 wins the leg
-  outright (a race, no elimination), which is the simplest reading of "H2H"
-  here and doesn't require Killer's elimination/lives machinery at all.
-- The data model mostly already generalizes for free: `playerSnapshotAroundTheClock()`
-  is already per-player and called via `.map()` across `game.players`
-  (`frontend/index.html:15095-15100`), and `hitSet` (a `Set` per player) has no
-  single-player assumption baked in — the gap is purely in the throw/render
-  dispatch, not the snapshot/stats shape.
-- `getAroundTheClockStatBubbles()`/Personal Bests and the two Home page
-  leaderboards (Fastest Completion, Most Completions) are today computed
-  practice-drill-only; decide whether an H2H race's completion also counts
-  toward them, or gets its own win/loss tracking the way Killer's `kills`/
-  `eliminated` fields do.
-- The live scoreboard's dartboard visualization **now exists and is
-  single-player by construction** (2026-07 live-scoreboard redesign, direction
-  C "The Ring" — the owner's explicit pick for both guided drills):
-  `renderers.around_the_clock.stage(s, L)` in `display.html` renders one dial
-  from `s.players[0]`, flanked by that player's figures, and takes the whole
-  screen area rather than a lane. So the "design it for 2+ from the start"
-  advice is overtaken — the retrofit this bullet hoped to avoid is now the
-  actual job, and it is a small, well-bounded one:
+**Open questions, resolved.**
 
-  - `stage()` reads `s.players[0]` directly, exactly like the controller-side
-    functions this section already lists. It needs the same generalization.
-  - The layout question is now concrete rather than open: the stage is a
-    three-column flex (figures · board · figures), so **a board per player**
-    fits the existing shape naturally for two players, while overlaid marker
-    styles on one board would need a new treatment. Two players is the case
-    worth designing for; at three-plus, a board each stops fitting and the
-    mode probably wants lanes with a compact progress rail instead — which
-    `laneHtml()`/`laneCellsHtml()` already provide.
-  - Whatever is chosen, the per-player state is already in the payload
-    (`playerSnapshotAroundTheClock()` sends `hitNumbers` per player, not a
-    game-level set), so no payload change is needed for the H2H case.
+- *soloOnly-and-also-H2H vs. h2hOnly*: dual. The existing drill is worth
+  keeping exactly as-is for solo practice, which was the original leaning.
+- *Does an H2H race count toward the drill stats/leaderboards*: no — the drill
+  boards are practice-scoped, and the race has its own win-rate board. A race
+  is still an ordinary completed game elsewhere: it counts in the all-game-types
+  win leaderboard and, at exactly two players, in Household Ratings, the same
+  as Cricket or Baseball.
+- *Layout for 2 vs. 3+*: one shape for all of them (lanes), for the reason
+  above.
 
 ## New Game / Scoring screen changes
 
