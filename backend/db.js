@@ -29,7 +29,7 @@ const { checkoutHint, dartLabel,
   GAUNTLET_STATION_ORDER, gauntletTotalScars, gauntletResultTier, rebuildGauntletState,
   KILLER_DEFAULT_LIVES, assignKillerNumbers, evaluateDartKiller, rebuildKillerState,
   computeFatigueSplit, classifyMarathonTrend,
-  shanghaiRoundTarget, evaluateVisitShanghai, rebuildShanghaiState,
+  shanghaiRoundTarget, evaluateVisitShanghai, rebuildShanghaiState, isShanghaiWin,
   HALVE_IT_DEFAULT_TARGETS, halveItRoundTarget, halveItDartValue, rebuildHalveItState,
   deadManWalkingParForTarget, pickDeadManWalkingTargets,
   normaliseDeadManWalkingDifficulty, DEAD_MAN_WALKING_DEFAULT_DIFFICULTY,
@@ -37,7 +37,7 @@ const { checkoutHint, dartLabel,
   makeDartCore, PRESSURE_ROUNDS, generatePressureCard, computePressureRoundResult,
   pressureMissPenaltyForCard, pressureComposureRating, rebuildPressureChamberState,
   doubleElimStructure,
-  resolveBoardColors, allCheckoutRoutes } = require('../frontend/scoring.js');
+  resolveBoardColors, allCheckoutRoutes, CRICKET_STANDARD_NUMBERS } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -1012,6 +1012,40 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   if (resolvedGameType === 'cricket' && config && config.variant != null && !['standard', 'cutthroat'].includes(config.variant)) {
     throw httpError(400, "variant must be 'standard' or 'cutthroat'");
   }
+  // config.numbers is what every Cricket stat derives marks from (CRICKET_MARK_CASE
+  // — REFERENCE.md calls it "the source of truth for mark derivation"), and until
+  // 2026-07 it was the one Cricket config field stored verbatim from the client
+  // while `variant` beside it was checked. The "exactly 7 targets" rule lived only
+  // in the browser, so a crafted create could open a game on all 21 numbers and
+  // score MPR 9 with a single T3/T11/T5 visit — permanently topping the MPR and
+  // 9-Mark boards — or on `[20]` alone, which drops
+  // getCricketPerfectLegStats()'s config-derived theoretical minimum to ONE dart
+  // and makes a lone T20 a Perfect Leg. Same "validate what reaches this function
+  // from an untrusted client" standard as variant above and killer.lives below.
+  if (resolvedGameType === 'cricket' && config && config.numbers != null) {
+    const nums = config.numbers;
+    // Count taken from the classic set rather than a literal 7 — the client's own
+    // rule is "same count as classic", so there is one place that decides it.
+    const want = CRICKET_STANDARD_NUMBERS.length;
+    if (!Array.isArray(nums) || nums.length !== want) {
+      throw httpError(400, `numbers must be an array of exactly ${want} targets`);
+    }
+    for (const n of nums) {
+      if (!Number.isInteger(n) || !(n === 25 || (n >= 1 && n <= 20))) {
+        throw httpError(400, 'each cricket number must be 1-20 or 25 (bull)');
+      }
+    }
+    if (new Set(nums).size !== nums.length) throw httpError(400, 'cricket numbers must be distinct');
+  }
+  // Shanghai's round count drives shanghaiRoundTarget(), which the write-time guard
+  // and the saved-game replay both derive each round's target from. The UI offers
+  // only 7 or 20; the server accepted anything, and `rounds: 9999` produces targets
+  // above 20 that no dart can ever match — every visit forced to scored:0, an
+  // unwinnable game, and a player's PPR dragged down by rounds nobody could score.
+  if (resolvedGameType === 'shanghai' && config && config.rounds != null) {
+    const r = Number(config.rounds);
+    if (!Number.isInteger(r) || r < 1 || r > 20) throw httpError(400, 'rounds must be an integer between 1 and 20');
+  }
   // Halve-It custom target editor (docs/archive/halve-it-roadmap.md "Custom target editor"):
   // config.targets rides in from the untrusted client just like cricket's variant/
   // numbers above, and both the write-time consistency guard (addTurn) and the
@@ -1496,6 +1530,16 @@ function addTurn(gameId, t, opts = {}) {
     const expectedPoints = darts.reduce((sum, d) => sum + (d.sector === round ? d.multiplier * round : 0), 0);
     if (scored !== expectedPoints) {
       throw httpError(400, "scored does not match this Shanghai visit's points on the round's own number");
+    }
+    // legWon is derivable here too, and was the one field this branch checked
+    // nothing about — while its sibling pressure_chamber branch below already
+    // validates its own. turns.leg_won drives the Shanghai! leaderboard, the 🀄
+    // badge and getShanghaiWonLegs()'s primary derivation, so an unchecked
+    // client could claim an instant Shanghai from three darts that hit nothing:
+    // a single, a double and a treble of the round's own number is the whole
+    // condition (isShanghaiWin()), and it is right here in scope.
+    if (!!t.legWon !== isShanghaiWin(darts.map(d => ({ sector: d.sector, mult: d.multiplier })), round)) {
+      throw httpError(400, "legWon must match whether this visit is a real Shanghai (single, double and treble of the round's number)");
     }
   } else if (gameTypeRow && gameTypeRow.game_type === 'halve_it') {
     // docs/archive/halve-it-roadmap.md: same SEC-25 shape as Baseball/Shanghai's own
@@ -4081,7 +4125,10 @@ function getShanghaiWonLegs(playerId, mode) {
       (SELECT COUNT(d2.id) FROM turns t2 JOIN darts d2 ON d2.turn_id=t2.id WHERE t2.game_id=t.game_id AND t2.set_no=t.set_no AND t2.leg_no=t.leg_no AND t2.player_id=t.player_id) AS darts,
       t.id AS lastTurnId
     FROM turns t JOIN games g ON g.id=t.game_id
-    WHERE t.leg_won=1 AND t.player_id=? ${scope}
+    -- completed_at IS NOT NULL: the finalRoundWins CTE below already requires it,
+    -- and without it here one abandoned match counted its instant-Shanghai leg as
+    -- won while its points-decided legs did not — the same match, two rules.
+    WHERE t.leg_won=1 AND t.player_id=? AND g.completed_at IS NOT NULL ${scope}
   `).all(playerId);
 
   const finalRoundWins = db.prepare(`
@@ -5351,13 +5398,29 @@ function getCheckoutLadderPersonalBests(playerName, mode) {
 // reached (a peak, no minimum-attempts floor — same reasoning every other
 // single-best-run board in this app uses).
 function getCheckoutLadderLeaderboard() {
+  // Grouped per RUN first, then reduced in JS — the same shape every sibling board
+  // uses (getBobs27Leaderboard, getCheckoutBlitzLeaderboard, getGauntletLeaderboard).
+  // Two MAX()s over one player-wide group would pair the peak rung with the
+  // player's most RECENT ladder turn, so a rung reached in January was dated to a
+  // 121 run in July. `achievedAt` has to come from the run that set the record.
   const rows = db.prepare(`
-    SELECT p.name AS name, MAX(t.target_score) AS bestTarget, MAX(t.created_at) AS achievedAt
+    SELECT p.name AS name, t.game_id AS gameId,
+           MAX(t.target_score) AS bestTarget, MAX(t.created_at) AS achievedAt
     FROM turns t JOIN games g ON g.id=t.game_id JOIN players p ON p.id=t.player_id
     WHERE g.game_type='checkout_ladder'
-    GROUP BY t.player_id
+    GROUP BY t.player_id, t.game_id
   `).all();
-  return rows.sort((a, b) => b.bestTarget - a.bestTarget);
+  const best = new Map();
+  for (const r of rows) {
+    const cur = best.get(r.name);
+    // Ties break to the EARLIER run: the record was set the first time it was
+    // reached, not the last time it was matched.
+    if (!cur || r.bestTarget > cur.bestTarget
+        || (r.bestTarget === cur.bestTarget && r.achievedAt < cur.achievedAt)) {
+      best.set(r.name, { name: r.name, bestTarget: r.bestTarget, achievedAt: r.achievedAt });
+    }
+  }
+  return Array.from(best.values()).sort((a, b) => b.bestTarget - a.bestTarget);
 }
 
 /* ---------- The Gauntlet (docs/archive/gauntlet-roadmap.md) ----------

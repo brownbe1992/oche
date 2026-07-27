@@ -235,7 +235,14 @@ function dartLabel(sector, mult){
 // outer app state and deliberately NOT part of this pure module). index.html's
 // makeDart() wraps this and adds thrownAt itself.
 function makeDartCore(sector, mult){
-  const m = (sector === 25 && mult === 3) ? 1 : mult;  // guard: no treble bull
+  // A miss has no ring, so an armed Double/Treble must not survive onto it.
+  // Around the World keys its 63 outcomes on `sector:mult`, so an unnormalised
+  // {0,2}/{0,3} minted a 64th and 65th key — letting a session "complete the
+  // world" having actually hit 61 of the real outcomes, and inflating the
+  // lifetime badge the same way. (The visit-based modes never saw this:
+  // pushThrownDarts() reads sector 0 with a multiplier as a "log N misses"
+  // shortcut before it ever reaches here.)
+  const m = (sector === 0 || (sector === 25 && mult === 3)) ? 1 : mult;  // no treble bull; no ringed miss
   return {
     sector, mult:m,
     value: dartValue(sector, m),
@@ -290,8 +297,13 @@ function evaluateVisit(player, darts, game){
      own text only calls out "a single" explicitly, but a treble on the target
      number is the identical miss (wrong ring, right number), so it's treated
      the same way for a complete, unambiguous rule — not a new failure mode.
-   - anything else (a miss on an unrelated number, or a genuine total miss) is
-     a no-op: doesn't end the session, doesn't count as a hit. */
+   - anything else ends the round too, with its own reason: a dart on a number
+     that isn't a target at all is "wrong number", and a genuine total miss
+     (sector 0) is "miss". EVERY non-target-double outcome ends the round —
+     this is a survival drill, so there is no such thing as a harmless dart.
+     (This comment previously said these two were a no-op that did not end the
+     session; the code and REFERENCE.md have always agreed with each other, and
+     the comment was the odd one out.) */
 function evaluateDartDoublesPractice(dart, targets){
   if(dart.isDouble){
     if(targets.includes(dart.sector)) return { hit:true, ended:false, reason:null };
@@ -1549,9 +1561,14 @@ function rebuildHalveItState({ names, legsPerSet, targets, turns }){
   // just turns recorded after the resume.
   return _replayVisits({
     names, turns, legsPerSet, roundKey: 'halveItRound',
-    newPlayer: name => ({ name, total:0, roundTotals:{}, legsWon:0, setsWon:0,
+    newPlayer: name => ({ name, total:0, roundTotals:{}, roundHalved:{}, legsWon:0, setsWon:0,
       legDarts:0, setDarts:0, gameDarts:0, everHalved:false, lastVisitHalved:false }),
-    resetLeg: (p, newSet) => { p.total = 0; p.roundTotals = {}; p.everHalved = false;
+    // roundHalved is per-LEG, exactly like roundTotals beside it —
+    // resetPlayerForNextLegHalveIt() clears it in live play. It was missed here
+    // when the replay of that field was added, so a resumed multi-leg game showed
+    // the PREVIOUS leg's halving marks against this leg's totals.
+    resetLeg: (p, newSet) => { p.total = 0; p.roundTotals = {}; p.roundHalved = {};
+      p.everHalved = false;
       p.lastVisitHalved = false; p.legDarts = 0; if(newSet) p.setDarts = 0; },
     context: ({ round }) => ({ halveItRound: round, config:{ targets } }),
     evaluateVisit: evaluateVisitHalveIt,
@@ -2294,9 +2311,15 @@ function rebuildKillerState({ participants, numbers, turns, threshold }){
         affected.lives += ev.delta;
         if(!affected.isKiller && affected.lives >= liveThreshold) affected.isKiller = true;
       } else {
+        // Must match the live engine's rule exactly — this replay backs the
+        // write-time guard AND every Killer stat, so a divergence here would make
+        // the server disagree with the game the players actually saw. See the
+        // longer note at the live site (enterTurn/throwDartKiller, index.html):
+        // the primer says "reduced to 0", and everyone starts at 0.
+        const livesBefore = affected.lives;
         affected.lives = Math.max(0, affected.lives - ev.delta);
         affected.livesLost += ev.delta;
-        if(affected.lives === 0 && !affected.eliminated){
+        if(livesBefore > 0 && affected.lives === 0 && !affected.eliminated){
           affected.eliminated = true;
           if(ev.affectedName !== t.throwerName) thrower.kills += 1;
         }

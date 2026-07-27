@@ -1080,6 +1080,15 @@ function evaluateDartAroundTheClock(dart, hitSet){
   is — `display.html`'s "GAME OVER" banner reads `s.doneHeading || 'GAME
   OVER'` instead of the literal string.
 
+**A miss has no ring** (2026-07 fix). `makeDartCore()` normalises `sector 0` to
+multiplier 1, exactly as it already did for the non-existent treble bull. The 63
+outcomes are keyed `sector:mult` and include exactly ONE miss; an armed
+Double/Treble surviving onto a miss minted `0:2` and `0:3`, a 64th and 65th key
+that counted toward the 63 — so a session could "complete the world" having
+actually hit 61 real outcomes, and the lifetime badge inflated the same way. The
+visit-based modes never saw this: `pushThrownDarts()` reads sector 0 with a
+multiplier as its "log N misses" shortcut before `makeDart()` is ever reached.
+
 **Around the World is one world = one game** (2026-07 redesign, superseding
 this doc's original "progress is lifetime, not reset per session, and the
 session never force-ends" design). The goal is the **session's own** 63
@@ -4710,7 +4719,7 @@ any existing stat query.
 | `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. For `game_type='baseball'` the same caller also rejects a `scored` that doesn't equal this visit's runs — the sum of dart `multiplier`s that hit the inning's target number, where the inning is derived server-side from the player's own prior turn count in the leg (`min(inning, 9)` for extra innings); a Baseball turn must also be neither a bust nor a checkout (`docs/security-audit-roadmap.md` SEC-25). For `game_type='bobs_27'`, `scored` is that round's own *gain only* — never a negative penalty (see §2's "store the gain, derive the penalty"); the same caller derives the round from the player's own prior turn count (capped at 20), rejects a `scored` that doesn't match `hits * round*2` on the submitted darts, rejects `checkout=true` outright, and requires `bust` to match whether replaying every prior round's gain/penalty plus this round's own would drop the running score to 0 or below (`docs/archive/practice-ladders-roadmap.md` Part A). Still deliberately skipped for Cricket (`scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits) and for Doubles Practice / Chuckin / Checkout Trainer / Around the Clock / World (non-arithmetic or non-points `scored`) |
 | `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns). **`checkout` is overloaded, and this matters to every query that reads it**: for `x01`, `checkout_ladder` and `dead_man_walking` it means "checked out, and `scored` is what for" — but The Pressure Chamber and Checkout Trainer reuse it for "this visit was a legal attempt rather than a miss", where `scored` is a CP gain or a flat `0` and no finish happened at all. `docs/bug-roadmap.md` BUG-27 is what happens when a query forgets this. The registry states it explicitly (`checkoutIsAttempt: true` on those two entries) and `CHECKOUT_POINTS` reads it from there |
 | ~~`checkout_points`~~ | *(dropped 2026-07 — `docs/archive/database-normalization-roadmap.md` §3.1, item 62)* | It held a copy of `scored` and nothing else, and is now **derived at read time** by the `CHECKOUT_POINTS` expression in `backend/db.js`: `CASE WHEN t.checkout = 1 AND g.game_type IN (<scoring types>) THEN t.scored END`. Two things make that correct rather than merely convenient. First, a checkout's points are the whole **visit's** score, not the finishing dart's — every evaluator returns `scored: bust ? 0 : pointsThisVisit`, a winning visit is never a bust, and `addTurn()` independently rejects a checkout turn whose `checkoutPoints` differs from its `scored` (SEC-22, and now also the guarantee the derivation rests on). Second, `checkout` is an **overloaded flag**, and this column was silently carrying that: see the row above. The game-type list is derived from `GAME_TYPE_REGISTRY`, not hand-kept — the two modes that overload the flag carry `checkoutIsAttempt: true` on their own entries. Covered by `backend/test/db.checkout-points-derivation.test.js`. The migration is a plain `DROP COLUMN` with no backfill and nothing to restore, since every value it held is still in the row it was copied from |
-| `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged. Checkout Trainer repurposes it as "answered with the objectively fewest darts" (§19) |
+| `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set by Cricket's write path (`enterTurnCricket()`) and — since 2026-07 — by the **Around the Clock race** on the dart that clears the twentieth number (`players.length > 1` only; solo is one clock = one game and has no leg to win). Without it `_h2hWonLegs()`, which matches `checkout=1 OR leg_won=1`, credited every race leg to nobody and each race read "N legs played, 0 legs won" for ever — the race signals completion with `bust`, which is a *completion* marker, not a winner. Originally set only by Cricket — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged. Checkout Trainer repurposes it as "answered with the objectively fewest darts" (§19) |
 | `target_score` | `INTEGER` | Checkout Trainer only (§19): the target offered for that round — unlike X01 there's no persistent "remaining score" state to derive it from afterward. `NULL` for every other game type; `addTurn()` range-checks it to 1–170 |
 | `declared_unsolvable` | `INTEGER NOT NULL DEFAULT 0` | Checkout Trainer trick questions only (§19): `1` marks a round answered by declaring "no possible checkout" instead of tapping out darts — the only turn shape allowed to carry **zero** dart rows (`addTurn()` rejects it outside `checkout_trainer` games, with any darts attached, or with a nonzero `scored`). The verdict still lives on `bust`/`checkout`/`leg_won` (correct call → `checkout=1, leg_won=1`; wrong call → `bust=1`); this flag exists so "a real checkout was solved" queries (Toughest Checkout Solved) can exclude declarations |
 | `affected_player_id` | `INTEGER` | Killer only (§ Killer): which player's life total this dart changed (`NULL` = no effect, thrower's own id = self-effect, another id = an attack). `NULL` for every other game type |
@@ -6120,6 +6129,18 @@ Every dart-count attempt is its own 1-3 dart `turns` row — the same per-dart-
 turn shape Doubles Practice/Just Chuckin' It already use — reusing
 `evaluateVisit()` (`frontend/scoring.js`) completely unmodified: a checkout
 attempt genuinely IS a normal X01 visit starting from `remaining = target`.
+
+**Config validated at creation** (2026-07). `createGame()` rejects a malformed
+`config` rather than storing it verbatim, for every field a stat later trusts:
+Cricket's `numbers` (exactly as many targets as the classic set, each 1-20 or 25,
+all distinct) and Shanghai's `rounds` (an integer 1-20) joined `variant`,
+`halve_it.targets`, `killer.lives` and `pinnedTarget`. Both were previously
+client-enforced only: all 21 Cricket numbers made every dart a mark, so one
+T3/T11/T5 visit scored MPR 9 and a 9-mark round and permanently topped both
+Cricket boards, while `numbers:[20]` dropped `getCricketPerfectLegStats()`'s
+config-derived theoretical minimum to a single dart; `rounds: 9999` produced
+Shanghai targets above 20 that no dart can match, an unwinnable game whose
+zero-point rounds dragged the player's PPR down.
 
 **Schema**: `turns.target_score INTEGER` (nullable) — the target offered for
 that round; only ever populated for this game type, since (unlike X01) there's
@@ -7800,6 +7821,17 @@ an attack on a different opponent on dart 2). It returns `null` for a no-op
 dart, or `{affectedName, delta, isGain, selfKill}` describing exactly whose
 life total changes and by how much; `rebuildKillerState({names, numbers,
 turns, threshold})` replays a whole leg's turns through it to derive
+**Elimination requires having had a life to lose** (2026-07 fix). The primer's
+rule is that a player *reduced to* 0 lives is eliminated, and every player
+*starts* at 0 — so testing `lives === 0` alone conflated the two. The first
+player to reach killer status (one treble of their own number does it) could
+eliminate an opponent who had not yet thrown, ending a two-player leg on dart 2.
+Both the live engine and `rebuildKillerState()` now require `livesBefore > 0`;
+they must agree, since the rebuild backs the write-time guard and every Killer
+stat. Over-kill still eliminates (3 damage against 1 life clamps to 0 and is a
+real reduction), and a self-kill on your own double still eliminates a killer on
+their last life.
+
 lives/`isKiller`/`eliminated`/kills for every player at any point in the
 turn history — shared identically by the write-time consistency guard and
 every stats query.
@@ -7816,9 +7848,12 @@ the one game type in this app that does. `turns.scored` stores the plain
 non-negative magnitude of the change (0-3); direction (gain vs. loss) is
 never stored, only derived by replaying `evaluateDartKiller()` again at read
 time. `checkout`/`bust` are always false (Killer has neither concept).
-`games.config` stores `{lives, numbers: {playerName: 1-20}}` — keyed by
-player **name**, not id, matching every other part of the write path
-(turns, badges, stats) that already keys on name.
+`games.config` stores `{lives, numbers: {<playerId>: 1-20}}` — keyed by player
+**id** since `docs/code-quality-roadmap.md` item 43, with a one-time
+`migrateKillerConfigsToIdKeys()` converting existing rows. It was originally
+name-keyed to match the rest of the write path; a rename then silently orphaned
+a finished match's number assignments, which an id cannot. `_parseKillerConfig()`
+bridges each entry back to the name every replay and stat still works in.
 
 ### Write-time validation (`addTurn()`, `backend/db.js`)
 

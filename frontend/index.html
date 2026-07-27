@@ -17229,7 +17229,12 @@ function enterTurnCheckoutLadder(){
     targetScore: game.checkoutLadderTarget,
     darts: mapDartsForRecord(game.darts) });
 
-  const turnRecord = { player:p.name, scored:ev.scored, bust:ev.bust, checkout:ev.win, darts:game.darts.slice() };
+  // trebleLess/checkoutPoints feed liveLaneStats() -> pracAggregate(); without
+  // them the live board reported 0% trebleless (i.e. "every visit had a treble")
+  // and an empty checkout list for a mode that records real finishes.
+  const turnRecord = { player:p.name, scored:ev.scored, bust:ev.bust, checkout:ev.win,
+    trebleLess:!!ev.trebleLess, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
+    darts:game.darts.slice() };
   game.currentLegTurns.push(turnRecord);
   game.sessionTurns.push(turnRecord);
 
@@ -17664,7 +17669,10 @@ function enterTurnDeadManWalking(){
     targetScore: game.dmwTarget,
     darts: mapDartsForRecord(recordedDarts) });
 
-  const turnRecord = { player:p.name, scored:ev.scored, bust:ev.bust, checkout:ev.win, darts:recordedDarts.slice() };
+  // Same as Checkout Ladder above: both fields feed the live board's own aggregate.
+  const turnRecord = { player:p.name, scored:ev.scored, bust:ev.bust, checkout:ev.win,
+    trebleLess:!!ev.trebleLess, checkoutPoints: ev.win ? ev.pointsThisVisit : null,
+    darts:recordedDarts.slice() };
   game.currentLegTurns.push(turnRecord);
   game.sessionTurns.push(turnRecord);
 
@@ -17960,9 +17968,17 @@ function throwDartKiller(sector, zone, missZone, missDepth, bounced){
       if(!affected.isKiller && affected.lives >= game.killerLives) affected.isKiller = true;
       announce(`${thrower.name} builds toward killer status — ${affected.lives} of ${game.killerLives}.`);
     } else {
+      // docs/game-modes-roadmap.md's Killer primer: "a player REDUCED TO 0 lives is
+      // eliminated", and "every player starts at 0". Checking `lives === 0` alone
+      // conflates the two — a player still on their starting 0 was never reduced,
+      // and the first player to reach killer status (one treble on their own
+      // number does it) could eliminate them with a single dart before they had
+      // thrown at all, winning a two-player leg on dart 2. Elimination now requires
+      // that the player HAD a life to lose.
+      const livesBefore = affected.lives;
       affected.lives = Math.max(0, affected.lives - delta);
       affected.gameLivesLost += delta;
-      if(affected.lives === 0 && !affected.eliminated){
+      if(livesBefore > 0 && affected.lives === 0 && !affected.eliminated){
         affected.eliminated = true;
         if(ev.affectedName !== thrower.name){
           thrower.kills += 1;
@@ -19495,7 +19511,16 @@ function throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced){
   else if(dart.isDouble) p.roundDoubles += 1;
   if(ev.isNewHit) p.hitSet.add(dart.sector);
   recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust: !!ev.completed, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
+    scored:0, bust: !!ev.completed, checkout:false, checkoutPoints:null,
+    // `bust` is this mode's repurposed "this dart completed the clock" marker
+    // (REFERENCE.md's turns table). That is NOT a winner signal, though, and a
+    // RACE has a winner: without leg_won, backend/db.js's _h2hWonLegs() — which
+    // matches on `checkout=1 OR leg_won=1` and gives Around the Clock no bespoke
+    // derivation — credited every race leg to nobody, so a race showed "N legs
+    // played, 0 legs won" for ever. leg_won is the game-type-agnostic "this turn
+    // won the leg" signal and this is exactly what it is for. Solo stays false:
+    // one clock is one game, there is no leg to win.
+    legWon: !!ev.completed && game.players.length > 1 }, dart, zone, missZone, missDepth, bounced);
   // by/hit describe the player who threw it, not whoever is at the oche when
   // this is next read — in a race the turn may have passed in between.
   game.atcLastDart = { label:dart.label, isNewHit:ev.isNewHit, completed:ev.completed,
