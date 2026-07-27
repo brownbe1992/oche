@@ -981,32 +981,94 @@ source level — every type declares all four members, `afterDart` is declared b
 exactly the types sharing `throwDartVisit`, every named function exists, and the
 four old chains are gone rather than merely bypassed.
 
-### Item 65 — Generalize `rebuild*State()`'s shared replay-loop shape (`scoring.js`)
+### Item 65 — Generalize `rebuild*State()`'s shared replay-loop shape (`scoring.js`) ✅ DONE (2026-07)
 
-`rebuildX01State`/`rebuildCricketState`/`rebuildBaseballState`/
-`rebuildShanghaiState`/`rebuildHalveItState`/`rebuildPressureChamberState` each
-reimplement an identical ~15-line control flow (detect a set/leg change,
-rotate starter, reset every player's leg-scoped fields, replay each turn
-through the type's own `evaluateVisit*`, apply the same "pendingNewLeg/
-pendingNewSet trailer" block for a leg won with no next-leg turn recorded
-yet), varying only in three hooks (`newPlayer`, `resetLeg`, `evaluateVisit`).
-Deferred: these are save/resume's core correctness engine, already the site
-of a real historical bug (the starter-rotation n-1 index desync, item 37's
-own note); a shared-loop refactor needs the same full-matrix live
-save/resume verification item 37 did for all 12 savable types before it's
-safe to land.
+`rebuildBaseballState`/`rebuildShanghaiState`/`rebuildHalveItState`/
+`rebuildPressureChamberState` were character-for-character identical apart from
+five hooks; `rebuildCricketState` differed only in how it names a leg win and in
+its practice set-gate. That is ~15 lines of leg/set bookkeeping written out five
+times over save/resume's core correctness engine — and the starter-rotation
+index desync item 37 had to hunt down lived in exactly this shape of code, in
+exactly one of these copies.
 
-### Item 66 — Generalize the 5 remaining `undoLastTurn*` per-type field restores
+All five now run on one `_replayVisits({ newPlayer, resetLeg, context,
+evaluateVisit, applyResult, winnerOf, roundKey, setsGateOpen })`. Net −182/+146
+lines. **X01 deliberately does not use it**: its replay carries bust/checkout
+handling, per-player starting scores, handicaps and a leg-win rule with nothing
+in common with "a fixed sequence of rounds," so folding it in would turn the
+hooks into a configuration language and leave every reader worse off than the
+duplication did.
 
-A follow-on to item 35 (which already consolidated the shared *trailer*):
-`undoLastTurnBaseball`/`undoLastTurnShanghai`/`undoLastTurnHalveIt`/
-`undoLastTurnPressureChamber`/`undoLastTurnBobs27` still each hand-write which
-snapshot fields to copy back onto `p`/`game` before calling `_finishUndo()` —
-since each snapshot's keys already enumerate exactly the fields to restore, a
-generic `Object.assign(p, snap)` (excluding snapshot bookkeeping keys) could
-replace most of these bodies. Deferred: moderate regression risk per mode if
-a bookkeeping key is accidentally copied onto the live player object; needs
-a full undo-after-every-turn-type live check.
+**Verification.** The deferral required "the same full-matrix live save/resume
+verification item 37 did." It got two things, because the pure functions and the
+path around them fail differently:
+
+1. **Direct equivalence against the pre-refactor implementations.** These are
+   pure functions, so both versions can simply be run side by side: 250
+   randomised turn streams per mode (1–4 players, several legs and sets, real
+   mixes of misses/bulls/multipliers), deep-comparing every field.
+   **1750/1750 comparisons identical** — with one intended exception, below.
+   The harness was itself validated by perturbing a single starter rotation in
+   the reference copy, which it caught on 111 of 250 seeds.
+2. **A new verify-ui `resume-fidelity` check**: for all 12 savable types, play
+   real visits, save through the real endpoint, resume through the real
+   `resumeGame()`, and require the resumed position to equal the paused one.
+   That covers the part no unit test reaches.
+
+**One real bug found, and fixed.** The save/resume matrix showed Halve-It
+resuming with its per-round halving marks blank while the round totals beside
+them were correct — the scorecard said a round scored 30 without saying it had
+been halved to get there. Two halves to it: `rebuildHalveItState()` never
+replayed `roundHalved`, and the `halve_it` resume member's hand-listed field
+copy omitted it. It had been recorded in the code as a known cosmetic gap; it is
+now reconstructed. This is the one intended divergence from the reference
+implementation, and it was confirmed to be exactly that — across all 250
+Halve-It seeds, `roundHalved` is the **only** field that differs, and no
+top-level field differs at all.
+
+**One pre-existing gap found and deliberately NOT fixed here.** Bob's 27, 121
+Checkout Ladder, the Gauntlet and Dead Man Walking all lose their per-player
+dart counters on resume (and Bob's 27 its round card), because their own
+bespoke rebuilds — four functions outside this item's five — never replayed
+them. Split out as its own tracker item rather than half-done here. The
+`resume-fidelity` check asserts that gap *precisely* rather than excluding it:
+the difference must be exactly those fields, so a fifth field going wrong, a
+fifth mode joining them, or somebody fixing it without updating the list all
+fail loudly.
+
+### Item 66 — Generalize the 5 remaining `undoLastTurn*` per-type field restores ✅ DONE (2026-07)
+
+`undoLastTurnBaseball`/`Shanghai`/`HalveIt`/`PressureChamber`/`Bobs27` each
+hand-wrote which snapshot fields to copy back onto `p`/`game`. The item's
+suggested shape was a generic `Object.assign(p, snap)`; that would have been
+wrong, because a snapshot was one FLAT object mixing the player's fields, the
+game's and the undo bookkeeping — `Object.assign(p, snap)` copies
+`baseballInning` onto a *player*.
+
+Namespacing them is what makes a generic restore possible at all:
+
+```js
+pushVisitSnapshot(p, ['totalRuns', 'inningRuns', 'legDarts', …], ['baseballInning']);
+…
+restoreVisitSnapshot(snap);   // Object.assign(p, snap.player); Object.assign(game, snap.game)
+```
+
+The field list is now stated **once**, at capture, beside the mutations it
+protects; the restore reads the snapshot's own shape, so there is no second list
+to fall out of step with it. That mattered: the drift this removes had already
+produced a real defect — Halve-It's `roundHalved` was captured by neither side,
+so an undone visit left its "this round was halved" mark behind and painted a
+halving that no longer happened (found and fixed in the wave-1 sweep).
+
+Verified by the verify-ui `turn-loop` check, which was deepened from one visit
+to three so the snapshot STACK is exercised rather than just its top entry, and
+confirmed to fail (`roundHalved: {} -> {1:false,2:true,3:true}`) when a single
+key is dropped from the one remaining list. One thing checked and found NOT to
+be true: the shallow copy on capture is defensive, not load-bearing — all five
+modes currently replace their object fields rather than mutating them in place,
+so an identity copy still passes. It stays because "the snapshot is a copy" is a
+far easier property to keep true than "no commit path anywhere ever mutates a
+snapshotted object in place."
 
 ### Item 67 — Build-once DOM for Cricket/single-target/Pressure-Chamber pads
 

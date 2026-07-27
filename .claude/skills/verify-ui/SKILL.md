@@ -5,7 +5,7 @@ description: Run Oche's browser-driven UI regression checks against a real runni
 
 # Verifying Oche's UI
 
-`backend/test/` (1305 tests, `cd backend && npm test`) covers the maths: stat
+`backend/test/` (1567 tests, `cd backend && npm test`) covers the maths: stat
 formulas, achievement triggers, DB queries, replay logic. It never loads a
 browser, so it cannot see whether a screen still *works* — and several real
 regressions have lived precisely in that blind spot:
@@ -40,7 +40,7 @@ series, on purpose (see Rate limiting below).
 
 ## What it covers
 
-250 assertions across eight checks:
+329 assertions across twelve checks:
 
 | Check | Guards |
 |---|---|
@@ -53,6 +53,7 @@ series, on purpose (see Rate limiting below).
 | `turn-loop` | Every type in `GAME_TYPES` goes throw → commit → undo and comes back to byte-identical state. Deliberately carries no per-mode expected numbers (the rules have unit tests in `backend/test/`); what it pins is that the RIGHT FUNCTION ran, which is the failure mode of registry-dispatched turn handling — a wrong branch there produces a wrong score, not a wrong picture. A mode whose undo is deliberately unreachable past a visit boundary (Killer) is detected and reported rather than skipped silently. |
 | `save-resume` | Pausing a game does not lose the visits just thrown. Throws three visits, calls `DB.saveGame()` and reads the resume payload with zero delay, and requires every turn to be there. The defect it guards is browser request ordering (a save resolving ahead of its still-queued turn writes), which no `backend/test` coverage can see — the backend was correct throughout. |
 | `leg-reset` | A new leg starts from a new leg's state, for every type that reaches one. Fingerprints `game`'s own state at leg 1, dirties it with a real visit, crosses a leg boundary and requires the fingerprint back — generic rather than a per-mode field list, so a mode that adds a game-level counter and forgets to reset it is caught without extending this file. Sweeps only the types that actually call `startNextLeg()`, and requires every type declaring a real `resetLegState` to be among them. |
+| `resume-fidelity` | A saved game comes back as the game that was paused, for every type in `SAVABLE_GAME_TYPES`. Resume is replay, not snapshot — the whole position is reconstructed by re-running the recorded turns through `scoring.js`'s `rebuild*State` functions — so a wrong one yields a completely normal-looking game that simply isn't the one the player paused. Plays a scripted multi-sector run, saves through the real endpoint, resumes through the real `resumeGame()`, and requires an identical fingerprint. The four modes whose bespoke rebuilds never replayed dart counters are asserted *precisely* (exactly those fields drift, nothing more) rather than excluded, so the gap can't silently widen — see `docs/open-roadmap-items.md` item 75. |
 | `live-scoreboard` | The `/display` second screen picks up players, updates on a scored visit, renders an end-of-leg card, and switches renderer for Cricket. |
 | `home-settings` | Home ticker hides with no activity and shows with some; a Settings tile summary tracks a script-driven change. |
 

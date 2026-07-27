@@ -12863,6 +12863,47 @@ function clearTurnSnapshots(){
   game.turnSnapshots = [];
   game.lastTurnSnapshot = null;
 }
+/* One visit snapshot shape for the five round-based modes — Baseball, Shanghai,
+   Halve-It, The Pressure Chamber, Bob's 27 (item 66).
+
+   The old shape was a single flat object mixing the player's fields, the game's
+   and the undo bookkeeping, so each of the five restores had to hand-write
+   which key belonged where. Predictably, they drifted: Halve-It's `roundHalved`
+   was captured by neither side, so an undone visit left its "this round was
+   halved" mark behind and painted a halving that no longer happened.
+
+   Namespacing player state and game state is what makes a generic restore
+   possible at all. A blind `Object.assign(p, snap)` — the shape this item
+   originally proposed — would have copied `baseballInning` onto a PLAYER.
+
+   The field list is now stated exactly ONCE, here at capture, right beside the
+   mutations it protects; restoreVisitSnapshot() reads the snapshot's own shape,
+   so there is no second list to fall out of step with it. */
+function pushVisitSnapshot(p, playerKeys, gameKeys){
+  // Shallow-copied on capture. Every one of these five modes currently REPLACES
+  // its object fields rather than mutating them in place
+  // (`p.roundResults = Object.assign({}, p.roundResults, {…})`), so holding the
+  // live reference would happen to work today — the copy is defensive, and stays
+  // because "the snapshot is a copy" is a much easier property to keep true than
+  // "no commit path anywhere ever mutates a snapshotted object in place".
+  const copy = v => Array.isArray(v) ? v.slice()
+    : (v && typeof v === 'object') ? Object.assign({}, v) : v;
+  const snap = { pi: game.current, player: {}, game: {},
+    ltLen: game.currentLegTurns.length, stLen: game.sessionTurns.length,
+    badgeReverts: [], voided: false };
+  playerKeys.forEach(k => { snap.player[k] = copy(p[k]); });
+  (gameKeys || []).forEach(k => { snap.game[k] = copy(game[k]); });
+  pushTurnSnapshot(snap);
+  return snap;
+}
+function restoreVisitSnapshot(snap){
+  const p = game.players[snap.pi];
+  Object.assign(p, snap.player);
+  Object.assign(game, snap.game);
+  game.currentLegTurns.length = snap.ltLen;
+  game.sessionTurns.length = snap.stLen;
+  return p;
+}
 function _finishUndo(snap, renderFn, opts){
   const { msg = 'Last turn undone.', restoreCurrent = false, resetDarts = false, push = false } = opts || {};
   if(restoreCurrent) game.current = snap.pi;
@@ -13717,12 +13758,9 @@ function enterTurnBaseball(){
 
   // snapshot state before mutations so undoLastTurn() can restore it — same
   // convention as X01/enterTurnCricket's own lastTurnSnapshot.
-  const _snap = { pi:game.current, totalRuns:p.totalRuns, inningRuns:Object.assign({}, p.inningRuns),
-    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
-    baseballInning:game.baseballInning,
-    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
-    badgeReverts:[], voided:false };
-  pushTurnSnapshot(_snap);
+  pushVisitSnapshot(p,
+    ['totalRuns', 'inningRuns', 'legDarts', 'setDarts', 'gameDarts'],
+    ['baseballInning']);
 
   p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns;
   const dartsThrown = game.darts.length;
@@ -13785,14 +13823,7 @@ function enterTurnBaseball(){
 function undoLastTurnBaseball(){
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
-  const p = game.players[snap.pi];
-  p.totalRuns = snap.totalRuns;
-  p.inningRuns = snap.inningRuns;
-  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
-  game.baseballInning = snap.baseballInning;
-  game.currentLegTurns.length = snap.ltLen;
-  game.sessionTurns.length = snap.stLen;
-
+  restoreVisitSnapshot(snap);
   _finishUndo(snap, renderGameBaseball, { restoreCurrent: true, resetDarts: true });
 }
 
@@ -13809,12 +13840,9 @@ function enterTurnShanghai(){
 
   // snapshot state before mutations so undoLastTurn() can restore it — same
   // convention as enterTurnBaseball()'s own lastTurnSnapshot.
-  const _snap = { pi:game.current, totalPoints:p.totalPoints, roundPoints:Object.assign({}, p.roundPoints),
-    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
-    shanghaiRound:game.shanghaiRound,
-    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
-    badgeReverts:[], voided:false };
-  pushTurnSnapshot(_snap);
+  pushVisitSnapshot(p,
+    ['totalPoints', 'roundPoints', 'legDarts', 'setDarts', 'gameDarts'],
+    ['shanghaiRound']);
 
   p.totalPoints = ev.totalPoints; p.roundPoints = ev.roundPoints;
   const dartsThrown = game.darts.length;
@@ -13863,14 +13891,7 @@ function enterTurnShanghai(){
 function undoLastTurnShanghai(){
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
-  const p = game.players[snap.pi];
-  p.totalPoints = snap.totalPoints;
-  p.roundPoints = snap.roundPoints;
-  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
-  game.shanghaiRound = snap.shanghaiRound;
-  game.currentLegTurns.length = snap.ltLen;
-  game.sessionTurns.length = snap.stLen;
-
+  restoreVisitSnapshot(snap);
   _finishUndo(snap, renderGameShanghai, { restoreCurrent: true, resetDarts: true });
 }
 
@@ -13899,21 +13920,20 @@ function enterTurnHalveIt(){
     : `${p.name} scores ${ev.gained} point${ev.gained===1?'':'s'} on ${halveItTargetLabel(ev.target)} — total ${ev.total}.`);
 
   // snapshot state before mutations so undoLastTurn() can restore it.
-  const _snap = { pi:game.current, total:p.total, roundTotals:Object.assign({}, p.roundTotals),
-    roundHalved:Object.assign({}, p.roundHalved),
-    everHalved:p.everHalved, lastVisitHalved:p.lastVisitHalved,
-    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
-    halveItRound:game.halveItRound,
-    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
-    badgeReverts:[], voided:false };
-  pushTurnSnapshot(_snap);
+  pushVisitSnapshot(p,
+    ['total', 'roundTotals', 'roundHalved', 'everHalved', 'lastVisitHalved',
+     'legDarts', 'setDarts', 'gameDarts'],
+    ['halveItRound']);
 
   p.total = ev.total; p.roundTotals = ev.roundTotals;
   // roundHalved (display-only, not part of evaluateVisitHalveIt()'s own pure
   // return): which rounds' cells the live scorecard marks with a ½ icon, per
   // the roadmap doc's own "icon + text, not a red flash alone" accessibility
-  // note. Not reconstructed on resume (a cosmetic gap only — the running
-  // totals themselves resume correctly via rebuildHalveItState()).
+  // note. It IS reconstructed on resume as of 2026-07 (item 65) — it used to be
+  // a documented cosmetic gap, which meant a resumed leg's card showed a round
+  // scoring 30 without showing that it had been halved to get there. Both
+  // halves of the fix matter: rebuildHalveItState() now replays the marks, and
+  // the halve_it `resume` member copies them across.
   p.roundHalved = Object.assign({}, p.roundHalved, { [game.halveItRound]: ev.halved });
   p.lastVisitHalved = ev.halved;
   if(ev.halved) p.everHalved = true;
@@ -13950,18 +13970,7 @@ function enterTurnHalveIt(){
 function undoLastTurnHalveIt(){
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
-  const p = game.players[snap.pi];
-  p.total = snap.total;
-  p.roundTotals = snap.roundTotals;
-  // roundHalved is display-only, but an undone visit that left its "this round
-  // was halved" mark behind still paints a halving that no longer happened.
-  p.roundHalved = snap.roundHalved;
-  p.everHalved = snap.everHalved; p.lastVisitHalved = snap.lastVisitHalved;
-  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
-  game.halveItRound = snap.halveItRound;
-  game.currentLegTurns.length = snap.ltLen;
-  game.sessionTurns.length = snap.stLen;
-
+  restoreVisitSnapshot(snap);
   _finishUndo(snap, renderGameHalveIt, { restoreCurrent: true, resetDarts: true });
 }
 
@@ -14088,15 +14097,12 @@ function enterTurnPressureChamber(){
     : `${p.name} lands a partial hit on ${card.target.label} — plus ${ev.gained} Composure Points, now on ${ev.totalCp}.`);
 
   // snapshot state before mutations so undoLastTurn() can restore it.
-  const _snap = { pi:game.current, totalCp:p.totalCp, misses:p.misses, fullHits:p.fullHits,
-    currentFullHitStreak:p.currentFullHitStreak, bestFullHitStreak:p.bestFullHitStreak,
-    roundResults:Object.assign({}, p.roundResults),
-    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
-    pressureChamberRound:game.pressureChamberRound, pressureChamberDeadline:game.pressureChamberDeadline, _pcTimerRound:game._pcTimerRound,
-    pressureDeclared:game.pressureDeclared,
-    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
-    badgeReverts:[], voided:false };
-  pushTurnSnapshot(_snap);
+  // pressureDeclared is the call this round was made under — restored with the
+  // rest so an undone visit re-opens on the same declaration, not a blank one.
+  pushVisitSnapshot(p,
+    ['totalCp', 'misses', 'fullHits', 'currentFullHitStreak', 'bestFullHitStreak',
+     'roundResults', 'legDarts', 'setDarts', 'gameDarts'],
+    ['pressureChamberRound', 'pressureChamberDeadline', '_pcTimerRound', 'pressureDeclared']);
 
   p.totalCp = ev.totalCp; p.misses = ev.misses; p.fullHits = ev.fullHits;
   p.currentFullHitStreak = ev.currentFullHitStreak; p.bestFullHitStreak = ev.bestFullHitStreak;
@@ -14157,17 +14163,7 @@ function enterTurnPressureChamber(){
 function undoLastTurnPressureChamber(){
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
-  const p = game.players[snap.pi];
-  p.totalCp = snap.totalCp; p.misses = snap.misses; p.fullHits = snap.fullHits;
-  p.currentFullHitStreak = snap.currentFullHitStreak; p.bestFullHitStreak = snap.bestFullHitStreak;
-  p.roundResults = snap.roundResults;
-  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
-  game.pressureChamberRound = snap.pressureChamberRound;
-  game.pressureChamberDeadline = snap.pressureChamberDeadline; game._pcTimerRound = snap._pcTimerRound;
-  game.pressureDeclared = snap.pressureDeclared;  // restore the call this round was made under
-  game.currentLegTurns.length = snap.ltLen;
-  game.sessionTurns.length = snap.stLen;
-
+  restoreVisitSnapshot(snap);
   _finishUndo(snap, renderGamePressureChamber, { restoreCurrent: true, resetDarts: true });
 }
 
@@ -14224,12 +14220,9 @@ function enterTurnBobs27(){
 
   // snapshot state before mutations so undoLastTurn() can restore it — same
   // convention as X01/enterTurnCricket()/enterTurnBaseball()'s own lastTurnSnapshot.
-  const _snap = { pi:game.current, running:p.running, roundResults:Object.assign({}, p.roundResults),
-    legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
-    bobs27Round:game.bobs27Round,
-    ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
-    badgeReverts:[], voided:false };
-  pushTurnSnapshot(_snap);
+  pushVisitSnapshot(p,
+    ['running', 'roundResults', 'legDarts', 'setDarts', 'gameDarts'],
+    ['bobs27Round']);
 
   p.running = ev.running;
   p.roundResults = Object.assign({}, p.roundResults, { [ev.round]: ev.gain });
@@ -14274,14 +14267,10 @@ function enterTurnBobs27(){
 function undoLastTurnBobs27(){
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
-  const p = game.players[snap.pi];
-  p.running = snap.running;
-  p.roundResults = snap.roundResults;
-  p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
-  game.bobs27Round = snap.bobs27Round;
-  game.currentLegTurns.length = snap.ltLen;
-  game.sessionTurns.length = snap.stLen;
-
+  restoreVisitSnapshot(snap);
+  // push:true is redundant (renderGameBobs27() pushes too) but is left exactly
+  // as it was — this item is a refactor, and a second live POST is not the
+  // thing to change while proving the restore behaves identically.
   _finishUndo(snap, renderGameBobs27, { resetDarts: true, push: true });
 }
 /* ----- Bob's 27 leg / set / game progression (dispatched from enterTurnBobs27) -----
@@ -16185,7 +16174,8 @@ const GAME_TYPES = {
       const r = rebuildHalveItState({ names: players.map(p=>p.name), legsPerSet: state.legsPerSet, targets, turns: state.turns });
       players.forEach((p,i) => {
         const rp = r.players[i];
-        Object.assign(p, { total:rp.total, roundTotals:rp.roundTotals, everHalved:rp.everHalved, lastVisitHalved:rp.lastVisitHalved,
+        Object.assign(p, { total:rp.total, roundTotals:rp.roundTotals, roundHalved:rp.roundHalved,
+          everHalved:rp.everHalved, lastVisitHalved:rp.lastVisitHalved,
           legsWon:rp.legsWon, setsWon:rp.setsWon, legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
       });
       return {

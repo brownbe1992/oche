@@ -23,6 +23,7 @@ const CHECKS = {
   'turn-loop': './checks/turn-loop',
   'save-resume': './checks/save-resume',
   'leg-reset': './checks/leg-reset',
+  'resume-fidelity': './checks/resume-fidelity',
   'live-scoreboard': './checks/live-scoreboard',
   'live-shell': './checks/live-shell',
   'home-settings': './checks/home-settings',

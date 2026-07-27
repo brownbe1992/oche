@@ -522,6 +522,21 @@ Cricket achievements (9 Marks, Perfect Leg) plus the two Cricket-native badges
 (Whitewash, Comeback Kid (Cricket)) — no Daily Challenge integration, since
 challenges are X01-only.
 
+**Round-based modes share one capture/restore pair.** Baseball, Shanghai,
+Halve-It, The Pressure Chamber and Bob's 27 all snapshot the same shape — some
+player fields, some game-level round fields, the two turn-array lengths — and
+each used to spell that out twice: once as a hand-written object literal in
+`enterTurn*()`, once as a matching list of assignments in `undoLastTurn*()`. Two
+lists that must agree and are edited apart is exactly how a field gets added to
+the capture and forgotten in the restore, which is what happened to Halve-It's
+`roundHalved`. They now use `pushVisitSnapshot(p, playerKeys, gameKeys)` and
+`restoreVisitSnapshot(snap)` (`frontend/index.html`), which take the field names
+**once** and store them namespaced as `snap.player` / `snap.game`, so restoring
+is `Object.assign` over each namespace rather than a second transcription. Values
+are shallow-copied on capture; the turn-array lengths (`snap.ltLen`/`snap.stLen`)
+and the acting seat (`snap.pi`) are recorded automatically. The round trip is
+enforced live for every registered mode by the verify-ui `turn-loop` check.
+
 ### Cricket rules — `GAME_TYPES.cricket.evaluateVisit(player, darts, game)` (`evaluateVisitCricket()`, `frontend/scoring.js`)
 
 A match's in-play numbers are locked to exactly 7, chosen at New Game time:
@@ -6794,6 +6809,42 @@ the same by-construction guarantee `ctorArg` (item 40) gives the player
 constructor's argument shape. `DB.gameId` is pointed back at the existing game
 id, so subsequent turns append to the same game; the live scoreboard picks the
 match back up on the next `pushLive()`.
+
+**One shared replay loop** — `_replayVisits(spec)` (`frontend/scoring.js`).
+Every `rebuild*State()` function was independently walking the same loop:
+iterate the turns in order, notice when the leg (or set) changes, reset the
+per-leg state, rotate the starter, evaluate each visit through that mode's own
+engine, apply the result to the player, and check for a winner. Five copies of
+that loop is five places for one fix to land in four, which is how a rebuild
+ends up subtly disagreeing with live play. `rebuildBaseballState()`,
+`rebuildShanghaiState()`, `rebuildHalveItState()`,
+`rebuildPressureChamberState()` and `rebuildCricketState()` now supply only the
+parts that genuinely differ, as a spec object:
+
+| Member | What the mode supplies |
+|---|---|
+| `roundKey` | the game-level round counter this mode advances (`baseballInning`, `shanghaiRound`, …), or none |
+| `newPlayer` | a fresh per-player state object |
+| `resetLeg` | what a new leg zeroes on a player |
+| `context` | per-visit context the evaluator needs (targets, round number, config) |
+| `evaluateVisit` | the mode's own scoring engine — unchanged, still the one live play calls |
+| `applyResult` | how the evaluated visit lands on the player |
+| `winnerOf` | when a leg is decided, and by whom |
+| `setsGateOpen` | whether this mode plays sets at all |
+
+`rebuildX01State()` is deliberately **excluded**: its per-player handicap
+start scores, bust handling and checkout detection make it the one rebuild
+whose loop isn't the same loop, and forcing it into the shared spec would put
+the conditionals back inside `_replayVisits()` — which is the thing being
+removed. The refactor is verified by direct equivalence against the
+pre-refactor implementations over randomised turn streams, and end-to-end
+through the real save/resume path by the verify-ui `resume-fidelity` check.
+
+Folding Halve-It onto the shared loop also **fixed** its rebuild: it never
+replayed `p.roundHalved`, so a resumed Halve-It game came back with a correct
+running total but a round card that had forgotten which rounds were halved.
+Its `applyResult` now writes it, and `GAME_TYPES.halve_it.resume()` threads it
+onto the constructed player alongside `roundTotals`.
 
 **What resume deliberately does NOT rebuild** (cosmetic, session-scoped,
 already lost today by a page refresh mid-game): past-leg summary cards

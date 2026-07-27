@@ -1172,56 +1172,123 @@ function rebuildX01State({ names, outModes, startScore, startScores, practice, l
 function rebuildCricketState({ names, config, practice, legsPerSet, turns }){
   const numbers = (config && config.numbers) || CRICKET_STANDARD_NUMBERS;
   const variant = (config && config.variant) === 'cutthroat' ? 'cutthroat' : 'standard';
-  const players = names.map(name => {
-    const marks = {}; numbers.forEach(n => { marks[n] = 0; });
-    return { name, marks, points:0, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 };
+  const freshMarks = () => { const marks = {}; numbers.forEach(n => { marks[n] = 0; }); return marks; };
+  return _replayVisits({
+    names, turns, legsPerSet,
+    // The one mode with a real set gate: a practice Cricket run must never take
+    // a set. The round-based modes pass the default `true`, which is moot for
+    // them — they are forced to 1 leg/1 set at creation (BUG-22).
+    setsGateOpen: !practice,
+    // No round counter: Cricket's legs run until somebody closes everything
+    // out, not for a fixed number of rounds.
+    roundKey: null,
+    newPlayer: name => ({ name, marks: freshMarks(), points:0, legsWon:0, setsWon:0,
+      legDarts:0, setDarts:0, gameDarts:0 }),
+    resetLeg: (p, newSet) => {
+      p.marks = freshMarks(); p.points = 0; p.legDarts = 0;
+      if(newSet) p.setDarts = 0;
+    },
+    context: () => ({ config: { numbers, variant } }),
+    evaluateVisit: evaluateVisitCricket,
+    applyResult: (p, ev, ctx) => {
+      p.marks = ev.marks; p.points = ev.points;
+      // Cut-throat is why applyResult receives the context: a closing visit puts
+      // points on every OPPONENT who still has that number open, so this hook
+      // writes to players other than the thrower.
+      if(variant === 'cutthroat'){
+        ev.opponentGains.forEach(g => {
+          if(g.gained > 0){
+            const opp = ctx.players.find(pl => pl.name === g.name);
+            if(opp) opp.points += g.gained;
+          }
+        });
+      }
+    },
+    // Cricket names its leg win `ev.win`, and the winner is always the thrower —
+    // unlike the round-based modes, where evaluateVisit decides a winner from
+    // everyone's totals once the final round completes.
+    winnerOf: (ev, t) => ev.win ? t.playerIndex : -1,
   });
-  const setsGateOpen = !practice;
-  let current = 0, starter = 0, setNo = 1, legNo = 1, seenFirst = false;
+}
+
+/* The shared replay loop behind every visit-based rebuild (item 65).
+ *
+ * Baseball, Shanghai, Halve-It and The Pressure Chamber's rebuilds were
+ * character-for-character identical apart from five hooks; Cricket's differed
+ * only in how it names a leg win and in its practice set-gate. That is ~15
+ * lines of leg/set bookkeeping — starter rotation, per-leg field reset, and the
+ * trailing "a leg was won but its next leg has no turns recorded yet" block —
+ * written out five times over save/resume's core correctness engine. The
+ * starter-rotation index desync item 37 had to hunt down lived in exactly this
+ * shape of code, in exactly one of these copies.
+ *
+ * Hooks:
+ *   newPlayer(name)          the mode's fresh player object
+ *   resetLeg(p, newSet)      per-player leg reset (setDarts only on a new set)
+ *   context({round})         extra fields this mode's evaluateVisit needs
+ *   evaluateVisit(p, darts, ctx)
+ *   applyResult(p, ev, ctx)  write the evaluation onto the player (ctx carries
+ *                            `players`, which cut-throat Cricket needs — its
+ *                            visit moves OTHER players' points, not just the
+ *                            thrower's)
+ *   winnerOf(ev, t)          index of whoever just won the leg, or -1
+ *   setsGateOpen             false where a practice run must never take a set
+ *                            (Cricket; the round-based modes are forced to
+ *                            1 leg/1 set at creation, so it is moot for them)
+ *   roundKey                 name of the mode's round counter (null if none)
+ *
+ * X01 deliberately does NOT use this. Its replay carries bust/checkout
+ * handling, per-player starting scores, handicaps and a leg-win rule with
+ * nothing in common with "a fixed sequence of rounds"; folding it in would turn
+ * these hooks into a configuration language and leave every reader worse off
+ * than the duplication did.
+ */
+function _replayVisits({ names, turns, legsPerSet, setsGateOpen = true, roundKey = null,
+                         newPlayer, resetLeg, context, evaluateVisit, applyResult, winnerOf }){
+  const players = names.map(newPlayer);
+  let current = 0, starter = 0, setNo = 1, legNo = 1, round = 1, seenFirst = false;
   let pendingNewLeg = false, pendingNewSet = false;
-  const resetLegMarks = (p, newSet) => {
-    const marks = {}; numbers.forEach(n => { marks[n] = 0; });
-    p.marks = marks; p.points = 0; p.legDarts = 0;
-    if(newSet) p.setDarts = 0;
-  };
   for(const t of turns){
     if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
       starter = (starter + 1) % players.length;
       current = starter;
       const newSet = t.setNo !== setNo;
-      players.forEach(p => resetLegMarks(p, newSet));
-      setNo = t.setNo; legNo = t.legNo;
+      players.forEach(p => resetLeg(p, newSet));
+      setNo = t.setNo; legNo = t.legNo; round = 1;
     }
     seenFirst = true;
     pendingNewLeg = false; pendingNewSet = false;
+    current = t.playerIndex;
     const p = players[t.playerIndex];
     const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
-    const ev = evaluateVisitCricket(p, dartsCore, { players, config: { numbers, variant } });
-    p.marks = ev.marks; p.points = ev.points;
-    if(variant === 'cutthroat'){
-      ev.opponentGains.forEach(g => {
-        if(g.gained > 0){
-          const opp = players.find(pl => pl.name === g.name);
-          if(opp) opp.points += g.gained;
-        }
-      });
-    }
+    const ctx = Object.assign({ players, current, starter },
+      context ? context({ round }) : null);
+    const ev = evaluateVisit(p, dartsCore, ctx);
+    applyResult(p, ev, ctx);
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
-    if(ev.win){
-      pendingNewSet = _applyLegWin(players, t.playerIndex, legsPerSet, setsGateOpen);
+    const winner = winnerOf(ev, t);
+    if(winner >= 0){
+      pendingNewSet = _applyLegWin(players, winner, legsPerSet, setsGateOpen);
       pendingNewLeg = true;
-      current = t.playerIndex;
+      current = winner;
     } else {
+      if(ev.roundComplete) round += 1;
       current = (t.playerIndex + 1) % players.length;
     }
   }
+  // A leg won by the very last recorded turn has no next-leg turns to advance
+  // the counters, so the transition is applied here instead — the same trailer
+  // all five hand-written loops carried.
   if(pendingNewLeg){
     starter = (starter + 1) % players.length;
     current = starter;
-    players.forEach(p => resetLegMarks(p, pendingNewSet));
+    players.forEach(p => resetLeg(p, pendingNewSet));
     if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
+    round = 1;
   }
-  return { players, current, starter, setNo, legNo };
+  const out = { players, current, starter, setNo, legNo };
+  if(roundKey) out[roundKey] = round;
+  return out;
 }
 
 // Baseball — structurally different from X01/Cricket: every player shares one
@@ -1235,43 +1302,15 @@ function rebuildCricketState({ names, config, practice, legsPerSet, turns }){
 // practice Baseball is forced to exactly 1 leg/1 set at creation, so the gate
 // would be a no-op here even if applied).
 function rebuildBaseballState({ names, legsPerSet, turns }){
-  const players = names.map(name => ({ name, totalRuns:0, inningRuns:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }));
-  let current = 0, starter = 0, setNo = 1, legNo = 1, baseballInning = 1, seenFirst = false;
-  let pendingNewLeg = false, pendingNewSet = false;
-  const resetLeg = (p, newSet) => { p.totalRuns = 0; p.inningRuns = {}; p.legDarts = 0; if(newSet) p.setDarts = 0; };
-  for(const t of turns){
-    if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
-      starter = (starter + 1) % players.length;
-      current = starter;
-      const newSet = t.setNo !== setNo;
-      players.forEach(p => resetLeg(p, newSet));
-      setNo = t.setNo; legNo = t.legNo; baseballInning = 1;
-    }
-    seenFirst = true;
-    pendingNewLeg = false; pendingNewSet = false;
-    current = t.playerIndex;
-    const p = players[t.playerIndex];
-    const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
-    const ev = evaluateVisitBaseball(p, dartsCore, { players, current, starter, baseballInning });
-    p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns;
-    p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
-    if(ev.matchComplete){
-      pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
-      pendingNewLeg = true;
-      current = ev.winnerIndex;
-    } else {
-      if(ev.roundComplete) baseballInning += 1;
-      current = (t.playerIndex + 1) % players.length;
-    }
-  }
-  if(pendingNewLeg){
-    starter = (starter + 1) % players.length;
-    current = starter;
-    players.forEach(p => resetLeg(p, pendingNewSet));
-    if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
-    baseballInning = 1;
-  }
-  return { players, current, starter, setNo, legNo, baseballInning };
+  return _replayVisits({
+    names, turns, legsPerSet, roundKey: 'baseballInning',
+    newPlayer: name => ({ name, totalRuns:0, inningRuns:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }),
+    resetLeg: (p, newSet) => { p.totalRuns = 0; p.inningRuns = {}; p.legDarts = 0; if(newSet) p.setDarts = 0; },
+    context: ({ round }) => ({ baseballInning: round }),
+    evaluateVisit: evaluateVisitBaseball,
+    applyResult: (p, ev) => { p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns; },
+    winnerOf: ev => ev.matchComplete ? ev.winnerIndex : -1,
+  });
 }
 
 // Shanghai (docs/archive/shanghai-roadmap.md) — Baseball's rebuildBaseballState()
@@ -1279,43 +1318,15 @@ function rebuildBaseballState({ names, legsPerSet, turns }){
 // of a hardcoded 9, and a Shanghai ending the match instantly instead of
 // needing the final round to complete.
 function rebuildShanghaiState({ names, legsPerSet, maxRounds, turns }){
-  const players = names.map(name => ({ name, totalPoints:0, roundPoints:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }));
-  let current = 0, starter = 0, setNo = 1, legNo = 1, shanghaiRound = 1, seenFirst = false;
-  let pendingNewLeg = false, pendingNewSet = false;
-  const resetLeg = (p, newSet) => { p.totalPoints = 0; p.roundPoints = {}; p.legDarts = 0; if(newSet) p.setDarts = 0; };
-  for(const t of turns){
-    if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
-      starter = (starter + 1) % players.length;
-      current = starter;
-      const newSet = t.setNo !== setNo;
-      players.forEach(p => resetLeg(p, newSet));
-      setNo = t.setNo; legNo = t.legNo; shanghaiRound = 1;
-    }
-    seenFirst = true;
-    pendingNewLeg = false; pendingNewSet = false;
-    current = t.playerIndex;
-    const p = players[t.playerIndex];
-    const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
-    const ev = evaluateVisitShanghai(p, dartsCore, { players, current, starter, shanghaiRound, config:{ rounds:maxRounds } });
-    p.totalPoints = ev.totalPoints; p.roundPoints = ev.roundPoints;
-    p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
-    if(ev.matchComplete){
-      pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
-      pendingNewLeg = true;
-      current = ev.winnerIndex;
-    } else {
-      if(ev.roundComplete) shanghaiRound += 1;
-      current = (t.playerIndex + 1) % players.length;
-    }
-  }
-  if(pendingNewLeg){
-    starter = (starter + 1) % players.length;
-    current = starter;
-    players.forEach(p => resetLeg(p, pendingNewSet));
-    if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
-    shanghaiRound = 1;
-  }
-  return { players, current, starter, setNo, legNo, shanghaiRound };
+  return _replayVisits({
+    names, turns, legsPerSet, roundKey: 'shanghaiRound',
+    newPlayer: name => ({ name, totalPoints:0, roundPoints:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }),
+    resetLeg: (p, newSet) => { p.totalPoints = 0; p.roundPoints = {}; p.legDarts = 0; if(newSet) p.setDarts = 0; },
+    context: ({ round }) => ({ shanghaiRound: round, config:{ rounds:maxRounds } }),
+    evaluateVisit: evaluateVisitShanghai,
+    applyResult: (p, ev) => { p.totalPoints = ev.totalPoints; p.roundPoints = ev.roundPoints; },
+    winnerOf: ev => ev.matchComplete ? ev.winnerIndex : -1,
+  });
 }
 
 // Halve-It (docs/archive/halve-it-roadmap.md). Structurally another Baseball/
@@ -1387,46 +1398,29 @@ function rebuildHalveItState({ names, legsPerSet, targets, turns }){
   // 🛡️ No Half Measures / 🪓 Halved at the Death — reconstructed here too so a
   // resumed leg's badge check still sees the leg's FULL halving history, not
   // just turns recorded after the resume.
-  const players = names.map(name => ({ name, total:0, roundTotals:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0,
-    everHalved:false, lastVisitHalved:false }));
-  let current = 0, starter = 0, setNo = 1, legNo = 1, halveItRound = 1, seenFirst = false;
-  let pendingNewLeg = false, pendingNewSet = false;
-  const resetLeg = (p, newSet) => { p.total = 0; p.roundTotals = {}; p.everHalved = false; p.lastVisitHalved = false; p.legDarts = 0; if(newSet) p.setDarts = 0; };
-  for(const t of turns){
-    if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
-      starter = (starter + 1) % players.length;
-      current = starter;
-      const newSet = t.setNo !== setNo;
-      players.forEach(p => resetLeg(p, newSet));
-      setNo = t.setNo; legNo = t.legNo; halveItRound = 1;
-    }
-    seenFirst = true;
-    pendingNewLeg = false; pendingNewSet = false;
-    current = t.playerIndex;
-    const p = players[t.playerIndex];
-    const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
-    const ev = evaluateVisitHalveIt(p, dartsCore, { players, current, starter, halveItRound, config:{ targets } });
-    p.total = ev.total; p.roundTotals = ev.roundTotals;
-    p.lastVisitHalved = ev.halved;
-    if(ev.halved) p.everHalved = true;
-    p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
-    if(ev.matchComplete){
-      pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
-      pendingNewLeg = true;
-      current = ev.winnerIndex;
-    } else {
-      if(ev.roundComplete) halveItRound += 1;
-      current = (t.playerIndex + 1) % players.length;
-    }
-  }
-  if(pendingNewLeg){
-    starter = (starter + 1) % players.length;
-    current = starter;
-    players.forEach(p => resetLeg(p, pendingNewSet));
-    if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
-    halveItRound = 1;
-  }
-  return { players, current, starter, setNo, legNo, halveItRound };
+  return _replayVisits({
+    names, turns, legsPerSet, roundKey: 'halveItRound',
+    newPlayer: name => ({ name, total:0, roundTotals:{}, legsWon:0, setsWon:0,
+      legDarts:0, setDarts:0, gameDarts:0, everHalved:false, lastVisitHalved:false }),
+    resetLeg: (p, newSet) => { p.total = 0; p.roundTotals = {}; p.everHalved = false;
+      p.lastVisitHalved = false; p.legDarts = 0; if(newSet) p.setDarts = 0; },
+    context: ({ round }) => ({ halveItRound: round, config:{ targets } }),
+    evaluateVisit: evaluateVisitHalveIt,
+    applyResult: (p, ev, ctx) => {
+      p.total = ev.total; p.roundTotals = ev.roundTotals;
+      p.lastVisitHalved = ev.halved;
+      if(ev.halved) p.everHalved = true;
+      // roundHalved was NOT replayed before 2026-07, so a resumed Halve-It leg
+      // came back with its scorecard's per-round halving marks blank while the
+      // round TOTALS beside them were correct — the card said a round scored 30
+      // and did not say it had been halved to get there. Found by the
+      // save/resume matrix this item's own deferral asked for
+      // (verify-ui `resume-fidelity`), which is the only place it was visible:
+      // the value is display-only, so no stat or leaderboard ever disagreed.
+      p.roundHalved = Object.assign({}, p.roundHalved, { [ctx.halveItRound]: ev.halved });
+    },
+    winnerOf: ev => ev.matchComplete ? ev.winnerIndex : -1,
+  });
 }
 
 /* ---------- The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md) ----------
@@ -1758,47 +1752,25 @@ function evaluateVisitPressureChamber(player, darts, game){
 // round target parameterized by maxRounds (config.rounds) and gameId (the
 // generatePressureCard() seed) instead of a hardcoded/parameterized number.
 function rebuildPressureChamberState({ gameId, names, legsPerSet, maxRounds, turns }){
-  const players = names.map(name => ({ name, totalCp:0, misses:0, fullHits:0,
-    currentFullHitStreak:0, bestFullHitStreak:0, roundResults:{},
-    legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }));
-  let current = 0, starter = 0, setNo = 1, legNo = 1, pressureChamberRound = 1, seenFirst = false;
-  let pendingNewLeg = false, pendingNewSet = false;
-  const resetLeg = (p, newSet) => { p.totalCp=0; p.misses=0; p.fullHits=0; p.currentFullHitStreak=0; p.bestFullHitStreak=0; p.roundResults={}; p.legDarts=0; if(newSet) p.setDarts=0; };
-  for(const t of turns){
-    if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
-      starter = (starter + 1) % players.length;
-      current = starter;
-      const newSet = t.setNo !== setNo;
-      players.forEach(p => resetLeg(p, newSet));
-      setNo = t.setNo; legNo = t.legNo; pressureChamberRound = 1;
-    }
-    seenFirst = true;
-    pendingNewLeg = false; pendingNewSet = false;
-    current = t.playerIndex;
-    const p = players[t.playerIndex];
-    const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
-    const ev = evaluateVisitPressureChamber(p, dartsCore, { gameId, players, current, starter, pressureChamberRound, config:{ rounds:maxRounds } });
-    p.totalCp = ev.totalCp; p.misses = ev.misses; p.fullHits = ev.fullHits;
-    p.currentFullHitStreak = ev.currentFullHitStreak; p.bestFullHitStreak = ev.bestFullHitStreak;
-    p.roundResults = ev.roundResults;
-    p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
-    if(ev.matchComplete){
-      pendingNewSet = _applyLegWin(players, ev.winnerIndex, legsPerSet, true);
-      pendingNewLeg = true;
-      current = ev.winnerIndex;
-    } else {
-      if(ev.roundComplete) pressureChamberRound += 1;
-      current = (t.playerIndex + 1) % players.length;
-    }
-  }
-  if(pendingNewLeg){
-    starter = (starter + 1) % players.length;
-    current = starter;
-    players.forEach(p => resetLeg(p, pendingNewSet));
-    if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
-    pressureChamberRound = 1;
-  }
-  return { players, current, starter, setNo, legNo, pressureChamberRound };
+  return _replayVisits({
+    names, turns, legsPerSet, roundKey: 'pressureChamberRound',
+    newPlayer: name => ({ name, totalCp:0, misses:0, fullHits:0,
+      currentFullHitStreak:0, bestFullHitStreak:0, roundResults:{},
+      legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }),
+    resetLeg: (p, newSet) => { p.totalCp=0; p.misses=0; p.fullHits=0; p.currentFullHitStreak=0;
+      p.bestFullHitStreak=0; p.roundResults={}; p.legDarts=0; if(newSet) p.setDarts=0; },
+    // gameId seeds generatePressureCard() — the card sequence is a pure function
+    // of (gameId, round), so a replay MUST pass the same id the live game used
+    // or it grades every visit against a different card.
+    context: ({ round }) => ({ gameId, pressureChamberRound: round, config:{ rounds:maxRounds } }),
+    evaluateVisit: evaluateVisitPressureChamber,
+    applyResult: (p, ev) => {
+      p.totalCp = ev.totalCp; p.misses = ev.misses; p.fullHits = ev.fullHits;
+      p.currentFullHitStreak = ev.currentFullHitStreak; p.bestFullHitStreak = ev.bestFullHitStreak;
+      p.roundResults = ev.roundResults;
+    },
+    winnerOf: ev => ev.matchComplete ? ev.winnerIndex : -1,
+  });
 }
 
 // Around the Clock (solo, guided drill) — a "round" is one leg, ended by

@@ -107,17 +107,25 @@ module.exports = async function run() {
       await page.waitForTimeout(350);
 
       const before = await page.evaluate(FINGERPRINT);
+      const pre = await page.evaluate(() => ({ legNo: game.legNo, setNo: game.setNo }));
 
-      // A real visit: three darts at 20, singles, so nothing depends on a
-      // mode-specific target being live. Some modes commit per dart and have
-      // no Enter turn at all — calling it there is harmless (every enterTurn*
-      // opens with its own no-darts-thrown guard).
-      const thrown = await page.evaluate(() => {
+      // THREE real visits, three darts each at 20 as singles, so nothing depends
+      // on a mode-specific target being live. Three rather than one so the
+      // snapshot STACK is exercised: undo reaches back through every visit
+      // committed this leg, and a capture or restore that only works for the
+      // most recent one passes a single-visit round trip trivially.
+      // Some modes commit per dart and have no Enter turn at all — calling it
+      // there is harmless, since every enterTurn* opens with its own
+      // no-darts-thrown guard.
+      const thrown = await page.evaluate(async () => {
         const err = [];
-        try {
-          for (let i = 0; i < 3; i++) { setMult(1); throwDart(20); }
-        } catch (e) { err.push('throw: ' + String(e && e.message || e)); }
-        try { enterTurn(); } catch (e) { err.push('enter: ' + String(e && e.message || e)); }
+        for (let v = 0; v < 3; v++) {
+          try {
+            for (let i = 0; i < 3; i++) { setMult(1); throwDart(20); }
+          } catch (e) { err.push('throw: ' + String(e && e.message || e)); }
+          try { enterTurn(); } catch (e) { err.push('enter: ' + String(e && e.message || e)); }
+          await new Promise(r => setTimeout(r, 40));
+        }
         return { err };
       }).catch(e => ({ err: [String(e && e.message || e)] }));
 
@@ -131,23 +139,32 @@ module.exports = async function run() {
         rep.ok(`${key}: the turn loop runs without throwing`, true);
       }
 
-      // Killer clears its snapshot stack the moment a visit ends ("can't undo
-      // across a visit boundary", advanceKillerTurn()) — a deliberate rule, not
-      // a lost snapshot, so a full three-dart visit there is genuinely not
-      // undoable and the round trip below cannot apply. Detected rather than
-      // listed by name, so a mode that adopts the same rule is handled without
-      // an edit here, and reported rather than skipped silently, so a mode that
-      // loses its snapshot by ACCIDENT still shows up in the output.
-      const undoable = await page.evaluate(() => !!(game && game.lastTurnSnapshot));
+      // Two states in which the round trip below genuinely cannot apply, both
+      // detected rather than listed by name so a mode that adopts either rule
+      // is handled without an edit here — and both REPORTED rather than skipped
+      // silently, so a mode that loses its snapshot by accident still shows up.
+      //
+      //  1. The snapshot stack is empty. Killer clears it the moment a visit
+      //     ends ("can't undo across a visit boundary", advanceKillerTurn()).
+      //  2. A leg or round boundary was crossed during the three visits, which
+      //     clears the stack for the same documented reason. Dead Man Walking
+      //     reaches this unpredictably: its targets are drawn from the player's
+      //     own history, so how many visits a round takes varies per run.
+      const post = await page.evaluate(() =>
+        ({ snap: !!(game && game.lastTurnSnapshot), legNo: game.legNo, setNo: game.setNo }));
+      const crossedBoundary = post.legNo !== pre.legNo || post.setNo !== pre.setNo;
+      const undoable = post.snap && !crossedBoundary;
 
-      // The round trip. Undo as many times as it takes to walk one visit back:
-      // per-dart modes snapshot per dart, visit modes per visit, and this check
-      // deliberately does not need to know which a mode is.
+      // The round trip. Undo as many times as it takes to walk every committed
+      // visit back: per-dart modes snapshot per dart, visit modes per visit,
+      // and this check deliberately does not need to know which a mode is.
       // The page's CSP forbids eval, so the fingerprint is taken by a separate
       // page.evaluate() (Playwright compiles the string as a function body,
       // which CSP allows) rather than called from inside this loop.
       const undone = await page.evaluate(async () => {
-        for (let i = 0; i < 4; i++) {
+        // Deep enough to walk all three visits back (and per-dart modes' nine
+        // individual darts), stopping the moment there is nothing left to undo.
+        for (let i = 0; i < 12; i++) {
           if (!game || !game.lastTurnSnapshot) break;
           try { undoLastTurn(); } catch (e) { return { error: String(e && e.message || e) }; }
           await new Promise(r => setTimeout(r, 30));
@@ -157,8 +174,9 @@ module.exports = async function run() {
       const restored = await page.evaluate(FINGERPRINT);
 
       if (!undoable) {
-        rep.ok(`${key}: undo is deliberately unavailable past the visit boundary`, true,
-          'snapshot stack cleared when the visit ended');
+        rep.ok(`${key}: undo is deliberately unavailable past the boundary crossed`, true,
+          crossedBoundary ? 'a leg/round resolved during the run, clearing the stack'
+                          : 'snapshot stack cleared when the visit ended');
       } else if (undone.error) {
         rep.ok(`${key}: undo runs without throwing`, false, undone.error);
       } else {
