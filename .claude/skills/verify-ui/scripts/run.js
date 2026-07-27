@@ -20,6 +20,7 @@ const CHECKS = {
   'ghost-picker': './checks/ghost-picker',
   'scoring-modes': './checks/scoring-modes',
   'all-game-types': './checks/all-game-types',
+  'turn-loop': './checks/turn-loop',
   'live-scoreboard': './checks/live-scoreboard',
   'live-shell': './checks/live-shell',
   'home-settings': './checks/home-settings',

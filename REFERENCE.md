@@ -123,6 +123,28 @@ oche/
   inside the X01-heavy originals — neither has an achievements, bust concept, or
   checkout-hint equivalent, so forcing them through the same code would mean a lot
   of irrelevant branching. See §2 for Cricket's and Baseball's scoring rules.
+- **Turn-loop dispatch is registry-driven, with no fallthrough** (2026-07). The
+  four entry points `renderGame()`, `throwDart()`, `undoLastTurn()` and
+  `enterTurn()` are each **one line**: they look up `render`, `throwDart`,
+  `undoLastTurn` and `enterTurn` on `GAME_TYPES[game.gameType]`. Every type
+  declares all four, **X01 included** — there is no implicit default, so a type
+  missing a member throws on its first frame instead of silently running X01's
+  scoreboard or X01's committer. The per-dart modes declare `enterTurnPerDart`,
+  a named no-op meaning "every dart is already committed as it lands"; before
+  this they had no branch at all and reached X01's committer, working only
+  because `noDartsThrown()` happened to return early for them.
+
+  `throwDart` has a fifth member, **`afterDart`**, because dart input is not a
+  plain per-type function: seven types replace it wholesale, and the other nine
+  share one body, `throwDartVisit()`, that holds the guard
+  (`darts.length>=3 || busted || won`) and the `pushThrownDarts()` call — the two
+  lines that must never diverge between modes — then calls the type's own
+  `afterDart`. Those are `afterDartSlotsOnly` (Cricket, Baseball, Bob's 27: no
+  bust and no live win to preview, so a dart only moves the slots and the pad),
+  `afterDartGauntlet`, `afterDartDeadManWalking` and `afterDartX01` (the live
+  bust/win/leaves preview). A type declaring `afterDart` *and* its own
+  `throwDart` is a contract violation — the `afterDart` would never run — and
+  `backend/test/frontend.turn-loop-dispatch.test.js` fails on it.
 - **Player Profile/Home page game-type toggle**: each `GAME_TYPES` entry also
   carries 3 UI-facing fields (game-modes-roadmap.md "Toggle mechanism
   generalized") — `label` (option text), `bubbleKeyMap` (patched on right after
@@ -451,9 +473,23 @@ which renders every registered mode's panel after a real dart.
 
 Every call to `enterTurn()` builds a full snapshot (`_snap`) of the acting
 player's pre-turn state — scores, per-leg/per-game running totals, and every
-piece of achievement/challenge tracking state (`legVisitScores`, `metronomeFired`,
-`pendingIceInTheVeins`, `legWorstDeficit`, `singlesHit`, `legVisitLogs` length) —
-stored as `game.lastTurnSnapshot`. `undoLastTurn()` restores every one of those
+piece of achievement/challenge tracking state — stored as
+`game.lastTurnSnapshot`.
+
+The tracking half is **one shared pair**, `snapshotVisitAchievementState(p)` /
+`restoreVisitAchievementState(p, snap)`, covering the six fields
+`awardVisitAchievements()` mutates on every visit: `legVisitScores`,
+`metronomeFired`, `pendingIceInTheVeins`, `legWorstDeficit`, `singlesHit` and
+`atwHitSet`. **Any mode that calls `awardVisitAchievements()` must use both.**
+Re-listing the fields at each call site is what let three modes drift into
+restoring different subsets of the same six: `atwHitSet` was restored by none of
+them (so an undone dart still counted toward the lifetime Around the World
+badge's session progress), and Checkout Ladder and Dead Man Walking restored
+none of the six at all despite calling the function. All fixed 2026-07, found by
+the verify-ui `turn-loop` check's round-trip assertion.
+
+`game.legVisitLogs` is truncated back to its snapshotted length separately, and
+each mode adds its own state fields on top. `undoLastTurn()` restores every one of those
 fields verbatim, truncates the leg/session turn-history arrays back to their
 pre-turn length, calls `DB.deleteLastTurn()` to remove the persisted turn row,
 and revokes any badge that turn awarded (`snap.badgeReverts`, populated by

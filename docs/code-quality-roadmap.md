@@ -906,45 +906,74 @@ the larger/riskier ones, each touching every game type across a hot-path
 function, deferred the same way items 35–59 above were: too large or
 behavior-risky to refactor untested in the same pass, none a bug.
 
-### Item 64 — Unify `render()`/`throwDart()`/`undoLastTurn()`/`enterTurn()` dispatch via `GAME_TYPES`
+### Item 64 — Unify `render()`/`throwDart()`/`undoLastTurn()`/`enterTurn()` dispatch via `GAME_TYPES` ✅ DONE (2026-07)
 
-Independently flagged by 3 of the 4 finder angles — the single most-repeated
-finding of the pass. All four functions open with their own hand-maintained
-`if(game.gameType === 'x') return xForThatType()` chain (10-15 branches each),
-duplicating the exact same 15-type list four times over, even though
-`GAME_TYPES` already exists and `resumeGame()` (item 37) already proved the
-pattern: replace each chain with `(GAME_TYPES[game.gameType].render ||
-renderGameDefault)()`-style generic dispatch, one new registry member per
-function (`render`, `throwDart`, `undoLastTurn`, `enterTurn`), with X01 itself
-getting an explicit member instead of being the implicit fallthrough default.
-Deferred because it touches all 15 game types' hot-path turn loop across 4
-functions (~60 dispatch points) — real behavior-risk if a single branch is
-transcribed wrong, needs full per-type live verification before landing.
+Independently flagged by 3 of the 4 finder angles in the 2026-07-22 pass — the
+single most-repeated finding. All four functions opened with their own
+hand-maintained `if(game.gameType === 'x') return xForThatType()` chain,
+writing out the same fifteen-type list four times over, which is four chances
+for a new game type to be added to three of them.
 
-**Update (2026-07, after the live-scoreboard redesign).** Two things changed
-in this item's favour, and one caution is now evidence-backed rather than
-theoretical:
+**As built.** Four registry members — `render`, `throwDart`, `undoLastTurn`,
+`enterTurn` — plus one the sketch did not anticipate:
 
-- **`display.html`'s own equivalent is done.** Its per-type `card()`/
-  `scorecard()` dispatch was replaced by `lane()`/`stage()` registry members
-  and the fourteen old renderers deleted. That is the same transformation this
-  item proposes, carried out on the read-only screen where a wrong branch
-  costs a bad frame rather than a wrong score — a useful rehearsal, and the
-  reason the remaining risk here is specifically about the *turn loop*, not
-  about registry dispatch as a technique.
-- **The verification cost dropped.** The verify-ui suite now drives every
-  registered mode through start → dart → render → completion (`all-game-types`,
-  `live-shell`, 148 assertions between them), reading the mode list from
-  `GAME_TYPES` itself. The "full per-type live verification" this deferral
-  asks for is now largely a suite run rather than a manual matrix.
-- **But the caution stands, and the redesign proved why.** Converting
-  `display.html` surfaced four defects that no test caught and only looking at
-  rendered output revealed — including a renderer left pointing at an element
-  that no longer existed, and a payload field silently stripped by the server's
-  allowlist. A `throwDart`/`enterTurn` conversion has no equivalent "look at
-  it" check: a mis-transcribed branch there produces a *wrong score*, which
-  looks perfectly normal on screen. Land it one function at a time, and add the
-  scoring assertions before the refactor, not after.
+- **`afterDart`.** `throwDart()` was not a plain chain. Seven types replaced it
+  wholesale, then came a shared guard-and-push, then a *second* chain of
+  post-push behaviours. Giving all sixteen a full `throwDart` would have
+  duplicated `if(game.darts.length>=3 || game.busted || game.won) return;` and
+  the `pushThrownDarts()` call sixteen times — the two lines that must never
+  diverge between modes. So the shared body stays as `throwDartVisit()` and the
+  variance moves to `afterDart`: `afterDartSlotsOnly` (Cricket, Baseball, Bob's
+  27 — three modes, one reason), `afterDartGauntlet`, `afterDartDeadManWalking`,
+  `afterDartX01`.
+- **X01 is explicit, and there is no fallthrough.** A type missing a member now
+  throws on its first frame rather than silently running X01's scoreboard or
+  X01's committer. `enterTurn` made that worth having: six types had no branch
+  and fell through to X01's committer, where `noDartsThrown()` happened to
+  return early for all of them. That worked, but only by coincidence; they now
+  declare `enterTurnPerDart`, a named no-op that says "every dart is already
+  committed as it lands."
+
+**The precondition this item set for itself was honoured.** Its own update said
+to add the scoring assertions before the refactor, not after, because a
+mis-transcribed turn-loop branch produces a wrong *score*, which looks entirely
+normal on screen. The verify-ui `turn-loop` check was written first: it drives
+every registered mode through throw → commit → undo and requires the state to
+come back byte-identical. It needs no per-mode expected numbers — a check that
+hard-coded "Cricket scores 60 here" would be a second copy of rules that
+already have unit tests — because what is not covered anywhere else is whether
+the right *function* ran at all, and a state that comes back changed after a
+full undo is exactly what "the wrong function ran" looks like.
+
+Writing it first paid immediately: it found **five pre-existing undo defects**,
+none of them related to this refactor, all invisible to every existing test.
+
+- `atwHitSet` was never restored on undo in any mode, while its sibling
+  `singlesHit` was — so an undone dart still counted toward the lifetime Around
+  the World badge's session progress. Fixed at the right altitude: the six
+  fields `awardVisitAchievements()` mutates are now snapshotted and restored by
+  one shared pair, `snapshotVisitAchievementState()`/
+  `restoreVisitAchievementState()`, instead of being re-listed at each call
+  site — which is how three modes ended up restoring different subsets of the
+  same six fields.
+- **Checkout Ladder** and **Dead Man Walking** restored none of them. Both call
+  `awardVisitAchievements()` (the BUG-37 fix wired them up) but neither undo
+  was extended to match.
+- **Halve-It** left its `roundHalved` mark behind, painting a halving that no
+  longer happened.
+- **Chuckin**'s heatmap cache counter was the one false positive, and is now
+  excluded by name — a cache version only ever moves forward, and an undo has
+  no reason to wind it back.
+
+**Killer's undo is deliberately unreachable past a visit boundary**
+(`advanceKillerTurn()` clears the snapshot stack), which the check detects and
+reports rather than skipping silently, so a mode that loses its snapshot by
+*accident* still shows up in the output.
+
+`backend/test/frontend.turn-loop-dispatch.test.js` pins the contract at the
+source level — every type declares all four members, `afterDart` is declared by
+exactly the types sharing `throwDartVisit`, every named function exists, and the
+four old chains are gone rather than merely bypassed.
 
 ### Item 65 — Generalize `rebuild*State()`'s shared replay-loop shape (`scoring.js`)
 

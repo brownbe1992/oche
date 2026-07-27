@@ -9905,22 +9905,13 @@ function askDeleteFromProfile(name){
 // Standard 3-dart average: total points / total darts * 3
 function avgStr(points, darts){ return darts ? (points/darts*3).toFixed(1) : '—'; }
 
-function renderGame(){
-  if(game.gameType === 'cricket') return renderGameCricket();
-  if(game.gameType === 'baseball') return renderGameBaseball();
-  if(game.gameType === 'shanghai') return renderGameShanghai();
-  if(game.gameType === 'halve_it') return renderGameHalveIt();
-  if(game.gameType === 'pressure_chamber') return renderGamePressureChamber();
-  if(game.gameType === 'doubles_practice') return renderGameDoublesPractice();
-  if(game.gameType === 'chuckin') return renderGameChuckin();
-  if(game.gameType === 'checkout_trainer') return renderGameCheckoutTrainer();
-  if(game.gameType === 'around_the_clock') return renderGameAroundTheClock();
-  if(game.gameType === 'around_the_world') return renderGameAroundTheWorld();
-  if(game.gameType === 'bobs_27') return renderGameBobs27();
-  if(game.gameType === 'checkout_ladder') return renderGameCheckoutLadder();
-  if(game.gameType === 'gauntlet') return renderGameGauntlet();
-  if(game.gameType === 'killer') return renderGameKiller();
-  if(game.gameType === 'dead_man_walking') return renderGameDeadManWalking();
+// One dispatch, not fifteen hand-maintained `if(game.gameType === …)` lines
+// (docs/code-quality-roadmap.md item 64). Every game type declares its own
+// `render`, X01 included — there is no implicit default, so a new type that
+// forgets one fails loudly at its first frame instead of silently rendering
+// X01's scoreboard.
+function renderGame(){ GAME_TYPES[game.gameType].render(); }
+function renderGameX01(){
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   game.players.forEach((p,i)=>{
@@ -12348,82 +12339,69 @@ function mapDartsForRecord(darts){
 }
 
 function throwDart(sector, zone, missZone, missDepth, bounced){
-  if(game.gameType === 'doubles_practice') return throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced);
-  if(game.gameType === 'chuckin') return throwDartChuckin(sector, zone, missZone, missDepth, bounced);
-  if(game.gameType === 'checkout_trainer') return throwDartCheckoutTrainer(sector, zone, missZone, missDepth, bounced);
-  if(game.gameType === 'around_the_clock') return throwDartAroundTheClock(sector, zone, missZone, missDepth, bounced);
-  if(game.gameType === 'around_the_world') return throwDartAroundTheWorld(sector, zone, missZone, missDepth, bounced);
-  if(game.gameType === 'killer') return throwDartKiller(sector, zone, missZone, missDepth, bounced);
-  if(game.gameType === 'pressure_chamber') return throwDartPressureChamber(sector, zone, missZone, missDepth, bounced);
+  GAME_TYPES[game.gameType].throwDart(sector, zone, missZone, missDepth, bounced);
+}
+/* The visit-based modes' dart input (item 64). Seven types replace this
+   wholesale with their own per-dart committer; the nine that batch to three
+   darts share this body and differ only in what happens AFTER the dart lands,
+   which is their `afterDart` member. Splitting it that way rather than giving
+   all sixteen a full throwDart keeps the guard and the push — the two lines
+   that must never diverge between modes — stated exactly once. */
+function throwDartVisit(sector, zone, missZone, missDepth, bounced){
   if(game.darts.length>=3 || game.busted || game.won) return;
   // A bounce-out is always exactly one dart, regardless of whatever multiplier
   // happens to still be selected — pushThrownDarts()'s own double/treble-Miss
   // shortcut check (!bounced && ...) already bypasses it in that case.
   pushThrownDarts(game.darts, sector, mult, zone, missZone, missDepth, bounced);
   mult=1; updateMultUI();
-
-  if(game.gameType === 'cricket'){
-    // No bust/checkout concept — the cricket pad re-renders the dart slots and its
-    // own live marks/points display; committed state only changes on Enter Turn.
-    renderSlots(); renderPad(); pushLive();
-    return;
+  GAME_TYPES[game.gameType].afterDart();
+}
+/* Cricket, Baseball and Bob's 27: no bust and no live "win" to preview, so a
+   dart only moves the visit slots and the pad. Cricket has no bust/checkout
+   concept at all; Baseball's win resolves only at the end of a full round of
+   innings; Bob's 27's "all three missed" can only be judged once the whole
+   visit is in. Three modes, one reason, one function. */
+function afterDartSlotsOnly(){ renderSlots(); renderPad(); pushLive(); }
+function afterDartGauntlet(){
+  // renderGameGauntlet() itself rebuilds the "next task" label from
+  // game.darts.length, so a single call covers slots+pad+status together —
+  // no pushLive() (docs/archive/gauntlet-roadmap.md "No live-scoreboard sync needed").
+  renderGameGauntlet();
+}
+function afterDartDeadManWalking(){
+  // docs/archive/dead-man-walking-roadmap.md "Execution — per-dart evaluation, not
+  // per-visit": nothing about the physical input widget changes (darts still
+  // accumulate into game.darts up to 3, same as X01) — only the LIVE
+  // evaluation is per-dart, generalizing the default block's own bust/win
+  // check below with a third stop condition (outOfDarts). game.busted is
+  // reused for BOTH a real bust and an out-of-darts stop (both block further
+  // entry identically); the write-time commit (enterTurnDeadManWalking())
+  // independently re-derives which one actually happened from the darts
+  // themselves, never trusting this flag.
+  const p = game.players[0];
+  const ev = evaluateVisitDeadManWalking(p, game.darts, game);
+  const status=document.getElementById('status');
+  if(ev.bust){
+    game.busted=true;
+    status.className='status bust'; status.textContent='EXECUTED — bust. Press Enter turn.';
+    announce('Bust.');
+  } else if(ev.win){
+    game.won=true;
+    status.className='status win'; status.textContent='WALKED OUT! Press Enter turn to record it.';
+    announce('Walked out!');
+  } else if(ev.outOfDarts){
+    game.busted=true;
+    status.className='status bust'; status.textContent='EXECUTED — out of darts. Press Enter turn.';
+    announce('Out of darts.');
+  } else {
+    const dartsLeft = game.dmwBudget - (game.dmwDartsUsedThisRound||0) - game.darts.length;
+    status.className='status';
+    status.textContent = `Leaves ${ev.newScore}. ${dartsLeft} dart${dartsLeft===1?'':'s'} left this round.`;
+    if(dartsLeft <= 1) announce(`${dartsLeft} dart left this round.`);
   }
-  if(game.gameType === 'baseball'){
-    // No bust concept, and "win" only resolves at the end of a full round of
-    // innings (see evaluateVisitBaseball()) — nothing meaningful to preview live
-    // per-dart, so just re-render the dart slots and pad same as Cricket.
-    renderSlots(); renderPad(); pushLive();
-    return;
-  }
-  if(game.gameType === 'bobs_27'){
-    // Same reasoning as Baseball — "all three darts missed" can only be judged
-    // once the whole visit is in, so there's nothing meaningful to preview
-    // live per-dart either.
-    renderSlots(); renderPad(); pushLive();
-    return;
-  }
-  if(game.gameType === 'gauntlet'){
-    // renderGameGauntlet() itself rebuilds the "next task" label from
-    // game.darts.length, so a single call covers slots+pad+status together —
-    // no pushLive() (docs/archive/gauntlet-roadmap.md "No live-scoreboard sync needed").
-    renderGameGauntlet();
-    return;
-  }
-  if(game.gameType === 'dead_man_walking'){
-    // docs/archive/dead-man-walking-roadmap.md "Execution — per-dart evaluation, not
-    // per-visit": nothing about the physical input widget changes (darts still
-    // accumulate into game.darts up to 3, same as X01) — only the LIVE
-    // evaluation is per-dart, generalizing the default block's own bust/win
-    // check below with a third stop condition (outOfDarts). game.busted is
-    // reused for BOTH a real bust and an out-of-darts stop (both block further
-    // entry identically); the write-time commit (enterTurnDeadManWalking())
-    // independently re-derives which one actually happened from the darts
-    // themselves, never trusting this flag.
-    const p = game.players[0];
-    const ev = evaluateVisitDeadManWalking(p, game.darts, game);
-    const status=document.getElementById('status');
-    if(ev.bust){
-      game.busted=true;
-      status.className='status bust'; status.textContent='EXECUTED — bust. Press Enter turn.';
-      announce('Bust.');
-    } else if(ev.win){
-      game.won=true;
-      status.className='status win'; status.textContent='WALKED OUT! Press Enter turn to record it.';
-      announce('Walked out!');
-    } else if(ev.outOfDarts){
-      game.busted=true;
-      status.className='status bust'; status.textContent='EXECUTED — out of darts. Press Enter turn.';
-      announce('Out of darts.');
-    } else {
-      const dartsLeft = game.dmwBudget - (game.dmwDartsUsedThisRound||0) - game.darts.length;
-      status.className='status';
-      status.textContent = `Leaves ${ev.newScore}. ${dartsLeft} dart${dartsLeft===1?'':'s'} left this round.`;
-      if(dartsLeft <= 1) announce(`${dartsLeft} dart left this round.`);
-    }
-    renderSlots(); renderPad(); updateCheckout(true); pushLive();
-    return;
-  }
-
+  renderSlots(); renderPad(); updateCheckout(true); pushLive();
+}
+function afterDartX01(){
   // live bust/win feedback before committing
   const ev = GAME_TYPES[game.gameType].evaluateVisit(game.players[game.current], game.darts, game);
   const status=document.getElementById('status');
@@ -12943,22 +12921,15 @@ function _finishUndo(snap, renderFn, opts){
   renderFn();
   if(push) pushLive();
 }
+// Same one-line dispatch as renderGame() above (item 64). The `game` null-guard
+// each of the fifteen old branches repeated lives here once — every undoLastTurn*
+// still opens with its own `!game.lastTurnSnapshot` check, which is about
+// whether there is anything to undo rather than whether a game exists.
 function undoLastTurn(){
-  if(game && game.gameType === 'cricket') return undoLastTurnCricket();
-  if(game && game.gameType === 'baseball') return undoLastTurnBaseball();
-  if(game && game.gameType === 'shanghai') return undoLastTurnShanghai();
-  if(game && game.gameType === 'halve_it') return undoLastTurnHalveIt();
-  if(game && game.gameType === 'pressure_chamber') return undoLastTurnPressureChamber();
-  if(game && game.gameType === 'doubles_practice') return undoLastTurnDoublesPractice();
-  if(game && game.gameType === 'chuckin') return undoLastTurnChuckin();
-  if(game && game.gameType === 'checkout_trainer') return undoLastTurnCheckoutTrainer();
-  if(game && game.gameType === 'around_the_clock') return undoLastTurnAroundTheClock();
-  if(game && game.gameType === 'around_the_world') return undoLastTurnAroundTheWorld();
-  if(game && game.gameType === 'bobs_27') return undoLastTurnBobs27();
-  if(game && game.gameType === 'checkout_ladder') return undoLastTurnCheckoutLadder();
-  if(game && game.gameType === 'gauntlet') return undoLastTurnGauntlet();
-  if(game && game.gameType === 'killer') return undoLastTurnKiller();
-  if(game && game.gameType === 'dead_man_walking') return undoLastTurnDeadManWalking();
+  if(!game) return;
+  GAME_TYPES[game.gameType].undoLastTurn();
+}
+function undoLastTurnX01(){
   if(!game || !game.lastTurnSnapshot) return;
   const snap = game.lastTurnSnapshot;
   const p = game.players[snap.pi];
@@ -12974,11 +12945,7 @@ function undoLastTurn(){
   // Restore achievement/challenge tracking state — otherwise an undone (mis-entered)
   // turn can leave a stale Metronome streak, Comeback Kid deficit, Around the Clock
   // progress, or a premature Daily Challenge completion in place.
-  p.legVisitScores = snap.legVisitScores;
-  p.metronomeFired = snap.metronomeFired;
-  p.pendingIceInTheVeins = snap.pendingIceInTheVeins;
-  p.legWorstDeficit = snap.legWorstDeficit;
-  p.singlesHit = snap.singlesHit;
+  restoreVisitAchievementState(p, snap);
   game.legVisitLogs.length = snap.legVisitLogsLen;
 
   // Restore game-level achievement counters
@@ -13073,6 +13040,27 @@ function noDartsThrown(){
 // Callers are responsible for their own turn RECORDING and progression — this
 // function only awards. It reads `game.darts` for the visit's darts, so it must
 // be called before that array is cleared.
+// The per-player tracking state awardVisitAchievements() above mutates on every
+// visit. Every mode that CALLS that function must snapshot these before the
+// visit and put them back on undo, or an undone (mis-entered) visit leaves a
+// stale Metronome streak, Comeback Kid deficit, Around the Clock/World progress
+// or Daily Challenge trace behind. Stated once here rather than re-listed at
+// each call site, which is how three modes ended up restoring different
+// subsets of the same six fields.
+function snapshotVisitAchievementState(p){
+  return { legVisitScores:(p.legVisitScores||[]).slice(), metronomeFired:p.metronomeFired,
+    pendingIceInTheVeins:p.pendingIceInTheVeins, legWorstDeficit:p.legWorstDeficit,
+    singlesHit:new Set(p.singlesHit), atwHitSet:new Set(p.atwHitSet) };
+}
+function restoreVisitAchievementState(p, snap){
+  if(!snap || snap.singlesHit === undefined) return;   // a mode that never tracked them
+  p.legVisitScores = snap.legVisitScores;
+  p.metronomeFired = snap.metronomeFired;
+  p.pendingIceInTheVeins = snap.pendingIceInTheVeins;
+  p.legWorstDeficit = snap.legWorstDeficit;
+  p.singlesHit = snap.singlesHit;
+  p.atwHitSet = snap.atwHitSet;
+}
 function awardVisitAchievements(p, ev, snap){
   const _snap = snap;
   // achievement flashes + in-game counters + Home Assistant webhooks
@@ -13260,17 +13248,17 @@ function awardVisitAchievements(p, ev, snap){
   }
 }
 
-function enterTurn(){
-  if(game.gameType === 'cricket') return enterTurnCricket();
-  if(game.gameType === 'baseball') return enterTurnBaseball();
-  if(game.gameType === 'shanghai') return enterTurnShanghai();
-  if(game.gameType === 'halve_it') return enterTurnHalveIt();
-  if(game.gameType === 'pressure_chamber') return enterTurnPressureChamber();
-  if(game.gameType === 'bobs_27') return enterTurnBobs27();
-  if(game.gameType === 'checkout_ladder') return enterTurnCheckoutLadder();
-  if(game.gameType === 'gauntlet') return enterTurnGauntlet();
-  if(game.gameType === 'dead_man_walking') return enterTurnDeadManWalking();
-  if(game.gameType === 'checkout_trainer') return submitCheckoutAttempt();
+// Item 64's third chain. Unlike render/undo, only ten types declared their own
+// commit here and the rest fell through to X01's — so the registry now gives
+// every type an explicit `enterTurn`, with the per-dart modes (which have no
+// Enter turn button at all) pointing at a no-op rather than at X01's committer,
+// which is what the old fallthrough actually did.
+function enterTurn(){ GAME_TYPES[game.gameType].enterTurn(); }
+// The per-dart modes' commit: there isn't one. Every dart is already committed
+// as it lands, so the Enter turn path has nothing to do — named rather than
+// left as an inline `()=>{}` so the registry reads as a deliberate declaration.
+function enterTurnPerDart(){}
+function enterTurnX01(){
   if(noDartsThrown()) return;
   const p = game.players[game.current];
   const ev = GAME_TYPES[game.gameType].evaluateVisit(p, game.darts, game);
@@ -13293,9 +13281,8 @@ function enterTurn(){
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
     // achievement/challenge tracking state — restored on undo so a mis-entered dart
     // that's undone can't leave a stale badge/streak trace behind
-    legVisitScores:p.legVisitScores.slice(), metronomeFired:p.metronomeFired,
-    pendingIceInTheVeins:p.pendingIceInTheVeins, legWorstDeficit:p.legWorstDeficit,
-    singlesHit:new Set(p.singlesHit), legVisitLogsLen:game.legVisitLogs.length,
+    ...snapshotVisitAchievementState(p),
+    legVisitLogsLen:game.legVisitLogs.length,
     // badges awarded/incremented while processing this turn — revoked on undo.
     // voided flips true once undo actually runs, so an award response that's
     // still in flight at that point revokes itself instead of registering here.
@@ -13948,6 +13935,7 @@ function enterTurnHalveIt(){
 
   // snapshot state before mutations so undoLastTurn() can restore it.
   const _snap = { pi:game.current, total:p.total, roundTotals:Object.assign({}, p.roundTotals),
+    roundHalved:Object.assign({}, p.roundHalved),
     everHalved:p.everHalved, lastVisitHalved:p.lastVisitHalved,
     legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
     halveItRound:game.halveItRound,
@@ -14000,6 +13988,9 @@ function undoLastTurnHalveIt(){
   const p = game.players[snap.pi];
   p.total = snap.total;
   p.roundTotals = snap.roundTotals;
+  // roundHalved is display-only, but an undone visit that left its "this round
+  // was halved" mark behind still paints a halving that no longer happened.
+  p.roundHalved = snap.roundHalved;
   p.everHalved = snap.everHalved; p.lastVisitHalved = snap.lastVisitHalved;
   p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
   game.halveItRound = snap.halveItRound;
@@ -15893,6 +15884,13 @@ function liveLaneState(game){
 const GAME_TYPES = {
   x01: {
     id: 'x01',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameX01,
+    throwDart: throwDartVisit,
+    afterDart: afterDartX01,
+    undoLastTurn: undoLastTurnX01,
+    enterTurn: enterTurnX01,
     label: 'X01',
     bowOutable: true, // shares advanceToNextActivePlayer()'s turn-rotation engine — see BOW_OUT_GAME_TYPES below
     category: (setup, config, startScore) => String(startScore),
@@ -15969,6 +15967,13 @@ const GAME_TYPES = {
   },
   cricket: {
     id: 'cricket',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameCricket,
+    throwDart: throwDartVisit,
+    afterDart: afterDartSlotsOnly,
+    undoLastTurn: undoLastTurnCricket,
+    enterTurn: enterTurnCricket,
     bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, points:p.points||0,
       closed:Object.keys(p.marks||{}).filter(n=>(p.marks[n]||0)>=3).length, won:p.name===winner })),
@@ -16026,6 +16031,13 @@ const GAME_TYPES = {
   },
   baseball: {
     id: 'baseball',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameBaseball,
+    throwDart: throwDartVisit,
+    afterDart: afterDartSlotsOnly,
+    undoLastTurn: undoLastTurnBaseball,
+    enterTurn: enterTurnBaseball,
     bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalRuns:p.totalRuns||0, won:p.name===winner })),
     // h2hStatsHtml()'s per-player rows — a Baseball player has no
@@ -16072,6 +16084,13 @@ const GAME_TYPES = {
   },
   shanghai: {
     id: 'shanghai',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameShanghai,
+    throwDart: throwDartVisit,
+    afterDart: afterDartX01,
+    undoLastTurn: undoLastTurnShanghai,
+    enterTurn: enterTurnShanghai,
     bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalPoints:p.totalPoints||0, won:p.name===winner })),
     h2hRows: (p, scope) => scope==='game' ? [
@@ -16110,6 +16129,13 @@ const GAME_TYPES = {
   },
   halve_it: {
     id: 'halve_it',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameHalveIt,
+    throwDart: throwDartVisit,
+    afterDart: afterDartX01,
+    undoLastTurn: undoLastTurnHalveIt,
+    enterTurn: enterTurnHalveIt,
     bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, total:p.total||0, won:p.name===winner })),
     h2hRows: (p, scope) => scope==='game' ? [
@@ -16152,6 +16178,12 @@ const GAME_TYPES = {
   },
   pressure_chamber: {
     id: 'pressure_chamber',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGamePressureChamber,
+    throwDart: throwDartPressureChamber,
+    undoLastTurn: undoLastTurnPressureChamber,
+    enterTurn: enterTurnPressureChamber,
     bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, totalCp:p.totalCp||0,
       rating:pressureComposureRating(p.totalCp||0), won:p.name===winner })),
@@ -16205,6 +16237,12 @@ const GAME_TYPES = {
   },
   doubles_practice: {
     id: 'doubles_practice',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameDoublesPractice,
+    throwDart: throwDartDoublesPractice,
+    undoLastTurn: undoLastTurnDoublesPractice,
+    enterTurn: enterTurnPerDart,
     label: 'Doubles Practice',
     // Perpetual — a round ends, the next begins, and only "End Game" stops it
     // (askEndGame()), which abandons rather than completing. Nothing here ever
@@ -16238,6 +16276,12 @@ const GAME_TYPES = {
   },
   chuckin: {
     id: 'chuckin',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameChuckin,
+    throwDart: throwDartChuckin,
+    undoLastTurn: undoLastTurnChuckin,
+    enterTurn: enterTurnPerDart,
     label: "Just Chuckin' It",
     // No completion panel, and no fallback stat cards either: this mode has no
     // round, leg or game boundary at all (throwDartChuckin() never resolves a
@@ -16272,6 +16316,12 @@ const GAME_TYPES = {
   },
   checkout_trainer: {
     id: 'checkout_trainer',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameCheckoutTrainer,
+    throwDart: throwDartCheckoutTrainer,
+    undoLastTurn: undoLastTurnCheckoutTrainer,
+    enterTurn: submitCheckoutAttempt,
     label: 'Checkout Trainer',
     // This mode has its own bespoke, paper-themed results screen (see paperTheme
     // below); the dark Trophy Cabinet panel would fight it. Same reasoning as
@@ -16323,6 +16373,12 @@ const GAME_TYPES = {
   },
   around_the_clock: {
     id: 'around_the_clock',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameAroundTheClock,
+    throwDart: throwDartAroundTheClock,
+    undoLastTurn: undoLastTurnAroundTheClock,
+    enterTurn: enterTurnPerDart,
     label: 'Around the Clock',
     category: () => 'Guided Around the Clock',
     newMatchPlayer: newMatchPlayerAroundTheClock,
@@ -16385,6 +16441,12 @@ const GAME_TYPES = {
   },
   around_the_world: {
     id: 'around_the_world',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameAroundTheWorld,
+    throwDart: throwDartAroundTheWorld,
+    undoLastTurn: undoLastTurnAroundTheWorld,
+    enterTurn: enterTurnPerDart,
     label: 'Around the World',
     category: () => 'Guided Around the World',
     newMatchPlayer: newMatchPlayerAroundTheWorld,
@@ -16419,6 +16481,13 @@ const GAME_TYPES = {
   },
   bobs_27: {
     id: 'bobs_27',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameBobs27,
+    throwDart: throwDartVisit,
+    afterDart: afterDartSlotsOnly,
+    undoLastTurn: undoLastTurnBobs27,
+    enterTurn: enterTurnBobs27,
     legSummary: (game) => [{ name:game.players[0].name, running:game.players[0].running, won:true }],
     label: "Bob's 27",
     category: () => "Bob's 27",
@@ -16446,6 +16515,13 @@ const GAME_TYPES = {
   },
   checkout_ladder: {
     id: 'checkout_ladder',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameCheckoutLadder,
+    throwDart: throwDartVisit,
+    afterDart: afterDartX01,
+    undoLastTurn: undoLastTurnCheckoutLadder,
+    enterTurn: enterTurnCheckoutLadder,
     label: 'Checkout Ladder',
     // Perpetual, same as Doubles Practice: resolveCheckoutLadderAttempt() hands
     // straight to startNextLeg(), never to finishUnit().
@@ -16478,6 +16554,13 @@ const GAME_TYPES = {
   },
   gauntlet: {
     id: 'gauntlet',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameGauntlet,
+    throwDart: throwDartVisit,
+    afterDart: afterDartGauntlet,
+    undoLastTurn: undoLastTurnGauntlet,
+    enterTurn: enterTurnGauntlet,
     label: 'The Gauntlet',
     category: () => 'The Gauntlet',
     // "No live-scoreboard sync needed" (its roadmap) — pushLive() skips this
@@ -16516,6 +16599,12 @@ const GAME_TYPES = {
   },
   killer: {
     id: 'killer',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameKiller,
+    throwDart: throwDartKiller,
+    undoLastTurn: undoLastTurnKiller,
+    enterTurn: enterTurnPerDart,
     bowOutable: true,
     legSummary: (game, winner) => game.players.map(p=>({ name:p.name, number:p.number,
       kills:p.kills||0, eliminated:!!p.eliminated, won:p.name===winner })),
@@ -16542,6 +16631,13 @@ const GAME_TYPES = {
   },
   dead_man_walking: {
     id: 'dead_man_walking',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameDeadManWalking,
+    throwDart: throwDartVisit,
+    afterDart: afterDartDeadManWalking,
+    undoLastTurn: undoLastTurnDeadManWalking,
+    enterTurn: enterTurnDeadManWalking,
     legSummary: (game) => [{ name:game.players[0].name, walkedOut:game.dmwWalkedOutCount, won:true }],
     label: 'Dead Man Walking',
     optionsSectionId: 'dead-man-walking-options-section',
@@ -16863,6 +16959,10 @@ function enterTurnCheckoutLadder(){
   const _snap = { score:p.score, legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
     visits:game.checkoutLadderVisits,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    // This mode calls awardVisitAchievements() (BUG-37), so it owes the same
+    // tracking-state restore X01 does — without it an undone visit left its
+    // Around the Clock/World progress and Metronome streak behind.
+    ...snapshotVisitAchievementState(p),
     badgeReverts:[], voided:false };
   pushTurnSnapshot(_snap);
 
@@ -16908,6 +17008,7 @@ function undoLastTurnCheckoutLadder(){
   const p = game.players[0];
   p.score = snap.score;
   p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  restoreVisitAchievementState(p, snap);
   game.checkoutLadderVisits = snap.visits;
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
@@ -17287,6 +17388,9 @@ function enterTurnDeadManWalking(){
   const _snap = { score:p.score, legDarts:p.legDarts, setDarts:p.setDarts, gameDarts:p.gameDarts,
     dartsUsedThisRound: game.dmwDartsUsedThisRound,
     ltLen:game.currentLegTurns.length, stLen:game.sessionTurns.length,
+    // Same reason as Checkout Ladder: this mode calls awardVisitAchievements(),
+    // so an undone visit must not leave its tracking state behind.
+    ...snapshotVisitAchievementState(p),
     badgeReverts:[], voided:false };
   pushTurnSnapshot(_snap);
 
@@ -17336,6 +17440,7 @@ function undoLastTurnDeadManWalking(){
   const p = game.players[0];
   p.score = snap.score;
   p.legDarts = snap.legDarts; p.setDarts = snap.setDarts; p.gameDarts = snap.gameDarts;
+  restoreVisitAchievementState(p, snap);
   game.dmwDartsUsedThisRound = snap.dartsUsedThisRound;
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
