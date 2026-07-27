@@ -1070,16 +1070,40 @@ so an identity copy still passes. It stays because "the snapshot is a copy" is a
 far easier property to keep true than "no commit path anywhere ever mutates a
 snapshotted object in place."
 
-### Item 67 — Build-once DOM for Cricket/single-target/Pressure-Chamber pads
+### Item 67 — Build-once DOM for Cricket/single-target/Pressure-Chamber pads ✅ DONE (2026-07)
 
-`renderPadCricket()`/`renderSingleTargetPad()`/`renderPadPressureChamber()`
-still tear down and rebuild every pad button (with fresh `onclick` closures)
-on every dart thrown, unlike the default 1-20+Bull pad (item 57b, already
-build-once-and-toggle). Deferred: needs the same `pad.dataset.padKind`-guard
-treatment as item 57b, but each of these three pads has its own per-dart
-visual state (mark glyphs/aria-labels, target highlighting) beyond plain
-`disabled` toggling, so the toggle-only-what-changed logic is more involved
-per pad than the generic fallback pad was.
+`renderPadCricket()`, `renderSingleTargetPad()` (Baseball/Shanghai/Halve-It/
+Bob's 27) and `renderPadPressureChamber()` each opened with `pad.innerHTML =
+''` and rebuilt every button, with a fresh `onclick` closure per button, on
+every single dart. The Pressure Chamber's is the worst of them: twenty-two
+buttons and twenty-two closures, discarded and recreated three times a visit.
+
+All three now carry `pad.dataset.padKey`, the same guard item 57b gave the
+default pad — which was also renamed from `padKind`/`hasMiss` to the one
+`padKey` the other three use, so there is one convention rather than two.
+
+The deferral note above was right that these three are not a straight copy of
+item 57b, and the resolution is a split rather than a cleverer guard:
+
+| Pad | Key | What still runs per dart |
+|---|---|---|
+| Cricket | `cricket:<numbers>:<offTargetOpen>` | the marks glyph, the `closed` class and the per-button `aria-label` — written onto the existing buttons |
+| Single-target | `single:<sector>:<label>:<ariaLabel>` | nothing; all three inputs are constant for a round, so the rebuild happens on a round change |
+| Pressure Chamber | `pc-declare` / `pc-grid` | nothing; the two shapes are fixed, and the key is which one is built |
+
+Each also ends with one `for(const b of pad.querySelectorAll('button')) b.disabled = full`
+sweep instead of a `disabled = full` repeated at every creation site — which
+matters now that the creation sites do not run every frame.
+
+**Verified by a new verify-ui check, `pad-reuse` (19 assertions).** It asserts
+both halves of the property, because they pull against each other: the buttons
+must be the SAME NODES after a dart (stamped with a marker attribute before,
+looked for after — a rebuild is invisible to any check that only reads the
+rendered result, which is why the per-dart rebuild survived this long), AND
+Cricket's marks/closed/aria must still MOVE when a number is closed (the naive
+way to stop rebuilding is to stop rendering, which freezes the pad while the
+real marks move underneath). Reverting either half fails the check: putting the
+unconditional rebuild back fails 4 assertions, freezing the glyph fails 1.
 
 ### Item 68 — `finishUnit()`'s per-type match-summary special cases → a registry member ✅ DONE (2026-07)
 

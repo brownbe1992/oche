@@ -12004,7 +12004,8 @@ function renderPad(){
       // (renderGameShell() replaces the whole `.pad` container), so a stale
       // build from a PREVIOUS game can never be toggled by mistake.
       const hasMiss = game.gameType !== 'checkout_trainer';
-      if(pad.dataset.padKind !== 'default' || pad.dataset.hasMiss !== String(hasMiss)){
+      const key = `default:${hasMiss}`;
+      if(pad.dataset.padKey !== key){
         pad.innerHTML = '';
         for(let n=1;n<=20;n++){
           const b=document.createElement('button');
@@ -12020,8 +12021,7 @@ function renderPad(){
           miss.className='miss'; miss.textContent='Miss';
           miss.onclick=()=>throwDart(0); pad.appendChild(miss);
         }
-        pad.dataset.padKind = 'default';
-        pad.dataset.hasMiss = String(hasMiss);
+        pad.dataset.padKey = key;
       }
       for(const b of pad.children) b.disabled = full;
     }
@@ -12047,23 +12047,44 @@ function renderPadCricket(full){
   if(!pad) return;
   pad.classList.remove('hidden');
   pad.classList.add('cricket-pad');
-  pad.innerHTML = '';
   const p = game.players[game.current];
   const numbers = game.config.numbers || CRICKET_STANDARD_NUMBERS;
-  numbers.forEach(n=>{
+
+  // Item 67 (docs/code-quality-roadmap.md), the same "build once, then toggle"
+  // treatment item 57b gave the default pad. What is REBUILT here is only what
+  // can actually change shape: the seven target buttons and their `throwDart(n)`
+  // closures are fixed for the whole match, and the off-target picker's presence
+  // is fixed until somebody taps the toggle. The marks glyph and the closed state
+  // DO change on every dart, so those are written onto the existing buttons below
+  // instead of being a reason to tear the whole pad down and re-attach fourteen
+  // fresh event handlers per throw.
+  const key = `cricket:${numbers.join(',')}:${cricketOffTargetOpen ? 1 : 0}`;
+  const rebuild = pad.dataset.padKey !== key;
+  if(rebuild){
+    pad.innerHTML = '';
+    numbers.forEach(n=>{
+      const b = document.createElement('button');
+      b.className = 'cricket-target';
+      b.innerHTML = `<span class="ct-num">${cricketNumberLabel(n)}</span><span class="ct-marks" aria-hidden="true"></span>`;
+      b.onclick = () => throwDart(n);
+      pad.appendChild(b);
+    });
+    const miss=document.createElement('button');
+    miss.className='miss'; miss.textContent='Miss';
+    miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+  }
+  // Per-dart state, written onto whichever buttons are there — freshly built or not.
+  const targetBtns = pad.querySelectorAll('.cricket-target');
+  numbers.forEach((n, i)=>{
+    const b = targetBtns[i];
+    if(!b) return;
     const m = p.marks[n] || 0;
     const closed = m >= 3;
-    const b = document.createElement('button');
-    b.className = 'cricket-target' + (closed ? ' closed' : '');
-    b.disabled = full;
-    b.innerHTML = `<span class="ct-num">${cricketNumberLabel(n)}</span><span class="ct-marks" aria-hidden="true">${marksGlyph(m)}</span>`;
+    b.classList.toggle('closed', closed);
+    const glyph = b.querySelector('.ct-marks');
+    if(glyph) glyph.textContent = marksGlyph(m);
     b.setAttribute('aria-label', `${cricketNumberLabel(n)}${closed ? ' — closed' : ` — ${Math.min(3,m)} of 3 marks`}`);
-    b.onclick = () => throwDart(n);
-    pad.appendChild(b);
   });
-  const miss=document.createElement('button');
-  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
-  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
 
   // docs/bug-roadmap.md BUG-23: a dart landing on a real number that just isn't
   // in play this match (e.g. 1-14 in classic Cricket, since only 7 of the 21
@@ -12074,35 +12095,40 @@ function renderPadCricket(full){
   // default picker lets it be logged with its real sector instead; scoring is
   // unaffected either way (evaluateVisitCricket() already no-ops any sector not
   // in `numbers`, regardless of which specific non-target number it is).
-  const offTargetNumbers = CRICKET_ALL_NUMBERS.filter(n => !numbers.includes(n));
-  const wrap = document.createElement('div');
-  wrap.className = 'cricket-offtarget-wrap';
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'cricket-offtarget-toggle';
-  toggle.disabled = full;
-  toggle.textContent = cricketOffTargetOpen ? 'Hit a different number ▴' : 'Hit a different number ▾';
-  toggle.setAttribute('aria-expanded', String(cricketOffTargetOpen));
-  toggle.onclick = () => { cricketOffTargetOpen = !cricketOffTargetOpen; renderPad(); };
-  wrap.appendChild(toggle);
-  if(cricketOffTargetOpen){
-    const grid = document.createElement('div');
-    grid.className = 'cricket-offtarget-grid';
-    grid.setAttribute('role', 'group');
-    grid.setAttribute('aria-label', 'Hit a different number — not in play this match, no marks');
-    offTargetNumbers.forEach(n=>{
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'cricket-offtarget-btn';
-      b.disabled = full;
-      b.textContent = cricketNumberLabel(n);
-      b.setAttribute('aria-label', `${cricketNumberLabel(n)} — not in play, no marks`);
-      b.onclick = () => throwDart(n);
-      grid.appendChild(b);
-    });
-    wrap.appendChild(grid);
+  if(rebuild){
+    const offTargetNumbers = CRICKET_ALL_NUMBERS.filter(n => !numbers.includes(n));
+    const wrap = document.createElement('div');
+    wrap.className = 'cricket-offtarget-wrap';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'cricket-offtarget-toggle';
+    toggle.textContent = cricketOffTargetOpen ? 'Hit a different number ▴' : 'Hit a different number ▾';
+    toggle.setAttribute('aria-expanded', String(cricketOffTargetOpen));
+    toggle.onclick = () => { cricketOffTargetOpen = !cricketOffTargetOpen; renderPad(); };
+    wrap.appendChild(toggle);
+    if(cricketOffTargetOpen){
+      const grid = document.createElement('div');
+      grid.className = 'cricket-offtarget-grid';
+      grid.setAttribute('role', 'group');
+      grid.setAttribute('aria-label', 'Hit a different number — not in play this match, no marks');
+      offTargetNumbers.forEach(n=>{
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'cricket-offtarget-btn';
+        b.textContent = cricketNumberLabel(n);
+        b.setAttribute('aria-label', `${cricketNumberLabel(n)} — not in play, no marks`);
+        b.onclick = () => throwDart(n);
+        grid.appendChild(b);
+      });
+      wrap.appendChild(grid);
+    }
+    pad.appendChild(wrap);
+    pad.dataset.padKey = key;
   }
-  pad.appendChild(wrap);
+  // One sweep for every button the pad owns — targets, Miss, the off-target
+  // toggle and its grid — rather than a `disabled = full` repeated at each
+  // creation site, which only ran on the frames that rebuilt.
+  for(const b of pad.querySelectorAll('button')) b.disabled = full;
 }
 
 /* Baseball's dedicated scoring screen — only one number is ever live (this
@@ -12125,17 +12151,24 @@ function renderSingleTargetPad(full, sector, label, ariaLabel){
   if(!pad) return;
   pad.classList.remove('hidden');
   pad.classList.add('cricket-pad');
-  pad.innerHTML = '';
-  const b = document.createElement('button');
-  b.className = 'cricket-target';
-  b.disabled = full;
-  b.innerHTML = `<span class="ct-num">${label}</span>`;
-  b.setAttribute('aria-label', ariaLabel);
-  b.onclick = () => throwDart(sector);
-  pad.appendChild(b);
-  const miss=document.createElement('button');
-  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
-  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+  // Item 67: this pad's whole content is (sector, label, ariaLabel) — all three
+  // constant for the length of a round. Keyed on exactly those, so the rebuild
+  // happens when the round's target changes and not once per dart.
+  const key = `single:${sector}:${label}:${ariaLabel}`;
+  if(pad.dataset.padKey !== key){
+    pad.innerHTML = '';
+    const b = document.createElement('button');
+    b.className = 'cricket-target';
+    b.innerHTML = `<span class="ct-num">${label}</span>`;
+    b.setAttribute('aria-label', ariaLabel);
+    b.onclick = () => throwDart(sector);
+    pad.appendChild(b);
+    const miss=document.createElement('button');
+    miss.className='miss'; miss.textContent='Miss';
+    miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+    pad.dataset.padKey = key;
+  }
+  for(const b of pad.querySelectorAll('button')) b.disabled = full;
 }
 function renderPadBaseball(full){
   const target = baseballInningTarget(game.baseballInning);
@@ -12185,8 +12218,6 @@ function renderPadPressureChamber(full){
   const pad = document.getElementById('pad');
   if(!pad) return;
   pad.classList.remove('hidden');
-  pad.classList.remove('cricket-pad');
-  pad.innerHTML = '';
 
   // docs/archive/pressure-chamber-roadmap.md build-order step 10: the self-declare hit/miss
   // step is its own screen state AHEAD of the normal dart-input widget. Until the
@@ -12194,44 +12225,62 @@ function renderPadPressureChamber(full){
   // number pad and the S/D/T multi-row are hidden and replaced by the two declare
   // buttons; only once a call is made does the real dart pad appear (No Warmup's
   // clock doesn't start until then either — see renderGamePressureChamber()).
+  //
+  // Item 67: this pad has exactly two shapes — the declare prompt and the full
+  // 1-20+Bull grid — and the contents of each are fixed. `padKey` is which of the
+  // two is currently built, so a round's worth of darts reuses one grid instead of
+  // rebuilding twenty-two buttons and their closures per throw.
   if(game.pressureDeclared == null && !full && game.darts.length === 0){
     if(bounceBtn) bounceBtn.disabled = true;
     if(multi) multi.classList.add('hidden');
     pad.classList.add('cricket-pad');
-    const prompt = document.createElement('div');
-    prompt.className = 'pp-meta';
-    prompt.style.cssText = 'grid-column:1/-1;text-align:center;margin-bottom:8px;font-weight:700';
-    prompt.textContent = 'Call it before you throw — will you HIT this target, or MISS?';
-    pad.appendChild(prompt);
-    const hitBtn = document.createElement('button');
-    hitBtn.className = 'cricket-target';
-    hitBtn.innerHTML = '<span class="ct-num">🎯 I\'ll hit it</span>';
-    hitBtn.setAttribute('aria-label', "Declare: I'll hit this round's target");
-    hitBtn.onclick = () => declarePressureHit(true);
-    pad.appendChild(hitBtn);
-    const missBtn = document.createElement('button');
-    missBtn.className = 'miss';
-    missBtn.innerHTML = '<span class="ct-num">❌ I\'ll miss</span>';
-    missBtn.setAttribute('aria-label', "Declare: I'll miss this round's target");
-    missBtn.onclick = () => declarePressureHit(false);
-    pad.appendChild(missBtn);
+    if(pad.dataset.padKey !== 'pc-declare'){
+      pad.innerHTML = '';
+      const prompt = document.createElement('div');
+      prompt.className = 'pp-meta';
+      prompt.style.cssText = 'grid-column:1/-1;text-align:center;margin-bottom:8px;font-weight:700';
+      prompt.textContent = 'Call it before you throw — will you HIT this target, or MISS?';
+      pad.appendChild(prompt);
+      const hitBtn = document.createElement('button');
+      hitBtn.className = 'cricket-target';
+      hitBtn.innerHTML = '<span class="ct-num">🎯 I\'ll hit it</span>';
+      hitBtn.setAttribute('aria-label', "Declare: I'll hit this round's target");
+      hitBtn.onclick = () => declarePressureHit(true);
+      pad.appendChild(hitBtn);
+      const missBtn = document.createElement('button');
+      missBtn.className = 'miss';
+      missBtn.innerHTML = '<span class="ct-num">❌ I\'ll miss</span>';
+      missBtn.setAttribute('aria-label', "Declare: I'll miss this round's target");
+      missBtn.onclick = () => declarePressureHit(false);
+      pad.appendChild(missBtn);
+      pad.dataset.padKey = 'pc-declare';
+    }
+    // The declare buttons are never disabled — reaching this branch at all means
+    // no call has been made and no dart has been thrown.
+    for(const b of pad.querySelectorAll('button')) b.disabled = false;
     return;
   }
 
+  pad.classList.remove('cricket-pad');
   if(bounceBtn) bounceBtn.disabled = full;
   if(multi) multi.classList.remove('hidden');
-  for(let n=1;n<=20;n++){
-    const b=document.createElement('button');
-    b.textContent=n; b.disabled=full;
-    b.onclick=()=>throwDart(n);
-    pad.appendChild(b);
+  if(pad.dataset.padKey !== 'pc-grid'){
+    pad.innerHTML = '';
+    for(let n=1;n<=20;n++){
+      const b=document.createElement('button');
+      b.textContent=n;
+      b.onclick=()=>throwDart(n);
+      pad.appendChild(b);
+    }
+    const bull=document.createElement('button');
+    bull.className='bull'; bull.textContent='Bull';
+    bull.onclick=()=>throwDart(25); pad.appendChild(bull);
+    const miss=document.createElement('button');
+    miss.className='miss'; miss.textContent='Miss';
+    miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+    pad.dataset.padKey = 'pc-grid';
   }
-  const bull=document.createElement('button');
-  bull.className='bull'; bull.textContent='Bull'; bull.disabled=full;
-  bull.onclick=()=>throwDart(25); pad.appendChild(bull);
-  const miss=document.createElement('button');
-  miss.className='miss'; miss.textContent='Miss'; miss.disabled=full;
-  miss.onclick=()=>throwDart(0); pad.appendChild(miss);
+  for(const b of pad.querySelectorAll('button')) b.disabled = full;
 }
 // Records this round's before-the-throw self-declaration and reveals the dart pad.
 // Purely a self-discipline signal (docs/archive/pressure-chamber-roadmap.md) — it never

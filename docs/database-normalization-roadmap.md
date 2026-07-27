@@ -1,6 +1,8 @@
-Status: Not started — design + migration plan drafted, per the owner's explicit
-"do not make any changes" instruction for the audit itself. Nothing in this
-document has been implemented; `backend/db.js`'s live schema is untouched.
+Status: §3.1's `turns.checkout_points` half is **DONE (2026-07)** — the column
+is dropped and derived at read time; see that section and §4.2 for what shipped
+and how the plan below had to be corrected first. §3.1's `category` half is
+open and **recommended against** (see its own note). §3.2 remains a sketch only,
+unimplemented by design.
 
 # Database normalization audit + 3NF redesign + migration plan
 
@@ -25,12 +27,12 @@ alike but aren't:
   would let deleting a participant retroactively reclassify a finished H2H
   game as solo).
 - **Two genuinely redundant, derivable-from-another-table caches**:
-  `turns.checkout_points` and the `category` column on `games`/`tournaments`/
-  `leagues` (for X01 rows, where it duplicates `config.startingScore`). These
-  *are* the textbook "materialized aggregate" shape 3NF purism forbids, but
-  they're deliberate, already-labeled performance caches (`turns.checkout_points`:
-  "kept as performance cache for ton+/Big Fish queries"), never independently
-  writable after creation, so they can never drift from the value they cache.
+  `turns.checkout_points` (**since removed** — see §3.1) and the `category`
+  column on `games`/`tournaments`/`leagues` (for X01 rows, where it duplicates
+  `config.startingScore`). These *are* the textbook "materialized aggregate"
+  shape 3NF purism forbids, but they're deliberate, already-labeled performance
+  caches, never independently writable after creation, so they can never drift
+  from the value they cache.
 - **One real structural finding**: `games.config` (and `leagues`/`tournaments`
   reusing `category` for two unrelated meanings depending on `game_type`) is a
   JSON blob whose keys vary by `game_type` — `startingScore` for X01,
@@ -92,15 +94,66 @@ that audit.
 
 ## 3. Redesign to strict 3NF
 
-### 3.1 Drop the two genuinely redundant columns (recommended — low cost, low risk)
+### 3.1 Drop the two genuinely redundant columns
 
-**`turns.checkout_points`** — always equal to the `scored` value of the
-checkout-marked dart in that turn's `darts` rows. Replace every read site
-(ton+/Big Fish/toughest-checkout queries, `q(...checkout_points...)` in
-`getPlayerStatBubbles()` and friends) with the equivalent
-`(SELECT d.scored FROM darts d WHERE d.turn_id = t.id ORDER BY d.dart_no DESC LIMIT 1)`
-subquery, or a `checkout_darts` covering index if that subquery shows up in
-`EXPLAIN QUERY PLAN` as a hot path. Drop the column.
+**`turns.checkout_points` — ✅ DONE (2026-07).** The column is gone; the value
+is derived at read time.
+
+**Two corrections to what this section originally said**, both found while
+implementing it, and both worth recording because the original plan would have
+produced wrong numbers:
+
+1. **It is not the last dart's value.** This section claimed
+   `checkout_points` equals "the `scored` value of the checkout-marked dart in
+   that turn's `darts` rows," and proposed
+   `(SELECT d.scored FROM darts d WHERE d.turn_id = t.id ORDER BY d.dart_no DESC LIMIT 1)`.
+   That is the value of the FINISHING DART. A checkout is the whole visit's
+   score — a 170 finish is T20+T20+Bull, and that subquery would have returned
+   50. The column duplicates `turns.scored`, not a dart. (`scored: bust ? 0 :
+   pointsThisVisit` in every evaluator; a winning visit is never a bust; and
+   `addTurn()` has independently enforced `checkoutPoints === scored` on
+   checkout turns at write time for a while.) So the replacement is `t.scored`
+   — cheaper than the subquery this section feared, not more expensive.
+
+2. **`checkout` is an overloaded flag, and the column was silently carrying
+   that.** For X01, 121 Checkout Ladder and Dead Man Walking, `checkout=1`
+   means "checked out, for this many points." For The Pressure Chamber and
+   Checkout Trainer it means "this visit was a legal attempt rather than a
+   miss" — and their `scored` is a CP gain or a flat 0, not a finish. Those two
+   wrote nothing into `checkout_points`, which is how the distinction was
+   encoded. A naive `CASE WHEN checkout = 1 THEN scored END` would therefore
+   have turned a 150-CP Pressure Chamber round into a 150 checkout.
+
+What shipped instead is `CHECKOUT_POINTS` in `backend/db.js`:
+
+```sql
+(CASE WHEN t.checkout = 1 AND g.game_type IN (<scoring types>) THEN t.scored END)
+```
+
+where the game-type list is **derived from `GAME_TYPE_REGISTRY`** — the two
+attempt-modes carry `checkoutIsAttempt: true` on their own entries, so a future
+mode that overloads the flag marks itself and one that doesn't is included
+without an edit. Every read site already joins `games g`, so this drops in
+where `t.checkout_points` used to be.
+
+Worth being precise about what the marking buys today: every current read site
+is ALSO X01-scoped (`docs/bug-roadmap.md` BUG-27 put `X01_ONLY` on all of them,
+for exactly this family of reason), so removing the marking changes no shipped
+number right now. It is there — and asserted — because the expression has to be
+correct on its own terms; BUG-27 is the standing evidence that "checkout=1
+means an X01 finish" is an assumption this codebase has already made wrongly
+once, in a query that had no game-type guard.
+
+Committed coverage: `backend/test/db.checkout-points-derivation.test.js`
+(9 assertions), which tests the expression **directly** rather than through a
+stats function, precisely because every stats function carries its own X01
+filter that would mask a wrong derivation.
+
+One deliberate behaviour change: the games CSV export's `highest_checkout`
+column, previously `0` for a Pressure Chamber or Checkout Trainer game (those
+rows stored `0`, not `NULL` — `addTurn()`'s `Number(t.checkoutPoints) || 0`),
+is now blank. The turns CSV export is byte-identical: its `checkout_points`
+column is still there, still populated, just computed.
 
 **`games.category` / `tournaments.category` / `leagues.category`** for X01
 rows — duplicates `CAST(json_extract(config,'$.startingScore') AS TEXT)`.
@@ -119,6 +172,23 @@ risk (every `GAME_TYPES` entry now derives its own `category` value instead
 of a fallthrough ternary that could silently write garbage), the remaining
 exposure here is purely "two columns instead of one," not "wrong values" —
 lower urgency than `checkout_points`.
+
+**Recommendation after doing the `checkout_points` half: don't do this one.**
+The two are not the same shape of change, and the difference only became clear
+with one of them finished. `checkout_points` was read as a VALUE, in about
+thirty places, and its replacement (`t.scored`) is a plain column reference —
+same cost, strictly clearer, and it deleted a real 3NF violation. `category` is
+read as a FILTER and a GROUP BY key (`g.category = ?`, `GROUP BY g.category`),
+in about that many places, and its replacement is
+`CAST(json_extract(g.config,'$.startingScore') AS TEXT)` — an expression SQLite
+cannot index, in queries where the column is the thing being scanned on. That
+trades a real query-plan regression across the roster and per-category stats
+for a purity gain the codebase does not otherwise feel: `category` has one
+writer, has never drifted, and item 41 already removed the way it could.
+
+It is tracked as its own open item on `docs/open-roadmap-items.md` rather than
+closed unilaterally, since "don't do it" is the owner's call, not this
+document's.
 
 ### 3.2 Split `games.config` into per-game-type tables (textbook-correct, NOT recommended to actually run without a separate go-ahead)
 
@@ -209,13 +279,26 @@ not meant to be executed as part of this pass.
    confirms the migration is good, then normal backup retention (`docs/`-
    documented `BACKUP_RETENTION_DAYS`) takes back over.
 
-### 4.2 Migrate `turns.checkout_points` off
+### 4.2 Migrate `turns.checkout_points` off — ✅ DONE (2026-07)
 
-Since the value already exists in `darts` for every historical row (the
-checkout dart's `scored` is generated from `sector`/`multiplier`, which have
-been recorded since the `darts` table existed), **no backfill is needed at
-all** — this is a pure "stop reading/writing a column" migration with zero
-data movement:
+Since the value already exists in the same row (`turns.scored` — see §3.1's
+first correction; this section originally said `darts`, which was wrong),
+**no backfill was needed at all** — a pure "stop reading/writing a column"
+migration with zero data movement. What actually ran:
+
+- All ~30 read sites repointed at the `CHECKOUT_POINTS` expression, `insertTurn`
+  and the player-import insert lost the parameter, and the column was dropped
+  via `ALTER TABLE turns DROP COLUMN checkout_points` in `db.js`'s existing
+  migration block — wrapped in the same `try/catch` as the additive migrations
+  beside it, which makes it idempotent for the same reason (a second run throws
+  "no such column" and is swallowed).
+- Steps 1 and 2 below were followed as written and the suite stayed green
+  throughout, at 1567 tests before the change and 1576 after.
+- An export written before this change still carries `checkout_points`; the
+  importer simply no longer reads it, and the value is reproduced from
+  `scored`+`checkout`+`game_type`. Old exports stay importable.
+
+The original plan, kept for the record:
 
 1. Add the replacement subquery (or a `checkout_darts` view, if `EXPLAIN
    QUERY PLAN` shows the correlated subquery form is too slow at real data

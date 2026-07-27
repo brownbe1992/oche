@@ -5,7 +5,7 @@ description: Run Oche's browser-driven UI regression checks against a real runni
 
 # Verifying Oche's UI
 
-`backend/test/` (1567 tests, `cd backend && npm test`) covers the maths: stat
+`backend/test/` (1576 tests, `cd backend && npm test`) covers the maths: stat
 formulas, achievement triggers, DB queries, replay logic. It never loads a
 browser, so it cannot see whether a screen still *works* — and several real
 regressions have lived precisely in that blind spot:
@@ -40,7 +40,7 @@ series, on purpose (see Rate limiting below).
 
 ## What it covers
 
-329 assertions across twelve checks:
+348 assertions across thirteen checks:
 
 | Check | Guards |
 |---|---|
@@ -54,6 +54,7 @@ series, on purpose (see Rate limiting below).
 | `save-resume` | Pausing a game does not lose the visits just thrown. Throws three visits, calls `DB.saveGame()` and reads the resume payload with zero delay, and requires every turn to be there. The defect it guards is browser request ordering (a save resolving ahead of its still-queued turn writes), which no `backend/test` coverage can see — the backend was correct throughout. |
 | `leg-reset` | A new leg starts from a new leg's state, for every type that reaches one. Fingerprints `game`'s own state at leg 1, dirties it with a real visit, crosses a leg boundary and requires the fingerprint back — generic rather than a per-mode field list, so a mode that adds a game-level counter and forgets to reset it is caught without extending this file. Sweeps only the types that actually call `startNextLeg()`, and requires every type declaring a real `resetLegState` to be among them. |
 | `resume-fidelity` | A saved game comes back as the game that was paused, for every type in `SAVABLE_GAME_TYPES`. Resume is replay, not snapshot — the whole position is reconstructed by re-running the recorded turns through `scoring.js`'s `rebuild*State` functions — so a wrong one yields a completely normal-looking game that simply isn't the one the player paused. Plays a scripted multi-sector run, saves through the real endpoint, resumes through the real `resumeGame()`, and requires an identical fingerprint. The four modes whose bespoke rebuilds never replayed dart counters are asserted *precisely* (exactly those fields drift, nothing more) rather than excluded, so the gap can't silently widen — see `docs/open-roadmap-items.md` item 75. |
+| `pad-reuse` | The dart pads are built once and toggled, not rebuilt per dart — and still update. Asserts BOTH, because they pull against each other: the buttons must be the same nodes after a dart (stamped before, looked for after — a rebuild is invisible to a check that only reads the rendered result, which is why the per-dart rebuild survived so long), and Cricket's marks glyph, `closed` class and `aria-label` must still move when a number closes (the naive way to stop rebuilding is to stop rendering, which freezes the pad while the real state moves underneath). Reads the pad-owning types from the app's own `MODE_PAD_RENDERERS`. |
 | `live-scoreboard` | The `/display` second screen picks up players, updates on a scored visit, renders an end-of-leg card, and switches renderer for Cricket. |
 | `home-settings` | Home ticker hides with no activity and shows with some; a Settings tile summary tracks a script-driven change. |
 

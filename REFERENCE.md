@@ -145,6 +145,33 @@ oche/
   bust/win/leaves preview). A type declaring `afterDart` *and* its own
   `throwDart` is a contract violation — the `afterDart` would never run — and
   `backend/test/frontend.turn-loop-dispatch.test.js` fails on it.
+- **The dart pads are built once and toggled** (2026-07, items 57b + 67).
+  Every pad renderer — the default 1-20+Bull grid, `renderPadCricket()`, the
+  shared `renderSingleTargetPad()` (Baseball/Shanghai/Halve-It/Bob's 27) and
+  `renderPadPressureChamber()` — writes a **`pad.dataset.padKey`** describing
+  what is currently built, and rebuilds only when that key changes. `renderPad()`
+  itself still runs on every dart; what stopped running on every dart is
+  `pad.innerHTML = ''` and the fresh `onclick` closure per button. The keys:
+
+  | Pad | `padKey` | Rebuilds when |
+  |---|---|---|
+  | default grid | `default:<hasMiss>` | never within a game |
+  | Cricket | `cricket:<numbers>:<offTargetOpen>` | the off-target picker is toggled |
+  | single-target | `single:<sector>:<label>:<ariaLabel>` | the round's target changes |
+  | Pressure Chamber | `pc-declare` / `pc-grid` | the declaration is made |
+  | dartboard SVG | *(n/a — `if(!board.querySelector('svg'))`)* | never within a game |
+
+  **What is NOT cached is anything that changes per dart.** Cricket's marks
+  glyph, its `closed` class and its per-button `aria-label` are written onto the
+  existing buttons on every render, and each renderer ends with one
+  `for(const b of pad.querySelectorAll('button')) b.disabled = full` sweep
+  covering every button it owns. The failure mode a "stop rebuilding" change
+  invites is freezing the pad while the real state moves underneath, so the
+  verify-ui `pad-reuse` check asserts both directions: the buttons must be the
+  same nodes after a dart, *and* Cricket's marks must still move when a number
+  closes. `pad`'s own DOM identity resets on every new game (`renderGameShell()`
+  replaces the whole container), so a stale key from a previous game can never
+  be matched.
 - **Leg resets are two members, split by scope** (2026-07, item 69).
   `resetForNextLeg(p, game, newSet)` is **per player** and runs once per seat;
   `resetLegState(game, newSet)` is **per game** and runs exactly once. Both are
@@ -1195,9 +1222,9 @@ them:
 | `games` | **H2H only — by design** | `COUNT(*) FROM games WHERE completed_at IS NOT NULL AND practice = 0 AND player_count > 1`. Practice, solo, and Daily Challenge sessions deliberately do **not** count as "Games Played" (product decision, 2026-07); completed cricket H2H matches **do** count (they're real matches — see the cricket-interaction table above). The explicit filter makes the practice exclusion intentional; independently, `completed_at` is only ever set on a genuine finish — a real match win (`POST /api/games/:id/complete`, called from `onLegWon()`'s and `onLegWonCricket()`'s match-win branches) or a forfeit-triggered walkover (`forfeitPlayer()`, §13 "Forfeiting a game / DNF") — never on an abandoned/DNF'd match (`POST /api/games/:id/abandon` sets `dnf_at` instead), so the filter is belt-and-braces rather than load-bearing today. |
 | `sets` / `legs` | **H2H only** | Distinct `(game,set)` / `(game,set,leg)` combos with ≥1 turn recorded — **no completion requirement**, an in-progress leg still counts |
 | `darts` | fully global | `COUNT(*) FROM darts` |
-| `tonPlus` | fully global | `COUNT(*) FROM turns WHERE checkout=1 AND checkout_points>=100` |
+| `tonPlus` | fully global | `COUNT(*) FROM turns WHERE CHECKOUT_POINTS>=100` (see `turns` in §Schema — the checkout's points are derived from `scored`, not stored) |
 | `oneEighties` | fully global | `COUNT(*) FROM turns WHERE scored=180` |
-| `bigFish` | fully global | `COUNT(*) FROM turns WHERE checkout=1 AND checkout_points=170` |
+| `bigFish` | fully global | `COUNT(*) FROM turns WHERE CHECKOUT_POINTS=170` |
 | `nineDarters` | fully global | see "Nine-darter definition" below |
 | `practiceLegs` | practice/solo only | same shape as `legs`, practice-scoped |
 
@@ -1218,7 +1245,7 @@ them:
   elsewhere in this file, chosen so one or two lucky opening legs can't top the
   board over a genuinely well-established start. Ranked **descending**
   (unlike Fewest Trebleless Visits above) — a higher first-9 average is better.
-- **Highest checkout**: `MAX(checkout_points)`, ties broken by earliest date; `overall`/`h2h`/`practice` variants.
+- **Highest checkout**: `MAX(CHECKOUT_POINTS)`, ties broken by earliest date; `overall`/`h2h`/`practice` variants.
 - **Today/week activity**: legs/darts with `date(created_at)` today or in the
   trailing 7 days — **not mode-scoped** (H2H and practice both count), and not
   timezone-shifted (raw UTC date boundary).
@@ -1309,7 +1336,7 @@ below the table.
 | **Darts Thrown** | raw | `COUNT(*)` from `darts`, **`AND g.game_type='x01'`** |
 | **Average** | 3-dart-avg | `totalPts / avgDarts * 3` where `avgDarts` sums `bust?3:COUNT(darts)` per turn |
 | **180s** | raw count | `COUNT(*) WHERE scored=180` |
-| **Big Fish** | raw count | `COUNT(*) WHERE checkout=1 AND checkout_points=170` |
+| **Big Fish** | raw count | `COUNT(*) WHERE CHECKOUT_POINTS=170` |
 | **9 Darters** | leg-level | nine-darter definition above, scoped to this player |
 | **Darts / Day** | raw | `dartsThrown / COUNT(DISTINCT date(created_at))`, **`AND g.game_type='x01'`** |
 | **Darts / Leg** | raw | `AVG(darts in leg)`, **won legs only** (`HAVING SUM(checkout)>0`) |
@@ -4286,7 +4313,8 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   (`won` / `lost` / `completed` for a finished game with no recorded winner /
   `unfinished`); `avg_per_turn` is `points_scored / turns` rounded to 2
   decimals (empty when they had no turns); `highest_checkout` is
-  `MAX(checkout_points)` over their `checkout=1` turns (empty when none).
+  `MAX(CHECKOUT_POINTS)` over their turns (empty when none — including for The Pressure
+  Chamber and Checkout Trainer, whose `checkout=1` is an attempt, not a finish).
   `kind='turns'` returns one row per turn **they threw** (never an
   opponent's), ordered by game then turn id: `turn_id, game_id, game_type,
   category, turn_at, set_no, leg_no, scored, bust, checkout, checkout_points,
@@ -4596,8 +4624,8 @@ any existing stat query.
 | `game_id` / `player_id` | `INTEGER NOT NULL, FK, ON DELETE CASCADE` | |
 | `set_no` / `leg_no` | `INTEGER NOT NULL` | Must be a positive integer (`addTurn()` rejects `0` or negative explicitly — an explicit `0` is validation-rejected, not silently treated as the "omitted" default of `1`) |
 | `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. For `game_type='baseball'` the same caller also rejects a `scored` that doesn't equal this visit's runs — the sum of dart `multiplier`s that hit the inning's target number, where the inning is derived server-side from the player's own prior turn count in the leg (`min(inning, 9)` for extra innings); a Baseball turn must also be neither a bust nor a checkout (`docs/security-audit-roadmap.md` SEC-25). For `game_type='bobs_27'`, `scored` is that round's own *gain only* — never a negative penalty (see §2's "store the gain, derive the penalty"); the same caller derives the round from the player's own prior turn count (capped at 20), rejects a `scored` that doesn't match `hits * round*2` on the submitted darts, rejects `checkout=true` outright, and requires `bust` to match whether replaying every prior round's gain/penalty plus this round's own would drop the running score to 0 or below (`docs/archive/practice-ladders-roadmap.md` Part A). Still deliberately skipped for Cricket (`scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits) and for Doubles Practice / Chuckin / Checkout Trainer / Around the Clock / World (non-arithmetic or non-points `scored`) |
-| `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns) |
-| `checkout_points` | `INTEGER` | Only set when `checkout=1` (X01 only) |
+| `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns). **`checkout` is overloaded, and this matters to every query that reads it**: for `x01`, `checkout_ladder` and `dead_man_walking` it means "checked out, and `scored` is what for" — but The Pressure Chamber and Checkout Trainer reuse it for "this visit was a legal attempt rather than a miss", where `scored` is a CP gain or a flat `0` and no finish happened at all. `docs/bug-roadmap.md` BUG-27 is what happens when a query forgets this. The registry states it explicitly (`checkoutIsAttempt: true` on those two entries) and `CHECKOUT_POINTS` reads it from there |
+| ~~`checkout_points`~~ | *(dropped 2026-07 — `docs/database-normalization-roadmap.md` §3.1, item 62)* | It held a copy of `scored` and nothing else, and is now **derived at read time** by the `CHECKOUT_POINTS` expression in `backend/db.js`: `CASE WHEN t.checkout = 1 AND g.game_type IN (<scoring types>) THEN t.scored END`. Two things make that correct rather than merely convenient. First, a checkout's points are the whole **visit's** score, not the finishing dart's — every evaluator returns `scored: bust ? 0 : pointsThisVisit`, a winning visit is never a bust, and `addTurn()` independently rejects a checkout turn whose `checkoutPoints` differs from its `scored` (SEC-22, and now also the guarantee the derivation rests on). Second, `checkout` is an **overloaded flag**, and this column was silently carrying that: see the row above. The game-type list is derived from `GAME_TYPE_REGISTRY`, not hand-kept — the two modes that overload the flag carry `checkoutIsAttempt: true` on their own entries. Covered by `backend/test/db.checkout-points-derivation.test.js`. The migration is a plain `DROP COLUMN` with no backfill and nothing to restore, since every value it held is still in the row it was copied from |
 | `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged. Checkout Trainer repurposes it as "answered with the objectively fewest darts" (§19) |
 | `target_score` | `INTEGER` | Checkout Trainer only (§19): the target offered for that round — unlike X01 there's no persistent "remaining score" state to derive it from afterward. `NULL` for every other game type; `addTurn()` range-checks it to 1–170 |
 | `declared_unsolvable` | `INTEGER NOT NULL DEFAULT 0` | Checkout Trainer trick questions only (§19): `1` marks a round answered by declaring "no possible checkout" instead of tapping out darts — the only turn shape allowed to carry **zero** dart rows (`addTurn()` rejects it outside `checkout_trainer` games, with any darts attached, or with a nonzero `scored`). The verdict still lives on `bust`/`checkout`/`leg_won` (correct call → `checkout=1, leg_won=1`; wrong call → `bust=1`); this flag exists so "a real checkout was solved" queries (Toughest Checkout Solved) can exclude declarations |
@@ -7772,7 +7800,7 @@ direction:
 |---|---|---|
 | `legAvg` | ascending (higher wins) | `MAX` of every won leg's average, dated before tonight |
 | `fewestDartsCheckout` | descending (lower wins) | `MIN` darts across every won leg, dated before tonight (`NOT_HANDICAPPED`-scoped, same as `getPersonalBests()`) |
-| `highestCheckout` | ascending (higher wins) | `MAX(checkout_points)`, dated before tonight |
+| `highestCheckout` | ascending (higher wins) | `MAX(CHECKOUT_POINTS)`, dated before tonight |
 
 A worse leg played later the same night never adds a second entry for a
 metric already recorded as beaten earlier that night — the comparison is
@@ -7782,7 +7810,7 @@ always "tonight's own best vs. the pre-tonight baseline," not per-leg.
 
 A chronological merge of the same event classes the live moment cards
 already fire on — 180s (X01-only), ton+/Big Fish checkouts
-(`checkout_points >= 100`, `170` specifically tagged `bigfish`), H2H match
+(`CHECKOUT_POINTS >= 100`, `170` specifically tagged `bigfish`), H2H match
 wins, and badges earned that date — sorted ascending by timestamp so the
 recap reads start-to-finish like the night actually happened.
 
