@@ -10,6 +10,13 @@
 // behaviour, it throws on the first frame, and this test says so before anyone
 // has to discover it live.
 //
+// `resetLegState` (item 69) joined them for the same reason: startNextLeg()
+// kept its own hardcoded per-mode chain of round-counter resets right next to
+// the registry call that was supposed to own leg resets, so the two mechanisms
+// drifted apart one game type at a time. `buildConfig` (item 70) replaced
+// startGame()'s 14-branch config ternary, whose final fallthrough silently
+// handed any unlisted game type X01's `{startingScore}`.
+//
 // Source-level rather than behavioural on purpose. The behaviour is covered by
 // the verify-ui `turn-loop` check, which drives every registered mode through
 // throw → commit → undo and requires the state to come back identical; what
@@ -41,6 +48,13 @@ function registryEntries() {
 }
 
 const ENTRIES = registryEntries();
+// Is the member declared at all? Its value may be a named function or an inline
+// arrow (buildConfig is mostly arrows, carrying each type's own reasoning next
+// to it the way `category` already does), so presence and "names a function"
+// are two different questions.
+const hasMember = (body, name) => new RegExp(`\\n {4}${name}:`).test(body);
+// The named-function form only. Returns null for an inline arrow, which the
+// exists-check below skips rather than failing on.
 const member = (body, name) => {
   const m = body.match(new RegExp(`\\n {4}${name}: ([A-Za-z0-9_]+),`));
   return m ? m[1] : null;
@@ -54,9 +68,9 @@ describe('the GAME_TYPES turn-loop contract', () => {
     }
   });
 
-  for (const name of ['render', 'throwDart', 'undoLastTurn', 'enterTurn']) {
+  for (const name of ['render', 'throwDart', 'undoLastTurn', 'enterTurn', 'resetLegState', 'buildConfig']) {
     test(`every type declares ${name}() — there is no implicit X01 default any more`, () => {
-      const missing = [...ENTRIES].filter(([, body]) => !member(body, name)).map(([k]) => k);
+      const missing = [...ENTRIES].filter(([, body]) => !hasMember(body, name)).map(([k]) => k);
       assert.deepEqual(missing, [], `${name} missing on: ${missing.join(', ')}`);
     });
   }
@@ -69,9 +83,9 @@ describe('the GAME_TYPES turn-loop contract', () => {
     // throws on the first dart.
     for (const [key, body] of ENTRIES) {
       const shared = member(body, 'throwDart') === 'throwDartVisit';
-      const after = member(body, 'afterDart');
+      const after = hasMember(body, 'afterDart');
       if (shared) assert.ok(after, `${key} shares throwDartVisit but declares no afterDart`);
-      else assert.equal(after, null, `${key} has its own throwDart, so its afterDart would never run`);
+      else assert.equal(after, false, `${key} has its own throwDart, so its afterDart would never run`);
     }
   });
 
@@ -80,7 +94,7 @@ describe('the GAME_TYPES turn-loop contract', () => {
     // parse, and the type would still start, and the very first dart would
     // throw "undefined is not a function" in front of a player mid-leg.
     for (const [key, body] of ENTRIES) {
-      for (const name of ['render', 'throwDart', 'afterDart', 'undoLastTurn', 'enterTurn']) {
+      for (const name of ['render', 'throwDart', 'afterDart', 'undoLastTurn', 'enterTurn', 'resetLegState']) {
         const fn = member(body, name);
         if (!fn) continue;
         assert.ok(new RegExp(`function ${fn}\\s*\\(`).test(src),
@@ -89,11 +103,15 @@ describe('the GAME_TYPES turn-loop contract', () => {
     }
   });
 
-  test('the four old dispatch chains are gone, not merely bypassed', () => {
+  test('the old dispatch chains are gone, not merely bypassed', () => {
     // A leftover chain would keep working, and would keep being the thing
     // people edit — leaving the registry members as decoration that drifts.
+    // startNextLeg() is here for item 69: its per-mode round-counter resets
+    // were a SECOND reset mechanism sitting beside the registry dispatch that
+    // already owned leg resets, which is how it quietly grew to six modes.
     for (const fn of ['function renderGame(){', 'function undoLastTurn(){',
-                      'function enterTurn(){', 'function throwDart(sector']) {
+                      'function enterTurn(){', 'function throwDart(sector',
+                      'function startNextLeg(newSet){']) {
       const i = src.indexOf(fn);
       assert.ok(i > -1, `${fn} not found`);
       const head = src.slice(i, i + 900);

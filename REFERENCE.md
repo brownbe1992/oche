@@ -145,6 +145,24 @@ oche/
   bust/win/leaves preview). A type declaring `afterDart` *and* its own
   `throwDart` is a contract violation — the `afterDart` would never run — and
   `backend/test/frontend.turn-loop-dispatch.test.js` fails on it.
+- **Leg resets are two members, split by scope** (2026-07, item 69).
+  `resetForNextLeg(p, game, newSet)` is **per player** and runs once per seat;
+  `resetLegState(game, newSet)` is **per game** and runs exactly once. Both are
+  called from `startNextLeg()`, which no longer carries the hardcoded per-mode
+  chain of round-counter resets that used to sit beside them (`baseballInning`,
+  `shanghaiRound`, `halveItRound`, the Pressure Chamber's round + shot clock,
+  `checkoutLadderVisits`, and — added last — Around the Clock's race state). The
+  split is not cosmetic: that state belongs to `game`, and running it once per
+  player would tear down the Pressure Chamber's timer N times a leg. The ten
+  types with no game-level state declare `resetLegStateNone`.
+- **A game type's `config` is built by `buildConfig(setup, startScore)`**
+  (2026-07, item 70), not by a ternary in `startGame()`. X01 declares its own
+  `{ startingScore }`; there is no fallthrough, so a type without the member
+  throws at game creation instead of silently being handed X01's shape — which
+  is nonsense config for a mode with no score. The six types configured by
+  nothing declare `buildConfigNone`. Cricket's implementation re-reads
+  `resolveCricketNumbers()`: the "exactly 7 targets" **validation** stays in
+  `startGame()`, where it can still abort the start.
 - **Player Profile/Home page game-type toggle**: each `GAME_TYPES` entry also
   carries 3 UI-facing fields (game-modes-roadmap.md "Toggle mechanism
   generalized") — `label` (option text), `bubbleKeyMap` (patched on right after

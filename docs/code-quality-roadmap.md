@@ -1052,26 +1052,81 @@ mode's panel is rendered against real player objects in the verify-ui
 
 See `REFERENCE.md` §2 "Completion panels" for the shipped contract.
 
-### Item 69 — `startNextLeg()`'s parallel hardcoded round-counter reset chain
+### Item 69 — `startNextLeg()`'s parallel hardcoded round-counter reset chain ✅ DONE (2026-07)
 
 Immediately after the already-generalized
 `game.players.forEach(p=>GAME_TYPES[game.gameType].resetForNextLeg(p, game,
-newSet))`, `startNextLeg()` runs a second hardcoded if-chain resetting each
-mode's game-level round counter (`baseballInning`, `shanghaiRound`,
-`halveItRound`, Pressure Chamber's round+timer state, `checkoutLadderVisits`)
-— the same conceptual "per-leg reset" job as `resetForNextLeg`, done through
-a second mechanism sitting one line away. Shape: fold the game-level counter
-reset into `resetForNextLeg`'s own contract (it already receives `game`).
-Deferred: touches every round-based type's leg-boundary reset; needs a
-full per-type multi-leg live check.
+newSet))`, `startNextLeg()` ran a second hardcoded if-chain resetting each
+mode's game-level round counter — the same conceptual "per-leg reset" job,
+through a second mechanism sitting one line away. It had grown to **six** modes
+by the time this shipped; the sixth arrived days earlier with Around the Clock's
+race variant (item 61), which is the clearest possible evidence that a
+mechanism sitting beside the registry gets extended instead of the registry.
 
-### Item 70 — `startGame()`'s 14-branch config-building ternary → a `buildConfig` registry member
+**Not folded into `resetForNextLeg` itself**, despite the deferral's suggested
+shape. That member is per-player and runs once per seat; the state in question
+is per-*game* (`baseballInning`, `pressureChamberDeadline`, a timer teardown).
+Folding it in would have run those resets N times per leg — including
+`stopPressureChamberNoWarmupTimer()`. It is instead a sibling member,
+`resetLegState(game, newSet)`, called exactly once:
 
-`startGame()` builds each game's `config` object via a 14-branch
+```js
+const _gt = GAME_TYPES[game.gameType];
+game.players.forEach(p=>_gt.resetForNextLeg(p, game, newSet));   // per player
+_gt.resetLegState(game, newSet);                                 // once per leg
+```
+
+Every type declares one, including the ten with nothing to reset — they point
+at `resetLegStateNone`, the same named-no-op pattern `enterTurnPerDart` uses, so
+"this mode needs no game-level reset" is a statement rather than an absence.
+
+The deferral asked for a full per-type multi-leg live check, and got one: the
+new verify-ui **`leg-reset`** check fingerprints `game`'s own state at the start
+of leg 1, dirties it with a real visit, crosses a leg boundary and requires the
+fingerprint to come back. Generic rather than a per-mode list of field names, so
+a mode that adds a game-level counter and forgets to reset it is caught without
+anyone remembering to extend the check — exactly the failure the hardcoded chain
+kept having. Confirmed to fail on a deliberately dropped `halveItRound` reset
+(`1 at leg 1 -> 2 at leg 2`).
+
+It sweeps only the nine types that genuinely reach `startNextLeg()`; the rest
+are "a run IS the game" drills or have no leg boundary at all, so asserting on
+them would assert a path players cannot take. That list is hand-written but
+cannot rot: the check also requires every type declaring a real (non-none)
+`resetLegState` to appear in it.
+
+### Item 70 — `startGame()`'s 14-branch config-building ternary → a `buildConfig` registry member ✅ DONE (2026-07)
+
+`startGame()` built each game's `config` object via a 14-branch
 `gameType === 'x' ? {...} : gameType === 'y' ? {...} : ...` chain, the same
 shape `category`/`ctorArg`/`resume` were already moved off of (items 41, 40,
-37). Shape: add a `buildConfig(setup)` member per `GAME_TYPES` entry, replace
-the ternary with `GAME_TYPES[gameType].buildConfig(setup)`. Deferred: a wrong
-transcription silently ships a different `games.config` shape for that type
-(no compile-time signal), so it needs a full per-type game-creation live
-check comparing the persisted `config` column before/after.
+37). It is now `GAME_TYPES[gameType].buildConfig(setup, startScore)`, one line.
+
+Declared as inline arrows per entry, matching how `category` already reads, so
+each type's reasoning (why Baseball's innings are fixed at 9, why the Pressure
+Chamber sends a value the server overrides anyway, why a Checkout Trainer pin
+forces Freeform) stays attached to the branch it explains instead of being
+orphaned in `startGame()`. The six types configured by nothing declare
+`buildConfigNone`.
+
+X01 declares its own `{ startingScore }` — there is no fallthrough. The old
+ternary's final `:` silently handed any unlisted game type X01's shape, which is
+nonsense config for a mode with no score; a missing member now throws at game
+creation, where it is obvious. Cricket's `buildConfig` re-reads
+`resolveCricketNumbers()` rather than having it threaded in: the "exactly 7
+targets" **validation** stays in `startGame()` (it has to be able to abort the
+start), and this is a pure resolve of the same selection.
+
+The deferral asked for a per-type live check comparing the persisted `config`
+before and after, on the grounds that a wrong transcription has no compile-time
+signal. Done exactly that: a driver started **all 16 types** and captured
+`game.config`/`category`/`start`, run against the pre-refactor source and the
+post-refactor source, and the two are byte-identical. (Dead Man Walking's
+`config.rounds` is excluded — its 15 targets are generated server-side from the
+player's own history, so they differ per fresh player by design; its one
+client-supplied field, `difficulty`, matches.)
+
+Both members are pinned at source level by
+`backend/test/frontend.turn-loop-dispatch.test.js`, alongside item 64's four:
+every type declares `render`, `throwDart`, `undoLastTurn`, `enterTurn`,
+`resetLegState` and `buildConfig`, and the functions they name exist.

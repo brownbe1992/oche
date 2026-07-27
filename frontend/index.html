@@ -7411,7 +7411,11 @@ function baseGameRuntimeState(){
     // per-dart evaluation, not per-visit — a round runs until
     // evaluateDartDoublesPractice()/evaluateDartAroundTheClock() ends it, never on
     // a fixed dart count. roundOver/roundEndReason are shared by both.
+    // atcVisitDarts is the race variant's three-darts-per-visit counter; declared
+    // here rather than created lazily on the first dart so a fresh leg and a
+    // just-reset leg hold the same shape (leg-reset's fingerprint reads it).
     roundOver: false, roundEndReason: null, dpLastDart: null, atcLastDart: null,
+    atcVisitDarts: 0,
     // Just Chuckin' It / guided Around the World (docs/game-modes-roadmap.md): no
     // round-ending condition at all — the session just runs until "End game" is pressed.
     chuckinLastDart: null, atwLastDart: null,
@@ -7608,63 +7612,14 @@ async function startGame(){
     : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt || isPracticePressureChamber) ? 1 : setup.legsPerSet;
   const setsPerGame = isDeadManWalking ? 1
     : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt || isPracticePressureChamber) ? 1 : setup.setsPerGame;
-  // Checkout Blitz's durationSec is stored even though only 60 exists today — same
-  // "store it even though only one value exists today" precedent tournament_rounds.
-  // legs_per_set already set for a field that was single-valued at first and
-  // configurable later (docs/archive/checkout-trainer-roadmap.md).
-  // variant (docs/archive/cutthroat-cricket-roadmap.md): a config flag on the same
-  // game_type='cricket', not a new game type — see that doc's "Design" section.
-  const config = gameType === 'cricket' ? { numbers: cricketNumbers, variant: setup.cricketVariant === 'cutthroat' ? 'cutthroat' : 'standard' }
-    // Innings fixed at 9 (docs/game-modes-roadmap.md "Baseball") — not a New Game
-    // choice, same "one-tap, no further input" precedent as Classic Cricket.
-    : gameType === 'baseball' ? { innings: 9 }
-    // Rounds (docs/archive/shanghai-roadmap.md) — default 1-7 (the common pub format),
-    // with a 1-20 long-form option chosen on the setup screen.
-    : gameType === 'shanghai' ? { rounds: setup.shanghaiRounds || 7 }
-    // Targets (docs/archive/halve-it-roadmap.md) — the classic 7-round pub set by
-    // default, or a player-defined sector+ring sequence from the custom target
-    // editor (resolveHalveItTargets() returns null for the classic preset, in
-    // which case config.targets is omitted and createGame() falls back to
-    // HALVE_IT_DEFAULT_TARGETS server-side).
-    : gameType === 'halve_it' ? (resolveHalveItTargets() ? { targets: resolveHalveItTargets() } : {})
-    // Rounds (docs/archive/pressure-chamber-roadmap.md) — fixed at 15, never a New
-    // Game choice; sent here only as a "store a currently-single value"
-    // placeholder matching PRESSURE_ROUNDS — createGame() (backend/db.js)
-    // overrides this server-side unconditionally regardless of what's sent,
-    // the same way it overrides Killer's number assignment.
-    : gameType === 'pressure_chamber' ? { rounds: PRESSURE_ROUNDS }
-    : gameType === 'doubles_practice' ? { doubles: setup.doublesTargets.slice() }
-    : gameType === 'chuckin' ? {}
-    // docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": a pin forces
-    // Freeform + trick questions off regardless of whatever those toggles show —
-    // the setup screen already disables them once a pin is applied (setCheckoutTrainerPin()),
-    // this just guards the actual write path from a stale toggle state too.
-    : gameType === 'checkout_trainer' ? { mode: setup.checkoutTrainerPin ? 'freeform' : setup.checkoutTrainerMode,
-        durationSec: (!setup.checkoutTrainerPin && setup.checkoutTrainerMode==='blitz') ? 60 : null,
-        difficulty: setup.checkoutTrainerDifficulty || 'full',
-        trickQuestions: setup.checkoutTrainerPin ? false : !!setup.checkoutTrainerTricks,
-        pinnedTarget: setup.checkoutTrainerPin || null }
-    : gameType === 'around_the_clock' ? {}
-    : gameType === 'around_the_world' ? {}
-    : gameType === 'bobs_27' ? {}
-    : gameType === 'checkout_ladder' ? {}
-    : gameType === 'gauntlet' ? {}
-    // lives (docs/game-modes-roadmap.md "Killer"): the only setup choice
-    // this mode has — player numbers are randomly assigned server-side
-    // (createGame()'s killerConfig), never chosen or sent from here.
-    : gameType === 'killer' ? { lives: setup.killerLives || KILLER_DEFAULT_LIVES }
-    // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Server-authoritative
-    // round generation"): NO client-supplied config field at all — sent empty
-    // and entirely ignored either way, since createGame() computes the real
-    // config.rounds itself, server-side, from a live snapshot of this
-    // player's own history. Sending {} rather than omitting config keeps this
-    // branch's shape consistent with every sibling drill above.
-    // difficulty (2026-07) is the ONE client-supplied field this mode has — the
-    // 15 targets are still computed server-side from this player's own weakest
-    // checkouts and are never sent from here. createGame() validates the id
-    // against its fixed four-value list.
-    : gameType === 'dead_man_walking' ? { difficulty: setup.dmwDifficulty || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY }
-    : { startingScore: startScore };
+  // Registry member (item 70, docs/code-quality-roadmap.md) — the 14-branch
+  // ternary this replaces is gone, and every real GAME_TYPES entry (x01
+  // included) declares its own buildConfig(setup, startScore). Same reasoning
+  // and same shape as `category` directly below: the old ternary's final
+  // fallthrough silently handed a new game type X01's `{startingScore}`, which
+  // is a nonsense config for a mode with no score — a missing member now throws
+  // here, at game creation, where it is obvious.
+  const config = GAME_TYPES[gameType].buildConfig(setup, startScore);
   // Registry member (item 41, docs/code-quality-roadmap.md) — every real
   // GAME_TYPES entry (including x01) declares its own category(setup, config,
   // startScore); a future type that forgets to add one throws HERE, loudly,
@@ -14564,6 +14519,43 @@ function onLegWon(wi){
 }
 
 // rotate who throws first, reset scores; keep game-scope totals, reset leg-scope
+/* The GAME-LEVEL half of a leg reset (item 69). resetForNextLeg() is per-player
+   and runs once per seat; these run ONCE per leg, and own the round counters,
+   timers and per-leg flags that live on `game` rather than on a player.
+   Previously this was a hardcoded `if(game.gameType === …)` chain sitting
+   directly beside the registry dispatch that was supposed to own leg resets —
+   a second mechanism, which is how it quietly grew to six modes (the sixth
+   arrived with Around the Clock's race variant).
+
+   Every type declares one, including the ten with nothing to reset: they point
+   at resetLegStateNone, the same named-no-op pattern enterTurnPerDart uses, so
+   "this mode needs no game-level reset" is a statement rather than an absence.
+   A missing member now throws on the first leg transition instead of silently
+   carrying a stale round counter into the next leg. */
+function resetLegStateNone(){}
+// The config a game type sends to createGame() when it has no setup choices at
+// all (item 70). Named rather than an inline `() => ({})` for the same reason
+// resetLegStateNone and enterTurnPerDart are: "this mode is configured by
+// nothing" should read as a declaration, not as an absence somebody forgot.
+function buildConfigNone(){ return {}; }
+function resetLegStateBaseball(game){ game.baseballInning = 1; }
+function resetLegStateShanghai(game){ game.shanghaiRound = 1; }
+function resetLegStateHalveIt(game){ game.halveItRound = 1; }
+function resetLegStatePressureChamber(game){
+  game.pressureChamberRound = 1;
+  game.pressureChamberDeadline = null;
+  game._pcTimerRound = null;
+  game.pressureDeclared = null;
+  stopPressureChamberNoWarmupTimer();
+}
+function resetLegStateCheckoutLadder(game){ game.checkoutLadderVisits = 0; }
+// The race variant reaches a next leg; a solo clock never does (it ends the
+// whole game on completion). roundOver gates every further dart, so a leg that
+// starts with it still true is a leg nobody can throw in.
+function resetLegStateAroundTheClock(game){
+  game.roundOver = false; game.roundEndReason = null;
+  game.atcLastDart = null; game.atcVisitDarts = 0;
+}
 function startNextLeg(newSet){
   if(newSet){ game.setNo += 1; game.legNo = 1; } else { game.legNo += 1; }
   if(newSet) DB.recordEvent('set_start', game.setNo, null);
@@ -14577,19 +14569,9 @@ function startNextLeg(newSet){
   // opening throw.
   game.starter = nextActiveIndexFrom(game, game.starter);
   game.current = game.starter;
-  game.players.forEach(p=>GAME_TYPES[game.gameType].resetForNextLeg(p, game, newSet));
-  if(game.gameType === 'baseball') game.baseballInning = 1;
-  if(game.gameType === 'shanghai') game.shanghaiRound = 1;
-  if(game.gameType === 'halve_it') game.halveItRound = 1;
-  if(game.gameType === 'pressure_chamber'){ game.pressureChamberRound = 1; game.pressureChamberDeadline = null; game._pcTimerRound = null; game.pressureDeclared = null; stopPressureChamberNoWarmupTimer(); }
-  if(game.gameType === 'checkout_ladder') game.checkoutLadderVisits = 0;
-  // The race variant reaches this function (a solo clock never does — it ends
-  // the whole game). roundOver gates every further dart, so a leg that starts
-  // with it still true is a leg nobody can throw in.
-  if(game.gameType === 'around_the_clock'){
-    game.roundOver = false; game.roundEndReason = null;
-    game.atcLastDart = null; game.atcVisitDarts = 0;
-  }
+  const _gt = GAME_TYPES[game.gameType];
+  game.players.forEach(p=>_gt.resetForNextLeg(p, game, newSet));   // per player
+  _gt.resetLegState(game, newSet);                                 // once per leg
   game.legSummary = null;
   game.currentLegTurns = [];
   game.legVisitLogs = [];
@@ -15907,6 +15889,8 @@ const GAME_TYPES = {
     newMatchPlayer,
     evaluateVisit,
     resetForNextLeg: resetPlayerForNextLegX01,
+    resetLegState: resetLegStateNone,
+    buildConfig: (setup, startScore) => ({ startingScore: startScore }),
     playerSnapshot: playerSnapshotX01,
     statDefs: STAT_DEFS,
     personalBestsRenderer: null,
@@ -15997,6 +15981,15 @@ const GAME_TYPES = {
     newMatchPlayer: newMatchPlayerCricket,
     evaluateVisit: evaluateVisitCricket,
     resetForNextLeg: resetPlayerForNextLegCricket,
+    resetLegState: resetLegStateNone,
+    // variant (docs/archive/cutthroat-cricket-roadmap.md): a config flag on the
+    // same game_type='cricket', not a new game type — see that doc's "Design"
+    // section. resolveCricketNumbers() is re-read here rather than threaded in
+    // from startGame(): the "exactly 7 targets" VALIDATION stays there (it has
+    // to be able to abort the start), and this is a pure resolve of the same
+    // selection.
+    buildConfig: (setup) => ({ numbers: resolveCricketNumbers(),
+      variant: setup.cricketVariant === 'cutthroat' ? 'cutthroat' : 'standard' }),
     playerSnapshot: playerSnapshotCricket,
     statDefs: CRICKET_STAT_DEFS,
     personalBestsSpec: CRICKET_PB_SPEC,
@@ -16069,6 +16062,10 @@ const GAME_TYPES = {
     newMatchPlayer: newMatchPlayerBaseball,
     evaluateVisit: evaluateVisitBaseball,
     resetForNextLeg: resetPlayerForNextLegBaseball,
+    resetLegState: resetLegStateBaseball,
+    // Innings fixed at 9 (docs/game-modes-roadmap.md "Baseball") — not a New
+    // Game choice, same "one-tap, no further input" precedent as Classic Cricket.
+    buildConfig: () => ({ innings: 9 }),
     playerSnapshot: playerSnapshotBaseball,
     // Stats pass (game-modes-roadmap.md "Baseball"): statDefs populated, so
     // Baseball now shows up on the Player Profile toggle
@@ -16116,6 +16113,10 @@ const GAME_TYPES = {
     newMatchPlayer: newMatchPlayerShanghai,
     evaluateVisit: evaluateVisitShanghai,
     resetForNextLeg: resetPlayerForNextLegShanghai,
+    resetLegState: resetLegStateShanghai,
+    // Rounds (docs/archive/shanghai-roadmap.md) — default 1-7 (the common pub
+    // format), with a 1-20 long-form option chosen on the setup screen.
+    buildConfig: (setup) => ({ rounds: setup.shanghaiRounds || 7 }),
     playerSnapshot: playerSnapshotShanghai,
     statDefs: SHANGHAI_STAT_DEFS,
     personalBestsSpec: SHANGHAI_PB_SPEC,
@@ -16161,6 +16162,13 @@ const GAME_TYPES = {
     newMatchPlayer: newMatchPlayerHalveIt,
     evaluateVisit: evaluateVisitHalveIt,
     resetForNextLeg: resetPlayerForNextLegHalveIt,
+    resetLegState: resetLegStateHalveIt,
+    // Targets (docs/archive/halve-it-roadmap.md) — the classic 7-round pub set by
+    // default, or a player-defined sector+ring sequence from the custom target
+    // editor. resolveHalveItTargets() returns null for the classic preset, in
+    // which case targets is omitted entirely and createGame() falls back to
+    // HALVE_IT_DEFAULT_TARGETS server-side.
+    buildConfig: () => { const t = resolveHalveItTargets(); return t ? { targets: t } : {}; },
     playerSnapshot: playerSnapshotHalveIt,
     statDefs: HALVE_IT_STAT_DEFS,
     personalBestsSpec: HALVE_IT_PB_SPEC,
@@ -16211,6 +16219,13 @@ const GAME_TYPES = {
     newMatchPlayer: newMatchPlayerPressureChamber,
     evaluateVisit: evaluateVisitPressureChamber,
     resetForNextLeg: resetPlayerForNextLegPressureChamber,
+    resetLegState: resetLegStatePressureChamber,
+    // Rounds (docs/archive/pressure-chamber-roadmap.md) — fixed at 15, never a New
+    // Game choice; sent only as a "store a currently-single value" placeholder
+    // matching PRESSURE_ROUNDS. createGame() (backend/db.js) overrides it
+    // server-side unconditionally regardless of what's sent, the same way it
+    // overrides Killer's number assignment.
+    buildConfig: () => ({ rounds: PRESSURE_ROUNDS }),
     playerSnapshot: playerSnapshotPressureChamber,
     statDefs: PRESSURE_CHAMBER_STAT_DEFS,
     personalBestsSpec: PRESSURE_CHAMBER_PB_SPEC,
@@ -16269,6 +16284,8 @@ const GAME_TYPES = {
     // thing if some future generic code path ever calls it by mistake.
     evaluateVisit: () => { throw new Error('doubles_practice has no per-visit evaluateVisit — see throwDartDoublesPractice()'); },
     resetForNextLeg: resetPlayerForNextLegDoublesPractice,
+    resetLegState: resetLegStateNone,
+    buildConfig: (setup) => ({ doubles: setup.doublesTargets.slice() }),
     playerSnapshot: playerSnapshotDoublesPractice,
     statDefs: DOUBLES_PRACTICE_STAT_DEFS,
     personalBestsSpec: DOUBLES_PRACTICE_PB_SPEC,
@@ -16307,6 +16324,8 @@ const GAME_TYPES = {
     // this is never actually invoked.
     evaluateVisit: () => { throw new Error("chuckin has no per-visit evaluateVisit — see throwDartChuckin()"); },
     resetForNextLeg: resetPlayerForNextLegChuckin,
+    resetLegState: resetLegStateNone,
+    buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotChuckin,
     statDefs: CHUCKIN_STAT_DEFS,
     personalBestsSpec: CHUCKIN_PB_SPEC,
@@ -16373,6 +16392,20 @@ const GAME_TYPES = {
     // both call this the same way X01's own turn flow does.
     evaluateVisit,
     resetForNextLeg: resetPlayerForNextLegCheckoutTrainer,
+    resetLegState: resetLegStateNone,
+    // docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": a pin
+    // forces Freeform + trick questions off regardless of whatever those toggles
+    // show — the setup screen already disables them once a pin is applied
+    // (setCheckoutTrainerPin()); this guards the actual write path from a stale
+    // toggle state too. durationSec is stored even though only 60 exists today,
+    // the same "store it even though it is single-valued for now" precedent
+    // tournament_rounds and legs_per_set already set.
+    buildConfig: (setup) => ({
+      mode: setup.checkoutTrainerPin ? 'freeform' : setup.checkoutTrainerMode,
+      durationSec: (!setup.checkoutTrainerPin && setup.checkoutTrainerMode==='blitz') ? 60 : null,
+      difficulty: setup.checkoutTrainerDifficulty || 'full',
+      trickQuestions: setup.checkoutTrainerPin ? false : !!setup.checkoutTrainerTricks,
+      pinnedTarget: setup.checkoutTrainerPin || null }),
     playerSnapshot: playerSnapshotCheckoutTrainer,
     statDefs: CHECKOUT_TRAINER_STAT_DEFS,
     personalBestsSpec: CHECKOUT_TRAINER_PB_SPEC,
@@ -16396,6 +16429,8 @@ const GAME_TYPES = {
     // precedent as Doubles Practice/Chuckin, so this is never actually invoked.
     evaluateVisit: () => { throw new Error('around_the_clock has no per-visit evaluateVisit — see throwDartAroundTheClock()'); },
     resetForNextLeg: resetPlayerForNextLegAroundTheClock,
+    resetLegState: resetLegStateAroundTheClock,
+    buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotAroundTheClock,
     statDefs: AROUND_THE_CLOCK_STAT_DEFS,
     personalBestsSpec: AROUND_THE_CLOCK_PB_SPEC,
@@ -16464,6 +16499,8 @@ const GAME_TYPES = {
     // same precedent as Chuckin, so this is never actually invoked.
     evaluateVisit: () => { throw new Error('around_the_world has no per-visit evaluateVisit — see throwDartAroundTheWorld()'); },
     resetForNextLeg: resetPlayerForNextLegAroundTheWorld,
+    resetLegState: resetLegStateNone,
+    buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotAroundTheWorld,
     statDefs: AROUND_THE_WORLD_STAT_DEFS,
     personalBestsSpec: AROUND_THE_WORLD_PB_SPEC,
@@ -16504,6 +16541,8 @@ const GAME_TYPES = {
     newMatchPlayer: newMatchPlayerBobs27,
     evaluateVisit: evaluateVisitBobs27,
     resetForNextLeg: resetPlayerForNextLegBobs27,
+    resetLegState: resetLegStateNone,
+    buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotBobs27,
     statDefs: BOBS_27_STAT_DEFS,
     personalBestsSpec: BOBS27_PB_SPEC,
@@ -16544,6 +16583,8 @@ const GAME_TYPES = {
     // ladder-advance logic evaluateVisit() itself knows nothing about).
     evaluateVisit,
     resetForNextLeg: resetPlayerForNextLegCheckoutLadder,
+    resetLegState: resetLegStateCheckoutLadder,
+    buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotCheckoutLadder,
     statDefs: CHECKOUT_LADDER_STAT_DEFS,
     personalBestsSpec: CHECKOUT_LADDER_PB_SPEC,
@@ -16583,6 +16624,8 @@ const GAME_TYPES = {
     // same "hardcode a branch" precedent Doubles Practice/Cricket established.
     evaluateVisit: () => { throw new Error('gauntlet has no per-visit evaluateVisit — see enterTurnGauntlet()'); },
     resetForNextLeg: resetPlayerForNextLegGauntlet,
+    resetLegState: resetLegStateNone,
+    buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotGauntlet,
     completionPanel: gauntletPanelSpec,
     statDefs: GAUNTLET_STAT_DEFS,
@@ -16628,6 +16671,11 @@ const GAME_TYPES = {
     // same "hardcode a branch" precedent Doubles Practice/Cricket established.
     evaluateVisit: () => { throw new Error('killer has no per-visit evaluateVisit — see throwDartKiller()'); },
     resetForNextLeg: resetPlayerForNextLegKiller,
+    resetLegState: resetLegStateNone,
+    // lives (docs/game-modes-roadmap.md "Killer"): the only setup choice this
+    // mode has — player numbers are randomly assigned server-side
+    // (createGame()'s killerConfig), never chosen or sent from here.
+    buildConfig: (setup) => ({ lives: setup.killerLives || KILLER_DEFAULT_LIVES }),
     playerSnapshot: playerSnapshotKiller,
     statDefs: KILLER_STAT_DEFS,
     personalBestsSpec: KILLER_PB_SPEC,
@@ -16660,6 +16708,14 @@ const GAME_TYPES = {
     // own evaluateVisit field already established).
     evaluateVisit: evaluateVisitDeadManWalking,
     resetForNextLeg: resetPlayerForNextLegDeadManWalking,
+    resetLegState: resetLegStateNone,
+    // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md
+    // "Server-authoritative round generation"): difficulty is the ONE
+    // client-supplied field this mode has. The 15 targets are computed
+    // server-side from a live snapshot of this player's own weakest checkouts
+    // and are never sent from here; createGame() validates the difficulty id
+    // against its fixed four-value list.
+    buildConfig: (setup) => ({ difficulty: setup.dmwDifficulty || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY }),
     playerSnapshot: playerSnapshotDeadManWalking,
     statDefs: DEAD_MAN_WALKING_STAT_DEFS,
     personalBestsSpec: DEAD_MAN_WALKING_PB_SPEC,
