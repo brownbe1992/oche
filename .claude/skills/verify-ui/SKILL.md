@@ -40,7 +40,7 @@ series, on purpose (see Rate limiting below).
 
 ## What it covers
 
-184 assertions across seven checks:
+250 assertions across eight checks:
 
 | Check | Guards |
 |---|---|
@@ -48,6 +48,7 @@ series, on purpose (see Rate limiting below).
 | `new-game` | Step 1 keeps a working Continue *and* reachable per-game options when the selected row's category collapses; keyboard activation of buttons nested inside activatable cards. |
 | `ghost-picker` | Deep-linked "Race this leg" arms the exact leg asked for; an unfindable one arms nothing and says so; an empty filter clears a stale selection; the deep link costs one fetch. |
 | `scoring-modes` | X01, Cricket, Around the Clock and Checkout Trainer in depth — the right shell (slots row, undo labels, enter button) for each shape. |
+| `live-shell` | Every live-capable type in `GAME_TYPES` renders a lane or a stage on /display at 1920x1080, draws its board where it declares a stage, shows the throw strip, and leaks no markup into visible text; plus the post-leg result view (verdict line, one lane per player, tally band replacing the strip, and the full-screen banner NOT covering it). |
 | `all-game-types` | Every non-dispatchOnly type in `GAME_TYPES` starts, reaches the game screen with exactly one input surface live, takes a dart without throwing, and renders its completion panel (or declares `noCompletionStats`) against real player objects. |
 | `live-scoreboard` | The `/display` second screen picks up players, updates on a scored visit, renders an end-of-leg card, and switches renderer for Cricket. |
 | `home-settings` | Home ticker hides with no activity and shows with some; a Settings tile summary tracks a script-driven change. |
