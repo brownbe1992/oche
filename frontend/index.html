@@ -318,7 +318,11 @@
     border-radius:12px;padding:12px 16px}
   .pscore.active{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}
   .pscore .nm{font-weight:600;font-size:15px}
-  .pscore .nm-out{font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-left:6px}
+  /* nowrap keeps the tag whole. Without it a long name leaves just enough room
+     for "DOUBLE" and pushes "OUT" alone onto the next line, so one row in a
+     3-4 player X01 stack renders a line taller than its neighbours. The tag is
+     a single label; it wraps as a unit or not at all. */
+  .pscore .nm-out{font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-left:6px;white-space:nowrap}
   .pscore .turnflag{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--gold);font-weight:700}
   .pscore .rem-wrap{margin-left:16px;display:flex;flex-direction:column;align-items:flex-end;gap:1px}
   .pscore .rem{font-family:'Bebas Neue';font-size:46px;line-height:.8;color:var(--cream);letter-spacing:.02em;min-width:64px;text-align:right}
@@ -6874,17 +6878,21 @@ function chosenGameContexts(key){
 }
 // How many player slots Step 2 allows for whatever's currently chosen — a
 // solo-only type (or Daily Challenge/Ghost/Marathon) allows exactly 1; Killer
-// and the other dual game types allow the existing global max; X01 stays
-// capped at 2 for now — 2-4 player X01 is a deliberate future roadmap item
-// (docs/x01-multiplayer-roadmap.md), not something this reorder silently
-// enables.
+// and the other dual game types allow the existing global max; X01 allows 2-4
+// (docs/archive/multiplayer-x01-roadmap.md).
 const SETUP_GLOBAL_MAX_PLAYERS = 6;
 function maxPlayersForSetup(){
   const key = currentSetupOptionKey();
   if(key === 'league_game') return 2;
   const ctxs = chosenGameContexts(key);
   if(ctxs.length===1 && ctxs[0]==='practice') return 1;
-  if(key === 'x01') return 2;
+  // X01 caps at 4, not the app's general 6 (docs/archive/multiplayer-x01-roadmap.md's
+  // "exact player ceiling" question, resolved by the owner asking for "2-4").
+  // It is a real format decision rather than a technical limit: a 501 leg is
+  // long, and at six players the wait between your own visits stops being a
+  // game you are playing and becomes one you are watching. Every other
+  // dual-capable type keeps the global ceiling.
+  if(key === 'x01') return 4;
   return SETUP_GLOBAL_MAX_PLAYERS;
 }
 // The 6 game types playable either solo or head-to-head — the only ones whose
@@ -10307,6 +10315,25 @@ function announce(text){
   el.textContent = '';
   requestAnimationFrame(()=>{ el.textContent = text; });
 }
+// A committed visit that passes the turn on (docs/accessibility-roadmap.md, and
+// docs/archive/multiplayer-x01-roadmap.md's accessibility question). With three
+// or four at the oche, "who is up now" stops being inferable from the result
+// alone: a sighted player reads it off the ▸ throwing flag, and a screen-reader
+// user has no equivalent. Silent at one or two active players, where the next
+// thrower is the only other person in the room.
+//
+// The next name is APPENDED to the result rather than spoken as a second
+// announce() — two calls in the same tick both clear and re-set one live region
+// on the same frame, so the second would replace the result it was meant to
+// follow rather than queue behind it.
+function announceTurn(text){
+  announce(text + nextThrowerPhrase());
+}
+function nextThrowerPhrase(){
+  if(!game || game.players.filter(p=>!p.dnf).length < 3) return '';
+  const nxt = game.players[nextActiveIndexFrom(game, game.current)];
+  return nxt && nxt !== game.players[game.current] ? ` ${nxt.name} to throw.` : '';
+}
 
 /* ---------- achievement full-screen takeover ---------- */
 const achOverlayEl = document.getElementById('ach-overlay');
@@ -13216,9 +13243,9 @@ function enterTurn(){
   // gap 1) — deliberately just the turn outcome, not per-dart. Leg/set/game-win detail
   // is handled separately by the achievement queue and onLegWon()'s own UI, which
   // isn't duplicated here to avoid two announcements for the same winning visit.
-  if(ev.bust) announce(`${p.name} busts, stays on ${p.score}.`);
+  if(ev.bust) announceTurn(`${p.name} busts, stays on ${p.score}.`);
   else if(ev.win) announce(`${p.name} checks out with ${ev.pointsThisVisit}. Leg won.`);
-  else announce(`${p.name} scores ${ev.scored}, ${ev.newScore} remaining.`);
+  else announceTurn(`${p.name} scores ${ev.scored}, ${ev.newScore} remaining.`);
 
   // snapshot state before mutations so undoLastTurn() can restore it
   const _snap = { pi:game.current, score:p.score,
@@ -13413,8 +13440,8 @@ function enterTurnCricket(){
   if(ev.win) announce(cutthroat
     ? `${p.name} closes out and wins the leg with only ${ev.points} point${ev.points===1?'':'s'} against.`
     : `${p.name} closes out and wins the leg with ${ev.points} points.`);
-  else if(_hitOpponents.length) announce(`${p.name} puts ${ev.pointsThisVisit} point${ev.pointsThisVisit===1?'':'s'} on ${_hitOpponents.map(g=>g.name).join(' and ')}.`);
-  else announce(`${p.name} scores ${ev.pointsThisVisit} point${ev.pointsThisVisit===1?'':'s'} this visit.`);
+  else if(_hitOpponents.length) announceTurn(`${p.name} puts ${ev.pointsThisVisit} point${ev.pointsThisVisit===1?'':'s'} on ${_hitOpponents.map(g=>g.name).join(' and ')}.`);
+  else announceTurn(`${p.name} scores ${ev.pointsThisVisit} point${ev.pointsThisVisit===1?'':'s'} this visit.`);
 
   // snapshot state before mutations so undoLastTurn() can restore it. badgeReverts/
   // voided mirror X01's enterTurn() snapshot (see its comment) — needed now that
@@ -13698,7 +13725,7 @@ function enterTurnBaseball(){
   const p = game.players[game.current];
   const ev = GAME_TYPES.baseball.evaluateVisit(p, game.darts, game);
 
-  announce(`${p.name} scores ${ev.scored} run${ev.scored===1?'':'s'} in inning ${Math.min(game.baseballInning,9)}.`);
+  announceTurn(`${p.name} scores ${ev.scored} run${ev.scored===1?'':'s'} in inning ${Math.min(game.baseballInning,9)}.`);
 
   // snapshot state before mutations so undoLastTurn() can restore it — same
   // convention as X01/enterTurnCricket's own lastTurnSnapshot.
@@ -13789,7 +13816,7 @@ function enterTurnShanghai(){
   const ev = GAME_TYPES.shanghai.evaluateVisit(p, game.darts, game);
   const maxRounds = (game.config && game.config.rounds) || 7;
 
-  announce(ev.shanghai ? `${p.name} throws a SHANGHAI on ${ev.target}!`
+  announceTurn(ev.shanghai ? `${p.name} throws a SHANGHAI on ${ev.target}!`
     : `${p.name} scores ${ev.scored} point${ev.scored===1?'':'s'} in round ${Math.min(game.shanghaiRound, maxRounds)}.`);
 
   // snapshot state before mutations so undoLastTurn() can restore it — same
@@ -13879,7 +13906,7 @@ function enterTurnHalveIt(){
   const ev = GAME_TYPES.halve_it.evaluateVisit(p, game.darts, game);
   const maxRounds = ((game.config && game.config.targets) || HALVE_IT_DEFAULT_TARGETS).length;
 
-  announce(ev.halved
+  announceTurn(ev.halved
     ? `${p.name} misses ${halveItTargetLabel(ev.target)} entirely — halved to ${ev.total}.`
     : `${p.name} scores ${ev.gained} point${ev.gained===1?'':'s'} on ${halveItTargetLabel(ev.target)} — total ${ev.total}.`);
 
@@ -14062,7 +14089,7 @@ function enterTurnPressureChamber(){
   const card = generatePressureCard(game.gameId, game.pressureChamberRound);
   const ev = GAME_TYPES.pressure_chamber.evaluateVisit(p, game.darts, game);
 
-  announce(ev.outcome === 'miss'
+  announceTurn(ev.outcome === 'miss'
     ? `${p.name} misses ${card.target.label} entirely under ${card.modifier.label} — loses ${ev.missPenalty} Composure Points.`
     : ev.outcome === 'full'
     ? `${p.name} lands a FULL HIT on ${card.target.label} — plus ${ev.gained} Composure Points, now on ${ev.totalCp}.`

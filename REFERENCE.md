@@ -3645,6 +3645,24 @@ intermediate dart tap:
    name, badge label, and the same `BADGE_INFO[...].desc` text used everywhere
    else.
 
+**Next-thrower suffix (`announceTurn()` / `nextThrowerPhrase()`).** Every
+multi-visit turn-based mode (X01, Cricket, Baseball, Shanghai, Halve-It,
+Pressure Chamber) commits its visit through `announceTurn()`, which appends
+"*Name* to throw." to the result above. It is **silent at one or two active
+players** — where the next thrower is the only other person in the room, and
+the phrase would be noise on every visit — and speaks only at **three or
+more**, where "who is up now" is otherwise readable solely from the visual
+▸ throwing flag. `dnf` players are excluded from both the count and the name,
+so a four-player match that has bowed out down to two goes quiet again.
+
+The phrase is **appended to the result string, not spoken as a second
+`announce()`**: two `announce()` calls in the same tick both clear and re-set
+the one live region on the same animation frame, so the second would replace
+the result it was meant to follow rather than queue behind it. Winning visits
+keep the plain `announce()` — the leg is over, and there is no next thrower.
+Killer is excluded: it announces per dart rather than per visit, so a
+next-thrower line would fire up to three times a turn.
+
 `display.html` is **not** currently covered — an open question in
 `docs/accessibility-roadmap.md` about whether the shared/ambient scoreboard
 display warrants the same investment as the primary controller.
@@ -6221,9 +6239,10 @@ up chosen.
 
 - **`maxPlayersForSetup()`**: `1` for any solo-only key (Daily
   Challenge/Ghost/Marathon/every drill); `2` for League Game (a fixture is
-  always exactly one pair) and for X01 (2-4 player X01 is a deliberate future
-  roadmap item, not yet enabled — see `docs/multiplayer-x01-roadmap.md`); the
-  global cap (6) for every other dual-capable type (Cricket, Baseball,
+  always exactly one pair); `4` for X01 — an X01-specific ceiling, deliberately
+  narrower than the app's general one, because a 501 leg is long enough that
+  six players stop playing and start watching (`docs/archive/multiplayer-x01-roadmap.md`);
+  the global cap (6) for every other dual-capable type (Cricket, Baseball,
   Shanghai, Halve-It, Pressure Chamber) and for the one H2H-only type (Killer,
   which additionally still enforces its own existing "at least 2" floor in
   `setupGoToStep3()`, unchanged from before the reorder).

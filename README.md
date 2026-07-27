@@ -203,9 +203,11 @@ show that mode's own options (starting score, targets/variant, format, and so
 on) right there, plus a collapsed "How to play & win" disclosure — there's no
 separate options page to click through to. How many players you can pick is
 decided by the game you chose: solo-only modes allow exactly one, X01
-head-to-head stays capped at two, and every other head-to-head-capable game
+head-to-head allows two to four, and every other head-to-head-capable game
 (Cricket, Baseball, Shanghai, Halve-It, Pressure Chamber, Killer) allows up to
-6.
+6. X01 stops at four on purpose rather than for any technical reason — a 501
+leg is long, and by six players the wait between your own visits stops being a
+game you're playing.
 
 Configure a game before starting:
 
@@ -222,7 +224,7 @@ Configure a game before starting:
 | **Variant (Cricket)** | Standard (highest points wins) · Cut-throat (bonus points land on opponents instead, lowest points wins) |
 | **Legs per set** | 1 – 9 |
 | **Sets per game** | 1 – 9 |
-| **Players** | Select from the roster (cap depends on the chosen game — solo-only modes allow exactly 1, X01 H2H stays at 2, other H2H-capable games allow up to 6) |
+| **Players** | Select from the roster (cap depends on the chosen game — solo-only modes allow exactly 1, X01 H2H allows 2-4, other H2H-capable games allow up to 6) |
 | **Finish rule (X01)** | Double out · Single out (set per player) |
 
 Solo-only modes are restricted to exactly one player automatically. Every other head-to-head-capable game requires at least two players selected, and is tracked separately from Practice statistics.
