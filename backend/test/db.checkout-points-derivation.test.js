@@ -1,5 +1,5 @@
 'use strict';
-// turns.checkout_points is derived, not stored — docs/database-normalization-roadmap.md
+// turns.checkout_points is derived, not stored — docs/archive/database-normalization-roadmap.md
 // §3.1, docs/open-roadmap-items.md item 62.
 //
 // The column held a copy of `scored`: every mode that records a checkout writes

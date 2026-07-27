@@ -3821,6 +3821,49 @@ dart tap:
    rather than summarising it — the numbers themselves are reached by heading
    (see below).
 
+### The shared per-turn dart aggregate (`_dart_agg`, 2026-07)
+
+Twelve query sites need "how many darts did this turn have, and how many were
+trebles." Each used to inline
+`(SELECT turn_id, COUNT(*), SUM(is_treble) FROM darts GROUP BY turn_id)` — a full
+scan of `darts` apiece, which SQLite cannot share between statements. Five of them
+were inside `computeStats()` (the roster page); more in `getSessionRecap()`
+(Home's Tonight panel).
+
+Measured, at 2,000 games / ~200k darts: `computeStats()` **1,215ms**,
+`getSessionRecap()` **1,028ms**, growing linearly at roughly 0.6ms per game, on a
+single-threaded server. A covering index on `darts(turn_id, is_treble)` was tried
+and rejected — it moved the aggregate only 127ms → 99ms, because the cost is the
+scan, not the lookups.
+
+**How it works.** `withDartAgg(fn)` (`backend/db.js`) fills a connection-scoped
+`TEMP TABLE _dart_agg (turn_id PRIMARY KEY, cnt, trebles)` once, then runs `fn`.
+It is **reentrant** — `computeStats()` calls other wrapped helpers, and an inner
+call must neither refill (wasted work) nor drop (wrong results) the table the
+outer one is still using, so a depth counter means only the outermost entry
+builds it. Seven entry points are wrapped: `computeStats`, `getSummary`'s
+callers, `getSessionRecap`, `getPlayerStatBubbles`, `getPersonalBests`,
+`getHomeExtra`, `getMetricHistory` and `getGhostCandidateLegs`. Every migrated
+query joins `_dart_agg` with the same `cnt`/`trebles` column names its inline
+subquery used, so the surrounding SQL is unchanged.
+
+`INNER JOIN _dart_agg` and `INNER JOIN darts` behave identically for a turn with
+**no** dart rows (a Checkout Trainer declaration — the one turn shape allowed to
+carry none): neither produces a row. That equivalence is asserted rather than
+assumed.
+
+**This is a per-request cache of a pure aggregate, not a stored column.** A
+materialised count on `turns` would have to be maintained on every insert and
+could drift from the darts it summarises — exactly the trade item 62 spent a
+change undoing when it removed `turns.checkout_points`. The temp table cannot
+drift because it is rebuilt from `darts` at the start of every call that reads it.
+
+Result: roster **1,215 → 727ms**, recap **1,028 → 608ms** at 2,000 games; 134 →
+82ms at a more typical 250. Covered by `backend/test/db.dart-agg.test.js`, which
+pins the cache's **lifetime** (staleness, a missing table, reentrancy) rather
+than its arithmetic — none of those fail loudly; they return quietly wrong
+statistics.
+
 ### The Player Profile's heading outline (2026-07)
 
 The profile is the app's longest screen — around three viewports of scroll on a
@@ -4666,7 +4709,7 @@ any existing stat query.
 | `set_no` / `leg_no` | `INTEGER NOT NULL` | Must be a positive integer (`addTurn()` rejects `0` or negative explicitly — an explicit `0` is validation-rejected, not silently treated as the "omitted" default of `1`) |
 | `scored` | `INTEGER NOT NULL` | Effective points — `0` on a bust, app-computed (not a raw dart sum). Means "X01 countdown points" for `game_type='x01'` but "cricket points earned this visit" for `game_type='cricket'` — same column, different quantity (see `X01_ONLY` in §3). `addTurn()` rejects a non-numeric value outright rather than silently coercing it to `0`. For `game_type='x01'` specifically, `POST /api/games/:id/turns` (the one production caller that opts into `addTurn()`'s `enforceConsistency` flag) additionally rejects a `scored` that doesn't match the sum of that visit's dart face values (`0` required on a bust; `checkout_points` must equal `scored` on a checkout) — `docs/security-audit-roadmap.md` SEC-22. For `game_type='baseball'` the same caller also rejects a `scored` that doesn't equal this visit's runs — the sum of dart `multiplier`s that hit the inning's target number, where the inning is derived server-side from the player's own prior turn count in the leg (`min(inning, 9)` for extra innings); a Baseball turn must also be neither a bust nor a checkout (`docs/security-audit-roadmap.md` SEC-25). For `game_type='bobs_27'`, `scored` is that round's own *gain only* — never a negative penalty (see §2's "store the gain, derive the penalty"); the same caller derives the round from the player's own prior turn count (capped at 20), rejects a `scored` that doesn't match `hits * round*2` on the submitted darts, rejects `checkout=true` outright, and requires `bust` to match whether replaying every prior round's gain/penalty plus this round's own would drop the running score to 0 or below (`docs/archive/practice-ladders-roadmap.md` Part A). Still deliberately skipped for Cricket (`scored` is computed from mark-closing state, not a dart-value sum, so the same rule would reject legitimate Cricket visits) and for Doubles Practice / Chuckin / Checkout Trainer / Around the Clock / World (non-arithmetic or non-points `scored`) |
 | `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns). **`checkout` is overloaded, and this matters to every query that reads it**: for `x01`, `checkout_ladder` and `dead_man_walking` it means "checked out, and `scored` is what for" — but The Pressure Chamber and Checkout Trainer reuse it for "this visit was a legal attempt rather than a miss", where `scored` is a CP gain or a flat `0` and no finish happened at all. `docs/bug-roadmap.md` BUG-27 is what happens when a query forgets this. The registry states it explicitly (`checkoutIsAttempt: true` on those two entries) and `CHECKOUT_POINTS` reads it from there |
-| ~~`checkout_points`~~ | *(dropped 2026-07 — `docs/database-normalization-roadmap.md` §3.1, item 62)* | It held a copy of `scored` and nothing else, and is now **derived at read time** by the `CHECKOUT_POINTS` expression in `backend/db.js`: `CASE WHEN t.checkout = 1 AND g.game_type IN (<scoring types>) THEN t.scored END`. Two things make that correct rather than merely convenient. First, a checkout's points are the whole **visit's** score, not the finishing dart's — every evaluator returns `scored: bust ? 0 : pointsThisVisit`, a winning visit is never a bust, and `addTurn()` independently rejects a checkout turn whose `checkoutPoints` differs from its `scored` (SEC-22, and now also the guarantee the derivation rests on). Second, `checkout` is an **overloaded flag**, and this column was silently carrying that: see the row above. The game-type list is derived from `GAME_TYPE_REGISTRY`, not hand-kept — the two modes that overload the flag carry `checkoutIsAttempt: true` on their own entries. Covered by `backend/test/db.checkout-points-derivation.test.js`. The migration is a plain `DROP COLUMN` with no backfill and nothing to restore, since every value it held is still in the row it was copied from |
+| ~~`checkout_points`~~ | *(dropped 2026-07 — `docs/archive/database-normalization-roadmap.md` §3.1, item 62)* | It held a copy of `scored` and nothing else, and is now **derived at read time** by the `CHECKOUT_POINTS` expression in `backend/db.js`: `CASE WHEN t.checkout = 1 AND g.game_type IN (<scoring types>) THEN t.scored END`. Two things make that correct rather than merely convenient. First, a checkout's points are the whole **visit's** score, not the finishing dart's — every evaluator returns `scored: bust ? 0 : pointsThisVisit`, a winning visit is never a bust, and `addTurn()` independently rejects a checkout turn whose `checkoutPoints` differs from its `scored` (SEC-22, and now also the guarantee the derivation rests on). Second, `checkout` is an **overloaded flag**, and this column was silently carrying that: see the row above. The game-type list is derived from `GAME_TYPE_REGISTRY`, not hand-kept — the two modes that overload the flag carry `checkoutIsAttempt: true` on their own entries. Covered by `backend/test/db.checkout-points-derivation.test.js`. The migration is a plain `DROP COLUMN` with no backfill and nothing to restore, since every value it held is still in the row it was copied from |
 | `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set only by Cricket's write path (`enterTurnCricket()`) — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged. Checkout Trainer repurposes it as "answered with the objectively fewest darts" (§19) |
 | `target_score` | `INTEGER` | Checkout Trainer only (§19): the target offered for that round — unlike X01 there's no persistent "remaining score" state to derive it from afterward. `NULL` for every other game type; `addTurn()` range-checks it to 1–170 |
 | `declared_unsolvable` | `INTEGER NOT NULL DEFAULT 0` | Checkout Trainer trick questions only (§19): `1` marks a round answered by declaring "no possible checkout" instead of tapping out darts — the only turn shape allowed to carry **zero** dart rows (`addTurn()` rejects it outside `checkout_trainer` games, with any darts attached, or with a nonzero `scored`). The verdict still lives on `bust`/`checkout`/`leg_won` (correct call → `checkout=1, leg_won=1`; wrong call → `bust=1`); this flag exists so "a real checkout was solved" queries (Toughest Checkout Solved) can exclude declarations |
@@ -7006,6 +7049,24 @@ replayed `p.roundHalved`, so a resumed Halve-It game came back with a correct
 running total but a round card that had forgotten which rounds were halved.
 Its `applyResult` now writes it, and `GAME_TYPES.halve_it.resume()` threads it
 onto the constructed player alongside `roundTotals`.
+
+**Dart counters are replayed by every rebuild** (item 75, 2026-07). `legDarts`,
+`setDarts` and `gameDarts` come back from the rebuild itself, via
+`countTurnDarts()` (`frontend/scoring.js`) and the shared
+`applyResumedDartCounts()` on the frontend side. What `legDarts` *means* varies
+per mode, and **where the reset lives is not always `resetForNextLeg`** — do not
+infer "no per-leg counter" from a no-op reset hook:
+
+| mode | `legDarts` on resume | because |
+|---|---|---|
+| Bob's 27 | the whole run | one continuous 20-round run, no leg boundary |
+| The Gauntlet | the whole run | `resetPlayerForNextLegGauntlet()` is a genuine no-op and nothing else resets it |
+| 121 Checkout Ladder | the current attempt | `resetPlayerForNextLegCheckoutLadder()` zeroes it per attempt |
+| Dead Man Walking | the current round | it never reaches `startNextLeg()`; `resolveDeadManWalkingRound()` zeroes it |
+
+Bob's 27 also replays `roundResults`, which is what its twenty-doubles completion
+card is drawn from — without it a resumed run showed a blank card for every round
+played before the pause.
 
 **What resume deliberately does NOT rebuild** (cosmetic, session-scoped,
 already lost today by a page refresh mid-game): past-leg summary cards

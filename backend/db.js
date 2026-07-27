@@ -533,7 +533,7 @@ try { db.exec('ALTER TABLE turns ADD COLUMN affected_player_id INTEGER'); } catc
 // honor-system self-discipline signal by design. Purely additive, same pattern as
 // target_score/declared_unsolvable/affected_player_id above.
 try { db.exec('ALTER TABLE turns ADD COLUMN declared_hit INTEGER'); } catch(e) {}
-// Item 62 (docs/database-normalization-roadmap.md §3.1) — the one SUBTRACTIVE
+// Item 62 (docs/archive/database-normalization-roadmap.md §3.1) — the one SUBTRACTIVE
 // migration in this block. checkout_points held a copy of `scored` and nothing
 // else (see CHECKOUT_POINTS below for the full argument and the two modes that
 // made it look like more than that), so there is nothing to back up or backfill:
@@ -1901,7 +1901,7 @@ function getPersonalBestsBatch(names) {
 
 const SAVABLE_GAME_TYPES = Object.keys(GAME_TYPE_REGISTRY).filter(k => GAME_TYPE_REGISTRY[k].savable);
 
-/* ---------- turns.checkout_points, derived (item 62, docs/database-normalization-roadmap.md §3.1) ----------
+/* ---------- turns.checkout_points, derived (item 62, docs/archive/database-normalization-roadmap.md §3.1) ----------
 
 `turns` used to carry a `checkout_points` column beside `scored`. It was pure
 duplication: every mode that records a checkout writes `scored: ev.scored` and
@@ -2545,7 +2545,10 @@ function _h2hWonLegs() {
 }
 
 /* ---------- statistics (computed with SQL) ---------- */
-function computeStats() {
+// Wrapped for the shared per-turn dart aggregate (item 44) — see withDartAgg().
+// The body is unchanged; this only decides when the temp table is (re)built.
+function computeStats() { return withDartAgg(() => _computeStats()); }
+function _computeStats() {
   const players = q.listPlayers.all();
 
   // Global totals are derived from h2hAgg + pracAgg (those two cover all turns exactly)
@@ -2627,8 +2630,11 @@ function computeStats() {
   // leg's ~45 darts across 15 hit rounds would otherwise dilute the average).
   const h2hAvgDarts = db.prepare(`
     SELECT pid, AVG(leg_darts) AS avg_darts FROM (
-      SELECT t.player_id AS pid, COUNT(d.id) AS leg_darts
-      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      -- Item 44: SUM over the shared per-turn aggregate rather than COUNT over raw
+      -- darts. Identical figure — a leg's darts are its turns' darts — from a join
+      -- one row per turn instead of one row per dart.
+      SELECT t.player_id AS pid, SUM(dt.cnt) AS leg_darts
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN ${DART_AGG} dt ON dt.turn_id=t.id
       WHERE g.practice=0 AND g.player_count>1 ${X01_ONLY}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout)>0
     ) GROUP BY pid
@@ -2640,8 +2646,11 @@ function computeStats() {
   // to-multi-dart rounds that set checkout=1 for a legal attempt).
   const practiceAvgDarts = db.prepare(`
     SELECT pid, AVG(leg_darts) AS avg_darts FROM (
-      SELECT t.player_id AS pid, COUNT(d.id) AS leg_darts
-      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      -- Item 44: SUM over the shared per-turn aggregate rather than COUNT over raw
+      -- darts. Identical figure — a leg's darts are its turns' darts — from a join
+      -- one row per turn instead of one row per dart.
+      SELECT t.player_id AS pid, SUM(dt.cnt) AS leg_darts
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN ${DART_AGG} dt ON dt.turn_id=t.id
       WHERE (g.practice=1 OR g.player_count=1) ${NOT_CHECKOUT_TRAINER}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout)>0
     ) GROUP BY pid
@@ -2651,10 +2660,16 @@ function computeStats() {
   const nineDarterBase = (extraWhere) => db.prepare(`
     SELECT pid, COUNT(*) AS n FROM (
       SELECT t.player_id AS pid
-      FROM turns t JOIN games g ON g.id=t.game_id JOIN darts d ON d.turn_id=t.id
+      -- Joins the shared per-turn aggregate rather than raw darts (item 44). This
+      -- ran three times per roster page — all/H2H/practice — at ~140ms each, the
+      -- single biggest cost in computeStats(). Joining darts made the row set 9x
+      -- bigger than the turns it was really grouping, which is also why the
+      -- original needed COUNT(DISTINCT t.id): against _dart_agg the join is 1:1
+      -- per turn, so a plain COUNT(*) counts turns and SUM(dt.cnt) counts darts.
+      FROM turns t JOIN games g ON g.id=t.game_id JOIN ${DART_AGG} dt ON dt.turn_id=t.id
       WHERE g.game_type='x01' AND json_extract(g.config,'$.startingScore')=501 ${extraWhere} ${NOT_HANDICAPPED}
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
-      HAVING COUNT(DISTINCT t.id)=3 AND SUM(t.checkout)>0 AND COUNT(d.id)=9
+      HAVING COUNT(*)=3 AND SUM(t.checkout)>0 AND SUM(dt.cnt)=9
     ) GROUP BY pid
   `).all();
 
@@ -2676,7 +2691,7 @@ function computeStats() {
       -- a winning visit counts only the darts actually thrown (dt.cnt)
       COALESCE(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dt.cnt END), 0) AS avgDarts
     FROM turns t JOIN games g ON g.id=t.game_id
-    LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt, SUM(is_treble) AS trebles FROM darts GROUP BY turn_id) dt
+    LEFT JOIN ${DART_AGG} dt
       ON dt.turn_id=t.id
     WHERE (${modeWhere}) ${X01_ONLY}
     GROUP BY t.player_id
@@ -2693,7 +2708,7 @@ function computeStats() {
   const allCounts = db.prepare(`
     SELECT t.player_id AS pid, COUNT(*) AS turns, COALESCE(SUM(dt.cnt), 0) AS dartsThrown
     FROM turns t JOIN games g ON g.id = t.game_id
-    LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dt ON dt.turn_id = t.id
+    LEFT JOIN ${DART_AGG} dt ON dt.turn_id = t.id
     WHERE 1=1 ${NOT_CHECKOUT_TRAINER}
     GROUP BY t.player_id
   `).all();
@@ -2714,7 +2729,7 @@ function computeStats() {
              CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END AS dcount,
              ROW_NUMBER() OVER (PARTITION BY t.player_id ORDER BY t.id DESC) AS rn
       FROM turns t JOIN games g ON g.id=t.game_id
-      LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id=t.id
+      LEFT JOIN ${DART_AGG} dc ON dc.turn_id=t.id
       WHERE 1=1 ${X01_ONLY}
     ) WHERE rn <= 30 GROUP BY pid
   `).all();
@@ -2829,7 +2844,10 @@ function getSummary() {
 
 // Additional homepage stats: win rates, trebleless %, ton+ rate, highest checkout,
 // last game played, today/this-week activity, and dart-pace (when timing data exists).
-function getHomeExtra() {
+// Wrapped for the shared per-turn dart aggregate (item 44) — see withDartAgg().
+// The body is unchanged; this only decides when the temp table is (re)built.
+function getHomeExtra() { return withDartAgg(() => _getHomeExtra()); }
+function _getHomeExtra() {
   // The all-game-types board is the seventh sibling of the six per-type win
   // leaderboards — same body, just no gameType scope (gameType is optional on
   // _winLeaderboard for exactly this caller), so a ranking-rule tweak can't
@@ -2848,7 +2866,7 @@ function getHomeExtra() {
     FROM turns t
     JOIN players p ON p.id = t.player_id
     JOIN games g ON g.id = t.game_id
-    LEFT JOIN (SELECT turn_id, SUM(is_treble) AS trebles FROM darts GROUP BY turn_id) dt ON dt.turn_id = t.id
+    LEFT JOIN ${DART_AGG} dt ON dt.turn_id = t.id
     WHERE ${modeWhere} ${X01_ONLY}
     GROUP BY p.id
     HAVING turns >= 10
@@ -2894,7 +2912,7 @@ function getHomeExtra() {
         FROM turns t JOIN games g ON g.id=t.game_id
         WHERE ${modeWhere} ${OPENING_CATS}
       ) t
-      LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+      LEFT JOIN ${DART_AGG} dc ON dc.turn_id = t.id
       WHERE t.rn <= 3
       GROUP BY t.player_id, t.game_id, t.set_no, t.leg_no
     ) leg
@@ -3029,7 +3047,10 @@ function _tzModifier(tzEastMin) {
 // doc's Open Questions.
 // date is caller-supplied (server.js passes the query params straight through)
 // and validated here, matching getChallengeStatus()'s own pattern.
-function getSessionRecap(date, tzEastMin) {
+// Wrapped for the shared per-turn dart aggregate (item 44) — see withDartAgg().
+// The body is unchanged; this only decides when the temp table is (re)built.
+function getSessionRecap(date, tzEastMin) { return withDartAgg(() => _getSessionRecap(date, tzEastMin)); }
+function _getSessionRecap(date, tzEastMin) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw httpError(400, 'date must be YYYY-MM-DD');
   const TZ = _tzModifier(tzEastMin);
   // Local-date bucket for a timestamp column — used by every query below, so a
@@ -3118,7 +3139,7 @@ function getSessionRecap(date, tzEastMin) {
       SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0)*3 AS la,
         SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END) AS darts
       FROM turns t JOIN games g ON g.id = t.game_id
-      JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+      JOIN ${DART_AGG} dc ON dc.turn_id = t.id
       WHERE t.player_id = ? AND ${dl('t.created_at')} = ? ${X01_ONLY}
       GROUP BY t.game_id, t.set_no, t.leg_no
       HAVING SUM(t.checkout) > 0
@@ -3186,7 +3207,7 @@ function getSessionRecap(date, tzEastMin) {
     SELECT MAX(la) AS v FROM (
       SELECT CAST(SUM(t.scored) AS REAL)/NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0)*3 AS la
       FROM turns t JOIN games g ON g.id = t.game_id
-      JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+      JOIN ${DART_AGG} dc ON dc.turn_id = t.id
       WHERE t.player_id = ? AND ${dl('t.created_at')} < ? ${X01_ONLY}
       GROUP BY t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout) > 0
     )
@@ -3261,7 +3282,10 @@ function getSessionRecap(date, tzEastMin) {
   };
 }
 
-function getPlayerStatBubbles(playerName, mode) {
+// Wrapped for the shared per-turn dart aggregate (item 44) — see withDartAgg().
+// The body is unchanged; this only decides when the temp table is (re)built.
+function getPlayerStatBubbles(playerName, mode) { return withDartAgg(() => _getPlayerStatBubbles(playerName, mode)); }
+function _getPlayerStatBubbles(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return null;
   const mf = _mf(mode);
@@ -3338,7 +3362,7 @@ function getPlayerStatBubbles(playerName, mode) {
       FROM (SELECT t.id, t.game_id, t.set_no, t.leg_no, t.scored, t.bust,
                    ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
             ${J} ${mf} ${OPENING_CATS}) t
-      LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+      LEFT JOIN ${DART_AGG} dc ON dc.turn_id = t.id
       WHERE t.rn <= 3
       GROUP BY t.game_id, t.set_no, t.leg_no
     )
@@ -3531,7 +3555,10 @@ function getCricketPerfectLegStats(mode) {
 // Personal-best / "tracking improvement" markers for the player page: best single-leg
 // average, fewest darts to finish a leg, current H2H win streak, and recent-form (last
 // 10 completed legs) average vs lifetime average.
-function getPersonalBests(playerName, mode) {
+// Wrapped for the shared per-turn dart aggregate (item 44) — see withDartAgg().
+// The body is unchanged; this only decides when the temp table is (re)built.
+function getPersonalBests(playerName, mode) { return withDartAgg(() => _getPersonalBests(playerName, mode)); }
+function _getPersonalBests(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return null;
   const mf = _mf(mode);
@@ -3555,7 +3582,7 @@ function getPersonalBests(playerName, mode) {
     SELECT t.game_id, t.set_no, t.leg_no, MAX(t.id) AS lastTurnId,
       CAST(SUM(t.scored) AS REAL)/NULLIF(SUM(CASE WHEN t.bust=1 THEN 3 ELSE dc.cnt END),0)*3 AS la
     FROM turns t JOIN games g ON g.id=t.game_id
-    JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id=t.id
+    JOIN ${DART_AGG} dc ON dc.turn_id=t.id
     WHERE t.player_id=? ${mf} ${NOT_CHECKOUT_TRAINER} ${X01_ONLY}
     GROUP BY t.game_id,t.set_no,t.leg_no
     HAVING SUM(t.checkout)>0
@@ -3584,7 +3611,7 @@ function getPersonalBests(playerName, mode) {
                    ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
             FROM turns t JOIN games g ON g.id=t.game_id
             WHERE t.player_id=? ${mf} ${OPENING_CATS}) t
-      LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+      LEFT JOIN ${DART_AGG} dc ON dc.turn_id = t.id
       WHERE t.rn <= 3
       GROUP BY t.game_id, t.set_no, t.leg_no
     )
@@ -3647,7 +3674,10 @@ const GHOST_LEG_SORTS = {
 // way GAME_TYPES' own soloOnly/h2hOnly flags are the source of truth other
 // derived lists reference).
 const GHOST_LEG_CATEGORIES = ['501', '301', '170', '101'];
-function getGhostCandidateLegs(playerName, limit, opts) {
+// Wrapped for the shared per-turn dart aggregate (item 44) — see withDartAgg().
+// The body is unchanged; this only decides when the temp table is (re)built.
+function getGhostCandidateLegs(playerName, limit, opts) { return withDartAgg(() => _getGhostCandidateLegs(playerName, limit, opts)); }
+function _getGhostCandidateLegs(playerName, limit, opts) {
   const p = getPlayer(playerName);
   if (!p) return [];
   // docs/security-audit-roadmap.md SEC-23: this is a public, unauthenticated route
@@ -3672,7 +3702,7 @@ function getGhostCandidateLegs(playerName, limit, opts) {
            SUM(dc.cnt) AS darts
     FROM turns t
     JOIN games g ON g.id = t.game_id
-    JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+    JOIN ${DART_AGG} dc ON dc.turn_id = t.id
     WHERE t.player_id = ? AND g.game_type = 'x01' ${category ? 'AND g.category = ?' : ''}
     GROUP BY t.game_id, t.set_no, t.leg_no
     HAVING SUM(t.checkout) > 0
@@ -5738,7 +5768,10 @@ function getAroundTheWorldLeaderboard() {
     .sort((a, b) => b.progress - a.progress);
 }
 
-function getMetricHistory(playerName, metric, period, opts = {}) {
+// Wrapped for the shared per-turn dart aggregate (item 44) — see withDartAgg().
+// The body is unchanged; this only decides when the temp table is (re)built.
+function getMetricHistory(playerName, metric, period, opts = {}) { return withDartAgg(() => _getMetricHistory(playerName, metric, period, opts)); }
+function _getMetricHistory(playerName, metric, period, opts = {}) {
   const p = getPlayer(playerName);
   if (!p) return [];
   const modeWhere = _mf(opts.mode);
@@ -5859,7 +5892,7 @@ function getMetricHistory(playerName, metric, period, opts = {}) {
                      ROW_NUMBER() OVER (PARTITION BY t.game_id,t.set_no,t.leg_no ORDER BY t.id) AS rn
               FROM turns t JOIN games g ON g.id=t.game_id
               WHERE t.player_id=? ${modeWhere} ${weightWhere} ${OPENING_CATS}) t
-        LEFT JOIN (SELECT turn_id, COUNT(*) AS cnt FROM darts GROUP BY turn_id) dc ON dc.turn_id = t.id
+        LEFT JOIN ${DART_AGG} dc ON dc.turn_id = t.id
         WHERE t.rn <= 3
         GROUP BY t.game_id, t.set_no, t.leg_no
       ) ${L.where} GROUP BY bucket ORDER BY bucket`).all(...params);
@@ -6209,6 +6242,57 @@ const NOT_HYPOTHETICAL_DARTS = `AND g.game_type NOT IN ('chuckin','checkout_trai
 // register as activity, a dart thrown, or a "last played" touch on any existing
 // stat, full stop (explicit product decision, not inferred from the chuckin
 // precedent this constant otherwise mirrors).
+/* ---------- The per-turn dart aggregate (item 44) ----------
+
+Twelve query sites across this file need "how many darts did this turn have, and
+how many were trebles" — the derived table
+`(SELECT turn_id, COUNT(*), SUM(is_treble) FROM darts GROUP BY turn_id)`. Written
+inline, each one is a full scan-and-group of the whole `darts` table, and SQLite
+cannot share the work between statements: `computeStats()` alone did FIVE of them,
+`getSessionRecap()` more.
+
+Measured on a seeded database, before this change:
+
+  games   computeStats()   Tonight's recap
+    250          134ms            116ms
+    500          297ms            214ms
+  1,000          634ms            508ms
+  2,000        1,215ms          1,028ms
+
+Linear in history, on a single-threaded server, on the roster page and the Home
+page — the two surfaces most likely to be open. `docs/security-audit-roadmap.md`
+SEC-27 is the same shape of problem after it had already bitten (a public read
+that ran the same expensive computation N times and froze the server).
+
+A covering index was tried first and rejected: `darts(turn_id, is_treble)` moved
+the aggregate only 127ms -> 99ms, because the cost is the scan itself, not the
+lookups. So the fix is to do it ONCE per request instead of once per query.
+`DART_AGG` is a TEMP table — connection-scoped, invisible to other readers,
+dropped implicitly — refilled at the start of each call that needs it via
+`withDartAgg()`. Deliberately NOT a stored/denormalized column: the value would
+then have to be maintained on every insert and could drift, which is the exact
+trade item 62 spent a wave undoing. This is a per-request cache of a pure
+aggregate, not a second source of truth. */
+const DART_AGG_DDL = `CREATE TEMP TABLE IF NOT EXISTS _dart_agg (
+  turn_id INTEGER PRIMARY KEY, cnt INTEGER NOT NULL, trebles INTEGER NOT NULL)`;
+let _dartAggDepth = 0;
+function withDartAgg(fn) {
+  // Reentrant: computeStats() calls helpers that also want the aggregate, and the
+  // inner call must not refill (wasted work) or drop it (wrong results) underneath
+  // the outer one. Refill happens once, at the outermost entry.
+  if (_dartAggDepth === 0) {
+    db.exec(DART_AGG_DDL);
+    db.exec('DELETE FROM _dart_agg');
+    db.exec(`INSERT INTO _dart_agg (turn_id, cnt, trebles)
+             SELECT turn_id, COUNT(*), COALESCE(SUM(is_treble), 0) FROM darts GROUP BY turn_id`);
+  }
+  _dartAggDepth += 1;
+  try { return fn(); } finally { _dartAggDepth -= 1; }
+}
+// The join target every migrated site uses in place of its own inline derived
+// table. Identical columns (`cnt`, `trebles`), so the surrounding SQL is unchanged.
+const DART_AGG = `_dart_agg`;
+
 const NOT_CHECKOUT_TRAINER = `AND g.game_type != 'checkout_trainer'`;
 // Route Recall shares the checkout_trainer game_type (its own roadmap's decision —
 // a mode flag, not a fourth game type), but it answers a completely different

@@ -2023,15 +2023,40 @@ function rebuildAroundTheClockRaceState({ names, legsPerSet, dartsPerVisit = 3, 
 // visit (either one finishes the game immediately, at which point it's no
 // longer savable) — every turn here is guaranteed mid-run, `running` always
 // positive, `round` always landing 1-20 for the resumed player's next visit.
+/* Dart counters for the four solo-run rebuilds (docs/open-roadmap-items.md item
+   75). Every other rebuild replays the counters as it walks its turns; these four
+   never did, so a resumed Bob's 27 / Checkout Ladder / Gauntlet / Dead Man Walking
+   came back showing 0 darts thrown for a run that was well underway. Persisted
+   stats were never affected — those are computed from the `turns`/`darts` tables
+   server-side — but the in-session display and the completion panel's dart figure
+   both read these.
+
+   `legDarts` is only distinct from `gameDarts` for a mode that actually resets it,
+   and where that reset LIVES varies: Checkout Ladder resets in the ordinary
+   resetPlayerForNextLeg hook, while Dead Man Walking never reaches startNextLeg()
+   at all and zeroes it inside resolveDeadManWalkingRound(). The Gauntlet genuinely
+   never resets it, and a Bob's 27 game is one continuous 20-round run — those two
+   report the same number three times, which is correct rather than lazy. Do not
+   infer "no per-leg counter" from a no-op resetForNextLeg; check for the reset. */
+function countTurnDarts(turns){
+  return (turns || []).reduce((n, t) => n + ((t.darts && t.darts.length) || 0), 0);
+}
+
 function rebuildBobs27State({ turns }){
   let running = 27, round = 1;
+  // roundResults is what the twenty-doubles completion card is drawn from, and it
+  // is rebuilt here rather than left to the resume member: the per-round GAIN is
+  // only knowable by replaying the round, which is exactly what this loop does.
+  const roundResults = {};
   for(const t of turns){
     const dartsCore = t.darts.map(d => makeDartCore(d.sector, d.mult));
     const ev = evaluateVisitBobs27({ running }, dartsCore, { bobs27Round: round });
     running = ev.running;
+    roundResults[ev.round] = ev.gain;
     round += 1;
   }
-  return { running, round };
+  const darts = countTurnDarts(turns);
+  return { running, round, roundResults, legDarts: darts, setDarts: darts, gameDarts: darts };
 }
 
 // The 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B) — solo
@@ -2048,7 +2073,7 @@ function rebuildCheckoutLadderState({ turns }){
   const byLeg = new Map();
   turns.forEach(t => { if(!byLeg.has(t.legNo)) byLeg.set(t.legNo, []); byLeg.get(t.legNo).push(t); });
   const legNos = Array.from(byLeg.keys()).sort((a,b)=>a-b);
-  let target = 121, currentLeg = 1, remaining = target, visitsThisLeg = 0;
+  let target = 121, currentLeg = 1, remaining = target, visitsThisLeg = 0, legDarts = 0;
   for(const ln of legNos){
     const legTurns = byLeg.get(ln);
     const player = { score: target, doubleOut: true };
@@ -2069,13 +2094,17 @@ function rebuildCheckoutLadderState({ turns }){
       currentLeg = ln + 1;
       remaining = target;
       visitsThisLeg = 0;
+      legDarts = 0;                       // the attempt resolved; the next one starts fresh
     } else {
       currentLeg = ln;
       remaining = lastRemaining;
       visitsThisLeg = legTurns.length;
+      legDarts = countTurnDarts(legTurns); // an attempt still in progress
     }
   }
-  return { target, legNo: currentLeg, remaining, visitsThisLeg };
+  const all = countTurnDarts(turns);
+  return { target, legNo: currentLeg, remaining, visitsThisLeg,
+    legDarts, setDarts: all, gameDarts: all };
 }
 
 /* ---------- The Gauntlet (docs/archive/gauntlet-roadmap.md) ----------
@@ -2147,10 +2176,14 @@ function rebuildGauntletState({ turns }){
   const settledCount = finalMisses.length;
   const currentStation = pendingRepeatStation != null ? pendingRepeatStation : GAUNTLET_STATION_ORDER[settledCount];
   const awaitingRepeat = pendingRepeatStation != null;
+  const darts = countTurnDarts(turns);
   return {
     finalMisses, settledCount, currentStation, awaitingRepeat,
     totalScars: gauntletTotalScars(finalMisses),
     done: settledCount === GAUNTLET_STATION_ORDER.length,
+    // The Gauntlet's leg reset is a deliberate no-op, so nothing here ever
+    // zeroes a per-leg counter — all three are the run's whole dart count.
+    legDarts: darts, setDarts: darts, gameDarts: darts,
   };
 }
 
@@ -2557,10 +2590,19 @@ function rebuildDeadManWalkingState({ rounds, turns }){
       remaining = rem;
     }
   }
+  const darts = countTurnDarts(turns);
   return {
     walkedOutCount, roundIndex, remaining, dartsUsedThisRound, walkedOutRounds, roundResults,
     done: roundIndex >= totalRounds,
     budget: rounds[roundIndex] ? rounds[roundIndex].par - 1 : 0,
+    // Dead Man Walking is the exception among these four, and it is not obvious:
+    // resetPlayerForNextLegDeadManWalking() is a no-op, but the mode never goes
+    // through startNextLeg() at all — resolveDeadManWalkingRound() advances the
+    // round itself and zeroes p.legDarts there. So legDarts is the CURRENT round's
+    // darts, which this function already tracks as dartsUsedThisRound. (Found by
+    // the resume-fidelity check, which rejected the whole-run count this
+    // originally returned.)
+    legDarts: dartsUsedThisRound, setDarts: darts, gameDarts: darts,
   };
 }
 

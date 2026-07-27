@@ -233,7 +233,7 @@ none. The committed test says so in place of the assertion.
 
 ### Applied: the Player Profile's heading outline and scope announcements (2026-07)
 
-Found by `docs/ui-overhaul-roadmap.md`'s design-phase audit, which measured the
+Found by `docs/archive/ui-overhaul-roadmap.md`'s design-phase audit, which measured the
 profile before redesigning it. Three defects, all on the app's densest screen —
 roughly three viewports of scroll on a phone *and* on a tablet, ~1,100 DOM
 nodes, 34 buttons:

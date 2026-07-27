@@ -16739,6 +16739,8 @@ const GAME_TYPES = {
       const { players, state } = ctx;
       const r = rebuildBobs27State({ turns: state.turns });
       players[0].running = r.running;
+      players[0].roundResults = r.roundResults;
+      applyResumedDartCounts(players[0], r);
       return {
         overlay: { bobs27Round: r.round },
         statusMsg: `Resumed — D${r.round}, running score: ${r.running}.`,
@@ -16780,6 +16782,7 @@ const GAME_TYPES = {
       const { players, state } = ctx;
       const r = rebuildCheckoutLadderState({ turns: state.turns });
       players[0].score = r.remaining;
+      applyResumedDartCounts(players[0], r);
       return {
         overlay: { checkoutLadderTarget: r.target, legNo: r.legNo, checkoutLadderVisits: r.visitsThisLeg },
         statusMsg: `Resumed — target ${r.target}, ${r.remaining} remaining, visit ${r.visitsThisLeg+1} of 3.`,
@@ -16816,8 +16819,9 @@ const GAME_TYPES = {
     homeTabRenderer: renderHomeTabBodyGauntlet,
     soloOnly: true,
     resume: (ctx) => {
-      const { state } = ctx;
+      const { players, state } = ctx;
       const r = rebuildGauntletState({ turns: state.turns });
+      applyResumedDartCounts(players[0], r);
       // Streaks aren't part of rebuildGauntletState()'s own return (they're a
       // frontend-only running counter, not needed by the write-time guard or
       // the stats queries that also consume that function) — re-derived here
@@ -16915,6 +16919,7 @@ const GAME_TYPES = {
       const r = rebuildDeadManWalkingState({ rounds, turns: state.turns });
       players[0].score = r.remaining;
       players[0].doubleOut = true;
+      applyResumedDartCounts(players[0], r);
       // The running current/best streak (badge-trigger bookkeeping, not needed
       // by the write-time guard or stats) is re-derived here as a pure function
       // of rebuildDeadManWalkingState()'s own settled-round history, mirroring
@@ -18755,6 +18760,17 @@ function renderGameChuckin(){
    "the current target"), and submitCheckoutAttempt() below is this mode's
    analog of enterTurn()/enterTurnCricket(), just grading against the objective
    optimum (scoring.js's gradeCheckoutAttempt()) instead of an opponent. */
+// Item 75: the four solo-run modes lost their dart counters on resume because
+// each rebuild replayed the position and nothing else. The counters now come back
+// from the rebuild itself, and this is the one place they are copied onto the
+// player — four call sites assigning three fields by hand is exactly the drift
+// item 66 removed from the undo snapshots.
+function applyResumedDartCounts(p, r){
+  p.legDarts = r.legDarts || 0;
+  p.setDarts = r.setDarts || 0;
+  p.gameDarts = r.gameDarts || 0;
+}
+
 function newMatchPlayerCheckoutTrainer(name, config){
   const doubleOut = playerOut(name)==='double';
   const p = { name, score: pickCheckoutTarget(doubleOut, undefined, config && config.difficulty, (config && config.trickQuestions) ? CHECKOUT_TRAINER_TRICK_CHANCE : 0, config && config.pinnedTarget), doubleOut,

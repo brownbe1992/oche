@@ -1,6 +1,16 @@
 # UI Overhaul — Design Roadmap
 
-> Status (2026-07): **the audit is done; the design plan is not.** The measurements
+> Status (2026-07): **CLOSED — the audit is done; the redesign was abandoned by the
+> owner's decision.** The measurements below are the lasting value and are kept for
+> whoever revisits the player page. The three findings that were accessibility rather
+> than layout were split out and shipped (see `docs/accessibility-roadmap.md`); the
+> layout redesign itself was dropped, on the reasoning that a plan nobody intends to
+> build is inventory. Nothing here is outstanding — see `docs/open-roadmap-items.md`'s
+> "Abandoned" section.
+>
+> Historical status line follows.
+>
+> **the audit is done; the design plan is not.** The measurements
 > and screenshots below replace this doc's original "what pain points are motivating
 > this?" open question with evidence. The three findings that were *accessibility*
 > rather than layout have already been fixed and shipped separately — see

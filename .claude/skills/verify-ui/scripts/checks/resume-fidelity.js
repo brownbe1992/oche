@@ -10,6 +10,8 @@
  * docs/code-quality-roadmap.md item 65 folded five of them onto one shared
  * replay loop, and deferred that work for years behind "needs the same
  * full-matrix live save/resume verification item 37 did." This is that matrix.
+ * It then found a second, older gap in four rebuilds it did not touch — the
+ * solo-run modes' dart counters — and drove that fix too (item 75).
  * The pure functions are separately verified by direct equivalence against the
  * pre-refactor implementations over randomised turn streams; what THIS adds is
  * the rest of the path — the real save endpoint, the real resume payload, the
@@ -67,9 +69,13 @@ const FINGERPRINT = `(() => {
   });
 })()`;
 
-// Modes whose own rebuilds predate — and do not implement — dart-counter
-// replay. Listed so the sweep stays honest: the gap is asserted, not skipped.
-const KNOWN_GAP = new Set(['bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking']);
+// There is no known gap any more. The four solo-run modes that used to come back
+// from a save with their dart counters at zero (Bob's 27, 121 Checkout Ladder, the
+// Gauntlet and Dead Man Walking) were fixed in item 75, and this check is how that
+// was driven: it asserted the gap PRECISELY rather than excluding it, so the moment
+// each rebuild started replaying its counters the check said so and told whoever
+// fixed it to move the mode into the main sweep. Which is this. Every savable type
+// now goes through one assertion.
 
 module.exports = async function run() {
   const rep = L.makeReporter('resume-fidelity');
@@ -137,30 +143,8 @@ module.exports = async function run() {
       if (!resumed.ok) { rep.ok(`${key}: resumes without throwing`, false, resumed.error); continue; }
       const after = await page.evaluate(FINGERPRINT);
 
-      if (KNOWN_GAP.has(key)) {
-        // These four lose their per-player DART COUNTERS on resume (and Bob's 27
-        // its round card), because their bespoke rebuilds never replayed them.
-        // A pre-existing gap in four rebuild functions outside item 65's five,
-        // tracked as its own item rather than half-fixed here — see
-        // docs/open-roadmap-items.md item 75.
-        //
-        // Asserted precisely rather than excluded: the difference must be
-        // EXACTLY the known fields. A fifth field going wrong, or a fifth mode
-        // joining them, fails here. So does somebody fixing it without updating
-        // this list — which is the correct prompt to move the mode into the
-        // main sweep above.
-        const drift = diffFields(before, after);
-        const allowed = new Set(['legDarts', 'setDarts', 'gameDarts', 'roundResults']);
-        const unexpected = drift.filter(f => !allowed.has(f));
-        rep.ok(`${key}: resume's known dart-counter gap, and nothing else (item 75)`,
-          drift.length > 0 && unexpected.length === 0,
-          drift.length === 0
-            ? 'the gap appears to be FIXED — move this mode into the main sweep'
-            : unexpected.length ? `also lost: ${unexpected.join(', ')}` : '');
-      } else {
-        rep.ok(`${key}: the resumed game is the game that was paused`, after === before,
-          after === before ? '' : firstDiff(before, after));
-      }
+      rep.ok(`${key}: the resumed game is the game that was paused`, after === before,
+        after === before ? '' : firstDiff(before, after));
 
       await page.evaluate(() => { try { game = null; } catch {} show('home'); });
       await page.waitForTimeout(120);
@@ -171,21 +155,6 @@ module.exports = async function run() {
 
   return rep.finish();
 };
-
-// Every PLAYER field that differs between two fingerprints, by name.
-function diffFields(a, b) {
-  let A, B;
-  try { A = JSON.parse(a).players || []; B = JSON.parse(b).players || []; } catch { return ['(unparseable)']; }
-  const out = new Set();
-  const n = Math.max(A.length, B.length);
-  for (let i = 0; i < n; i++) {
-    const x = A[i] || {}, y = B[i] || {};
-    for (const k of new Set([...Object.keys(x), ...Object.keys(y)])) {
-      if (JSON.stringify(x[k]) !== JSON.stringify(y[k])) out.add(k);
-    }
-  }
-  return [...out].sort();
-}
 
 function firstDiff(a, b) {
   let A, B;

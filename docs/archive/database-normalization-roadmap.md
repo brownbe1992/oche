@@ -1,8 +1,9 @@
-Status: §3.1's `turns.checkout_points` half is **DONE (2026-07)** — the column
+Status: **CLOSED (2026-07).** §3.1's `turns.checkout_points` half is **DONE** — the column
 is dropped and derived at read time; see that section and §4.2 for what shipped
-and how the plan below had to be corrected first. §3.1's `category` half is
-open and **recommended against** (see its own note). §3.2 remains a sketch only,
-unimplemented by design.
+and how the plan below had to be corrected first. §3.1's `category` half and §3.2
+(the `config` split) were both **abandoned by the owner's decision** — the reasoning
+is recorded in each section and summarised on `docs/open-roadmap-items.md`'s
+"Abandoned" table. Nothing in this document is outstanding.
 
 # Database normalization audit + 3NF redesign + migration plan
 

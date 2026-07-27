@@ -1,7 +1,7 @@
 'use strict';
 /* The Player Profile is navigable and audible, not just visible.
  *
- * `docs/ui-overhaul-roadmap.md`'s design-phase audit measured the profile as the
+ * `docs/archive/ui-overhaul-roadmap.md`'s design-phase audit measured the profile as the
  * app's densest screen — roughly three viewports of scroll on both a phone and a
  * tablet, ~1,100 DOM nodes, 34 buttons — and found three concrete accessibility
  * defects on it that had nothing to do with the layout question:
