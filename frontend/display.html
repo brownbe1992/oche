@@ -442,6 +442,34 @@
   .tly.next{margin-left:auto;border-color:rgba(217,180,106,.4);background:rgba(217,180,106,.08)}
   .tly.next .k{color:var(--gold);font-weight:600}
 
+
+  /* ---- stage layouts: the board IS the content -------------------------
+     Around the Clock and Around the World take direction C ("The Ring", the
+     owner's pick for these two): a board-shaped dial centre stage with the
+     figures flanking it, because for a guided drill the board is not a garnish
+     on the numbers — it IS the state of the game. Just Chuckin' It joins them
+     for the same reason: with no score, no target and no round, the heatmap of
+     where the session has landed is the only thing there is to show. */
+  .stage{flex:1;display:flex;align-items:center;gap:4.6vmin;padding:2.4vmin 4.3vmin;min-height:0}
+  .stage-side{flex:1;min-width:0;display:flex;flex-direction:column;gap:.8vmin}
+  .stage-side.r{align-items:flex-end;text-align:right}
+  .stage-name{font-size:4.6vmin;font-weight:600;line-height:1;color:#fff;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .stage-sub{font-size:1.8vmin;color:var(--muted)}
+  .stage-hero{font-family:'Bebas Neue';font-size:17vmin;line-height:.72;color:#fff;margin:.6vmin 0}
+  .stage-hero .u{font-size:5vmin;color:var(--muted);margin-left:1.1vmin}
+  .stage-stats{display:flex;gap:3.2vmin;flex-wrap:wrap}
+  .stage-side.r .stage-stats{justify-content:flex-end}
+  .stage-chalk{font-family:'Kalam',cursive;font-size:2.6vmin;color:#9fa9a2;margin-top:1vmin}
+  .stage-chalk em{font-style:normal;color:var(--gold)}
+  .stage-board{flex:none;display:flex;flex-direction:column;align-items:center;gap:1.2vmin}
+  .stage-board svg{width:62vmin;height:62vmin;display:block}
+  .stage-cap{font-size:1.4vmin;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  body.orientation-portrait .stage{flex-direction:column;gap:2vmin;padding:2vmin 3vmin}
+  body.orientation-portrait .stage-side,
+  body.orientation-portrait .stage-side.r{align-items:flex-start;text-align:left;width:100%}
+  body.orientation-portrait .stage-board svg{width:70vmin;height:70vmin}
+
   /* leg summary cards (shown between legs) */
   .sum-card{position:relative;background:var(--surface);border:1px solid var(--wire);border-radius:2vmin;
     padding:3vmin 3.2vmin;display:flex;flex-direction:column;gap:2.4vmin;justify-content:center;overflow:hidden}
@@ -1568,6 +1596,31 @@ const renderers = {
     }
   },
   cricket: {
+    /* MPR leads, because MPR is Cricket's three-dart average — the live board
+       never showed it at all before, which is the same gap the leg-complete
+       panel had. The seven numbers run across the lane as cells, so each
+       player's card is readable on its own row instead of being a column of a
+       shared table nobody can scan across. */
+    lane(p, i, s, L){
+      const nums = Object.keys(p.marks || {}).map(Number)
+        .sort((a,b)=> (a===25?0:a) === (b===25?0:b) ? 0 : (b===25?0:b) - (a===25?0:a));
+      const cells = nums.map(n => {
+        const m = num((p.marks||{})[n]);
+        return { label: n === 25 ? 'Bull' : String(n),
+          glyphHtml: cricketMarkGlyph(m, n === 25 ? 'Bull' : String(n)),
+          state: m >= 3 ? 'ok' : null };
+      });
+      const shut = nums.filter(n => num((p.marks||{})[n]) >= 3).length;
+      const sub = [`${shut} of ${nums.length} shut`,
+        p.roundsThrown ? `${num(p.roundsThrown)} round${num(p.roundsThrown)===1?'':'s'}` : ''
+      ].filter(Boolean).join(' · ');
+      return buildModeLane(p, i, s, L, {
+        sub, cells, big: p.mpr == null ? '—' : p.mpr, bigUnit: 'mpr', bigSmall: false,
+      });
+    },
+    resultStats(p){
+      return [{ v: p.points, k: 'points' }, { v: p.closed, k: 'numbers closed' }];
+    },
     // A single shared chalkboard-style table (rows=numbers, columns=players)
     // rather than per-player cards — matches how cricket is scored on a real
     // board. Replaces the per-player marks-grid design used before.
@@ -1619,6 +1672,25 @@ const renderers = {
   // Cricket's (rows=innings 1-9, columns=players) rather than per-player cards —
   // all players share one live inning, not independent per-player state.
   baseball: {
+    /* Nine innings as cells, runs in the big slot. A blank inning is scored
+       (0 runs) and a not-yet-played one is empty — different facts, so they
+       never share a look. */
+    lane(p, i, s, L){
+      const inning = num((s.modeState||{}).baseballInning) || 1;
+      const max = Math.max(9, inning);
+      const cells = Array.from({length:max}, (_,k)=>{
+        const r = (p.inningRuns||{})[k+1];
+        if(r == null) return pendingCell(String(k+1));
+        return { label: String(k+1), glyph: String(num(r)),
+          state: num(r) === 9 ? 'ok' : num(r) === 0 ? 'no' : null };
+      });
+      if(cells[inning-1]) cells[inning-1].state = cells[inning-1].state || 'now';
+      return buildModeLane(p, i, s, L, {
+        sub: `inning ${Math.min(inning,max)} of ${max} · ${num(p.legDarts)} darts`,
+        cells, big: num(p.totalRuns), bigUnit: 'runs',
+      });
+    },
+    resultStats(p){ return [{ v: p.totalRuns, k: 'runs' }]; },
     scorecard(s, L){
       const players = s.players;
       const active = s.currentIndex;
@@ -1658,6 +1730,22 @@ const renderers = {
   // round's own TARGET NUMBER (not the round index) so the live board matches
   // what's actually live to score against.
   shanghai: {
+    lane(p, i, s, L){
+      const ms = s.modeState || {};
+      const max = num(ms.shanghaiMaxRounds) || 7;
+      const round = num(ms.shanghaiRound) || 1;
+      const cells = Array.from({length:Math.max(max, round)}, (_,k)=>{
+        const v = (p.roundPoints||{})[k+1];
+        if(v == null) return pendingCell(String(k+1));
+        return { label: String(k+1), glyph: String(num(v)), state: num(v) === 0 ? 'no' : null };
+      });
+      if(cells[round-1]) cells[round-1].state = cells[round-1].state || 'now';
+      return buildModeLane(p, i, s, L, {
+        sub: `round ${Math.min(round,max)} of ${max} · ${num(p.legDarts)} darts`,
+        cells, big: num(p.totalPoints), bigUnit: 'pts',
+      });
+    },
+    resultStats(p){ return [{ v: p.totalPoints, k: 'points' }]; },
     scorecard(s, L){
       const players = s.players;
       const active = s.currentIndex;
@@ -1701,6 +1789,28 @@ const renderers = {
   // that round with a ½ marker on a halved round, mirroring index.html's own
   // renderGameHalveIt() exactly.
   halve_it: {
+    /* roundTotals holds the RUNNING total after each round, so a halving shows
+       up as a drop rather than a zero — which is why the halved cell is marked
+       in its own right rather than left for the number to imply. */
+    lane(p, i, s, L){
+      const ms = s.modeState || {};
+      const targets = Array.isArray(ms.halveItTargets) ? ms.halveItTargets : [];
+      const round = num(ms.halveItRound) || 1;
+      const cells = Array.from({length:Math.max(targets.length, round)}, (_,k)=>{
+        const t = targets[k];
+        const label = t == null ? String(k+1) : halveItTargetLabel(t, true);
+        const v = (p.roundTotals||{})[k+1];
+        if(v == null) return pendingCell(label);
+        const halved = !!(p.roundHalved||{})[k+1];
+        return { label, glyph: (halved ? '½ ' : '') + num(v), state: halved ? 'no' : 'ok' };
+      });
+      if(cells[round-1]) cells[round-1].state = 'now';
+      return buildModeLane(p, i, s, L, {
+        sub: `round ${round} of ${targets.length || round}${p.everHalved ? ' · halved' : ''}`,
+        cells, big: num(p.total), bigUnit: 'total',
+      });
+    },
+    resultStats(p){ return [{ v: p.total, k: 'total' }]; },
     scorecard(s, L){
       const players = s.players;
       const active = s.currentIndex;
@@ -1709,13 +1819,7 @@ const renderers = {
       const round = (s.modeState||{}).halveItRound || 1;
       const { lastCount: lastRound, suffix: roundSuffix } = roundOverrunInfo(round, maxRounds, 'rounds');
       const targetAt = i => targets[Math.min(i, maxRounds) - 1];
-      const targetLabel = t => {
-        if(!t) return '';
-        const numLabel = t.sector === 25 ? 'Bull' : String(t.sector);
-        if(!t.ring) return numLabel;
-        const ringLabel = t.ring === 'double' ? 'Double' : t.ring === 'treble' ? 'Treble' : 'Single';
-        return `${ringLabel} ${numLabel}`;
-      };
+      const targetLabel = t => halveItTargetLabel(t);
       const rows = [];
       for(let i=1;i<=lastRound;i++){
         const isCurrentRound = i===round;
@@ -1756,6 +1860,26 @@ const renderers = {
   // unmissable, plus a live No Warmup countdown read from
   // s.modeState.pressureChamberDeadline.
   pressure_chamber: {
+    lane(p, i, s, L){
+      const ms = s.modeState || {};
+      const cards = Array.isArray(ms.pressureChamberCards) ? ms.pressureChamberCards : [];
+      const round = num(ms.pressureChamberRound) || 1;
+      const ICON = { full:'✅', partial:'➗', miss:'❌' };
+      const cells = Array.from({length:Math.max(cards.length, round)}, (_,k)=>{
+        const r = (p.roundResults||{})[k+1];
+        if(!r) return pendingCell(String(k+1));
+        return { label: String(k+1), glyph: ICON[r] || '',
+          state: r === 'full' ? 'ok' : r === 'miss' ? 'no' : null };
+      });
+      if(cells[round-1]) cells[round-1].state = cells[round-1].state || 'now';
+      return buildModeLane(p, i, s, L, {
+        sub: `round ${round} · ${num(p.fullHits)} full · ${num(p.misses)} missed`,
+        cells, big: num(p.totalCp), bigUnit: 'cp',
+      });
+    },
+    resultStats(p){
+      return [{ v: p.totalCp, k: 'composure points' }, { v: p.rating, k: 'rating' }];
+    },
     scorecard(s, L){
       const players = s.players;
       const active = s.currentIndex;
@@ -1821,6 +1945,24 @@ const renderers = {
   // column since it's always solo), just fixed at exactly 20 rows — no
   // "extra innings"-style dynamic extension the way Baseball's table needs.
   bobs_27: {
+    /* Twenty doubles as cells. The running score leads, because in Bob's 27 the
+       score IS the drama — it can go negative and end the run. */
+    lane(p, i, s, L){
+      const round = num((s.modeState||{}).bobs27Round) || 1;
+      const cells = Array.from({length:20}, (_,k)=>{
+        const r = (p.roundResults||{})[k+1];
+        if(r == null) return pendingCell('D'+(k+1));
+        return { label: 'D'+(k+1), glyph: num(r) > 0 ? '+'+num(r) : '−'+((k+1)*2),
+          state: num(r) > 0 ? 'ok' : 'no' };
+      });
+      if(cells[round-1]) cells[round-1].state = cells[round-1].state || 'now';
+      const scored = Object.keys(p.roundResults||{}).length;
+      return buildModeLane(p, i, s, L, {
+        sub: `D${round} of 20 · ${scored} round${scored===1?'':'s'} played`,
+        cells, big: num(p.running), bigUnit: 'score',
+      });
+    },
+    resultStats(p){ return [{ v: p.running, k: 'final score' }]; },
     scorecard(s, L){
       const p = s.players[0];
       const round = (s.modeState||{}).bobs27Round || 1;
@@ -1853,6 +1995,24 @@ const renderers = {
   // visit-of-3 counter, since neither leg-scoped nor session-scoped darts is
   // as meaningful here as which visit of this attempt is live.
   checkout_ladder: {
+    lane(p, i, s, L){
+      const ms = s.modeState || {};
+      const target = num(ms.checkoutLadderTarget) || 121;
+      const visits = num(ms.checkoutLadderVisits);
+      const lane = (ms.lanes && ms.lanes[i]) || null;
+      const stats = [
+        { v: target, k: 'target' },
+        { v: `${visits+1} of 3`, k: 'visit' },
+        { v: num(p.legDarts), k: 'darts this rung' },
+      ];
+      if(lane) stats.push({ v: num(lane.bestVisit), k: 'best visit' });
+      return laneHtml({
+        active: i === s.currentIndex, name: p.name,
+        sub: `attempt ${num(s.legNo)} · climbing from 61 to 170`,
+        recent: L.showRecent && lane ? laneRecentHtml(lane.recent) : '', recentLabel: 'visits',
+        stats, big: num(p.score),
+      });
+    },
     card(p, i, s, L){
       const active = i===s.currentIndex;
       const target = num((s.modeState||{}).checkoutLadderTarget || 121);
@@ -1892,6 +2052,38 @@ const renderers = {
   // renderGameKiller()), killer status, and kills. s.modeState.killerLives comes
   // from liveSnapshot()'s GAME_TYPES.killer.liveModeState (index.html).
   killer: {
+    strip(s, L){
+      const me = s.players[s.currentIndex];
+      if(!me) return null;
+      const need = me.isKiller
+        ? { k: `${me.name} is hunting`, r: 'any live number',
+            note: 'a double on someone else\'s number takes a life' }
+        : { k: `${me.name} needs`, r: 'D' + num(me.number), note: 'to become a killer' };
+      return singleDartStrip(null, need);
+    },
+    /* The player's NUMBER is the most important fact in Killer and used to be a
+       footnote chip; it leads the lane. Lives sit in the big slot, since
+       survival rather than a score is the result. */
+    lane(p, i, s, L){
+      const lives = num(p.lives);
+      const target = num((s.modeState||{}).killerLives) || 3;
+      const pips = Array.from({length:target}, (_,k)=>
+        ({ label:'', glyph: k < lives ? '●' : '✕', state: k < lives ? 'ok' : 'no' }));
+      return laneHtml({
+        active: i === s.currentIndex && !p.eliminated, out: !!p.eliminated,
+        lead: `<span class="lane-big" style="margin-left:0;font-size:5.4vmin;` +
+              `border:.2vmin solid var(--gold);border-radius:1.1vmin;padding:0 1.4vmin;` +
+              `color:var(--gold);transform:none">${num(p.number)}</span>`,
+        name: p.name,
+        sub: p.eliminated ? 'out' : (p.isKiller ? 'killer — hunting everyone' : `needs D${num(p.number)} to become killer`),
+        cells: laneCellsHtml(pips),
+        big: p.eliminated ? 'OUT' : lives, bigUnit: p.eliminated ? '' : (lives === 1 ? 'life' : 'lives'),
+        bigSmall: !!p.eliminated,
+      });
+    },
+    resultStats(p){
+      return [{ v: p.kills, k: 'kills' }, { v: 'D' + num(p.number), k: 'their number' }];
+    },
     card(p, i, s, L){
       const active = i===s.currentIndex && !p.eliminated;
       const livesTarget = num((s.modeState||{}).killerLives) || 3;
@@ -1928,6 +2120,26 @@ const renderers = {
   // dmwWalkedOut come from liveSnapshot()'s GAME_TYPES.dead_man_walking.
   // liveModeState; the round number rides on the generic s.legNo.
   dead_man_walking: {
+    /* Fifteen rounds as cells, the round's remaining score in the big slot. The
+       dart budget is the tension, so it leads the sub-line. */
+    lane(p, i, s, L){
+      const ms = s.modeState || {};
+      const results = Array.isArray(ms.dmwRoundResults) ? ms.dmwRoundResults : [];
+      const round = num(s.legNo) || 1;
+      const left = Math.max(0, num(ms.dmwBudget) - num(ms.dmwDartsUsed));
+      const cells = Array.from({length:15}, (_,k)=>{
+        const r = results[k];
+        if(!r) return pendingCell(k+1 === round ? String(num(p.score)) : '·');
+        return { label: String(num(r.target)), glyph: r.walkedOut ? '✓' : '✕',
+          state: r.walkedOut ? 'ok' : 'no' };
+      });
+      if(cells[round-1]) cells[round-1].state = 'now';
+      return buildModeLane(p, i, s, L, {
+        sub: `round ${round} of 15 · ${left} dart${left===1?'':'s'} left · ${num(ms.dmwWalkedOut)} walked out`,
+        cells, big: num(p.score), bigUnit: 'to go',
+      });
+    },
+    resultStats(p){ return [{ v: `${num(p.walkedOut)}/15`, k: 'walked out' }]; },
     card(p, i, s, L){
       const active = i===s.currentIndex;
       const ms = s.modeState || {};
@@ -1966,6 +2178,33 @@ const renderers = {
   // player/card — no legSummary, no scorecard, so this always goes through the
   // generic s.players.map(renderer.card) path below, same as X01.
   doubles_practice: {
+    strip(s, L){
+      const ms = s.modeState || {};
+      const p = s.players[0] || {};
+      return singleDartStrip(ms.dpLastDart, ms.roundOver
+        ? { k: 'round over', r: `${num(p.roundHits)} of ${num(p.roundDarts)}`,
+            note: ms.roundEndReason === 'completed' ? 'every target hit' : 'out of darts' }
+        : { k: 'hits this round', r: `${num(p.roundHits)} / ${num(p.roundDarts)}` });
+    },
+    /* The target doubles as cells, hits over darts in the big slot. A round that
+       has ended says so in the sub-line rather than freezing without explanation. */
+    lane(p, i, s, L){
+      const ms = s.modeState || {};
+      const targets = Array.isArray(ms.doublesTargets) ? ms.doublesTargets : [];
+      const cells = targets.map(t => ({
+        label: t === 25 ? 'Bull' : 'D' + num(t), glyph: '', state: null }));
+      const hits = num(p.roundHits), darts = num(p.roundDarts);
+      const pct = darts ? Math.round(hits / darts * 100) : 0;
+      const sub = ms.roundOver
+        ? `round over — ${ms.roundEndReason === 'completed' ? 'all targets hit' : 'out of darts'}`
+        : `${targets.length} target${targets.length===1?'':'s'} · ${pct}% hit rate`;
+      return laneHtml({
+        active: i === s.currentIndex, name: p.name, sub,
+        cells: cells.length ? laneCellsHtml(cells) : null,
+        stats: cells.length ? null : [{ v: pct + '%', k: 'hit rate' }],
+        big: `${hits}/${darts}`, bigUnit: 'hits', bigSmall: true,
+      });
+    },
     card(p, i, s, L){
       const active = i===s.currentIndex;
       const ms = s.modeState || {};
@@ -2006,6 +2245,42 @@ const renderers = {
   // live, session-only tally (gradually fills in as the session progresses),
   // a separate concept from the lifetime heatmap the Player Profile fetches.
   chuckin: {
+    strip(s, L){
+      const run = ((s.modeState||{}).chuckinRecent) || [];
+      const runHtml = run.length
+        ? run.slice(-9).map(d => `<span class="c${d.isTreble ? ' t' : d.isMiss ? ' m' : ''}">${esc(d.label)}</span>`).join('')
+        : '';
+      return singleDartStrip((s.modeState||{}).chuckinLastDart,
+        runHtml ? { k: 'last nine darts', runHtml } : null);
+    },
+    /* No score, no target, no round — so the heatmap of where the session has
+       actually landed is the only thing there is to show, and it gets the whole
+       stage rather than a thumbnail beside a card. */
+    stage(s, L){
+      const p = s.players[0] || {};
+      const darts = num(p.sessionDarts);
+      const trebles = num(p.sessionTrebles);
+      const avgNum = p.sessionAvg == null ? null : Number(p.sessionAvg);
+      const avg = Number.isFinite(avgNum) ? avgNum.toFixed(1) : '—';
+      const run = ((s.modeState||{}).chuckinRecent) || [];
+      return stageSideHtml({
+        eyebrow: '▸ throwing', name: p.name || '',
+        hero: darts, heroUnit: 'darts',
+        sub: 'nothing to win, nothing to bust',
+        stats: [
+          { v: avg, k: '3-dart average' },
+          { v: darts ? Math.round(trebles/darts*100) + '%' : '0%', k: 'trebles' },
+          { v: trebles, k: 'trebles' },
+        ],
+        chalk: run.length
+          ? 'last darts · ' + run.slice(-6).map(d => d.isTreble ? `<em>${esc(d.label)}</em>` : esc(d.label)).join(' · ')
+          : '',
+      }) +
+      `<div class="stage-board">
+        <span class="stage-cap">where this session has landed</span>
+        ${buildChuckinLiveHeatmap(p.heatmap || [])}
+      </div>`;
+    },
     card(p, i, s, L){
       const active = i===s.currentIndex;
       const pct = p.sessionDarts ? Math.round(p.sessionTrebles/p.sessionDarts*100) : 0;
@@ -2052,6 +2327,46 @@ const renderers = {
   // exactly one player/card — no legSummary, no scorecard, goes through the
   // generic s.players.map(renderer.card) path, same as Doubles Practice/Chuckin.
   around_the_clock: {
+    strip(s, L){
+      const p = s.players[0] || {};
+      const hit = Array.isArray(p.hitNumbers) ? p.hitNumbers.map(Number) : [];
+      const left = [...Array(20)].map((_,k)=>k+1).filter(n => !hit.includes(n));
+      return singleDartStrip((s.modeState||{}).atcLastDart,
+        left.length ? { k: 'next number', r: String(left[0]),
+          note: `${left.length} number${left.length===1?'':'s'} to go` }
+        : { k: 'the clock is clear', r: `${num(p.roundDarts)} darts` });
+    },
+    /* Direction C, the owner's pick for the two guided drills: the dial centre
+       stage. The old card had this board already and floated it in ~60% empty
+       space with a lone dart chip; here it is the subject, with the run's own
+       figures either side of it. */
+    stage(s, L){
+      const p = s.players[0] || {};
+      const hit = Array.isArray(p.hitNumbers) ? p.hitNumbers.map(Number) : [];
+      const darts = num(p.roundDarts);
+      const left = [...Array(20)].map((_,k)=>k+1).filter(n => !hit.includes(n));
+      const perNumber = hit.length ? (darts / hit.length).toFixed(1) : '—';
+      return stageSideHtml({
+        eyebrow: '▸ at the oche', name: p.name || '',
+        hero: `${hit.length}`, heroUnit: '/ 20',
+        sub: 'numbers cleared',
+        stats: [
+          { v: darts, k: 'darts' },
+          { v: perNumber, k: 'darts per number' },
+          { v: num(p.roundTrebles), k: 'trebles' },
+          { v: num(p.roundMisses), k: 'misses' },
+        ],
+      }) +
+      `<div class="stage-board">
+        <span class="stage-cap">${left.length ? `next up · ${left[0]}` : 'clock complete'}</span>
+        ${buildClockBoard(hit)}
+      </div>` +
+      stageSideHtml({
+        right: true, name: 'Still to hit',
+        chalk: left.length ? left.join(' · ') : '<em>every number hit</em>',
+        stats: [{ v: left.length, k: left.length === 1 ? 'number left' : 'numbers left' }],
+      });
+    },
     card(p, i, s, L){
       const active = i===s.currentIndex;
       const ms = s.modeState || {};
@@ -2104,6 +2419,48 @@ const renderers = {
   // Guided Around the World (docs/game-modes-roadmap.md): solo, no rounds/legs at
   // all — always exactly one player/card, same shape as Chuckin.
   around_the_world: {
+    strip(s, L){
+      const p = s.players[0] || {};
+      const done = Array.isArray(p.hitOutcomes) ? p.hitOutcomes.length : 0;
+      return singleDartStrip((s.modeState||{}).atwLastDart,
+        { k: 'this session', r: `${done} / 63`,
+          note: `${63 - done} outcome${63 - done === 1 ? '' : 's'} to go` });
+    },
+    /* The same treatment, over 63 outcomes instead of 20 numbers. A ring whose
+       wedges are split into the three outcomes each number owes shows a
+       part-finished number at a glance, which the 63-cell grid never did across
+       a room. */
+    stage(s, L){
+      const p = s.players[0] || {};
+      const keys = Array.isArray(p.hitOutcomes) ? p.hitOutcomes : [];
+      const hit = new Set(keys);
+      const darts = num(p.sessionDarts);
+      const done = [...Array(20)].map((_,k)=>k+1).filter(n => [1,2,3].every(m => hit.has(n+':'+m)));
+      const perOutcome = hit.size ? (darts / hit.size).toFixed(1) : '—';
+      return stageSideHtml({
+        eyebrow: '▸ at the oche', name: p.name || '',
+        hero: `${hit.size}`, heroUnit: '/ 63',
+        sub: 'outcomes hit this session',
+        stats: [
+          { v: darts, k: 'darts' },
+          { v: perOutcome, k: 'darts per outcome' },
+          { v: done.length, k: 'numbers finished' },
+        ],
+      }) +
+      `<div class="stage-board">
+        <span class="stage-cap">single · treble · double, reading outward</span>
+        ${buildWorldRing(keys)}
+      </div>` +
+      stageSideHtml({
+        right: true, name: 'The extras',
+        stats: [
+          { v: hit.has('25:1') ? '✓' : '—', k: 'outer bull' },
+          { v: hit.has('25:2') ? '✓' : '—', k: 'double bull' },
+          { v: hit.has('0:1') ? '✓' : '—', k: 'a miss' },
+        ],
+        chalk: `<em>${63 - hit.size}</em> outcomes to go`,
+      });
+    },
     card(p, i, s, L){
       const active = i===s.currentIndex;
       const hitOutcomes = Array.isArray(p.hitOutcomes) ? p.hitOutcomes : [];
@@ -2182,9 +2539,14 @@ function laneRecentHtml(recent){
 // A row of per-round cells inside a lane. `state` is 'ok' | 'no' | 'now' | null
 // and is always paired with the cell's own glyph, never left to colour alone.
 function laneCellsHtml(cells){
+  // `glyph` is TEXT and is escaped; `glyphHtml` is markup a caller has already
+  // built safely (Cricket's mark glyphs carry a screen-reader span, so they
+  // cannot go through esc() — doing that printed the tag source into the cell).
+  // Two fields rather than a flag, so which one escapes is greppable.
   return cells.map(c =>
     `<div class="lcell${c.state ? ' ' + c.state : ''}">` +
-    `<div class="n">${esc(c.label)}</div><div class="g">${esc(c.glyph == null ? '' : c.glyph)}</div></div>`
+    `<div class="n">${esc(c.label)}</div>` +
+    `<div class="g">${c.glyphHtml != null ? c.glyphHtml : esc(c.glyph == null ? '' : c.glyph)}</div></div>`
   ).join('');
 }
 
@@ -2345,6 +2707,114 @@ function renderResultView(renderer, s, L){
     (s.done ? '' : `<span class="tly next"><span class="k">Next leg coming up</span></span>`);
   tallies.classList.remove('hidden');
 }
+
+
+/* ---- per-mode lanes for the round-based modes ----------------------------
+   Cricket, Baseball, Shanghai, Halve-It and The Pressure Chamber are one idea
+   wearing five names: a fixed sequence of rounds, a running total, and a card
+   showing how each round went. So they share one lane shape — the sequence as
+   .lane-cells across the middle, the total in the big slot — rather than five
+   full-width tables that each pushed the rest of the screen into a hole.
+
+   buildModeLane() is the shared body; each mode supplies only its own cells,
+   its own headline number and its own sub-line. */
+// A Halve-It target as a label. `short` is for a lane cell, where there is room
+// for "D20" but not "Double 20". Hoisted out of the scorecard renderer that used
+// to own it inline, so the lane and the table can never drift apart on wording.
+function halveItTargetLabel(t, short){
+  if(!t) return '';
+  const n = t.sector === 25 ? 'Bull' : String(t.sector);
+  if(!t.ring) return n;
+  if(short) return (t.ring === 'double' ? 'D' : t.ring === 'treble' ? 'T' : '') + n;
+  const ring = t.ring === 'double' ? 'Double' : t.ring === 'treble' ? 'Treble' : 'Single';
+  return `${ring} ${n}`;
+}
+
+
+// One side of a stage layout. Mirrors laneHtml()'s option shape so the two
+// layouts stay recognisably the same design rather than two separate ideas.
+
+/* The throw strip for a mode that commits PER DART — Around the Clock, Around
+   the World, Just Chuckin' It, Doubles Practice, Killer. Three pending slots
+   and a visit total are both lies there: there is no visit to total and there
+   are not three darts pending, so one slot carries the dart that just landed
+   and the visit pane states its value instead. */
+function singleDartStrip(lastDart, need){
+  const label = lastDart && lastDart.label ? lastDart.label : null;
+  return {
+    solo: true,
+    darts: [label ? { label, cls: dartClass(label) } : { label: 'first dart', pending: true }],
+    visit: label ? { k: 'that dart', v: dartScoreOf(label) } : null,
+    need: need || null,
+  };
+}
+// The value of a dart from its label — the strip has the label, not the number,
+// and this file has no shared scoring module to ask.
+function dartScoreOf(label){
+  const t = String(label || '');
+  if(t === 'Miss') return 0;
+  if(t === 'Bull') return 50;
+  if(t === '25') return 25;
+  const m = /^([TD]?)(\d+)$/.exec(t);
+  if(!m) return 0;
+  return Number(m[2]) * (m[1] === 'T' ? 3 : m[1] === 'D' ? 2 : 1);
+}
+
+function stageSideHtml(o){
+  return `<div class="stage-side${o.right ? ' r' : ''}">
+    ${o.eyebrow ? `<div class="stage-sub" style="color:var(--gold);letter-spacing:.18em;text-transform:uppercase;font-weight:700">${esc(o.eyebrow)}</div>` : ''}
+    <div class="stage-name">${esc(o.name)}</div>
+    ${o.hero == null ? '' : `<div class="stage-hero">${esc(o.hero)}${o.heroUnit ? `<span class="u">${esc(o.heroUnit)}</span>` : ''}</div>`}
+    ${o.sub ? `<div class="stage-sub">${esc(o.sub)}</div>` : ''}
+    ${(o.stats && o.stats.length) ? `<div class="stage-stats">${o.stats.map(st =>
+      `<div class="lst"><span class="v">${esc(st.v)}</span><span class="k">${esc(st.k)}</span></div>`).join('')}</div>` : ''}
+    ${o.chalk ? `<div class="stage-chalk">${o.chalk}</div>` : ''}
+  </div>`;
+}
+
+// The Around the World ring: twenty wedges, each split into the three outcomes
+// that number owes (single / treble / double, reading outward exactly as the
+// real board does), plus the two bulls at the centre. A number part-way done
+// reads at a glance, which a 63-cell grid never did across a room.
+function buildWorldRing(hitKeys){
+  const hit = new Set(Array.isArray(hitKeys) ? hitKeys : []);
+  const { CX, CY, R, DEG, xy, annulus } = BOARD_GEOM;
+  const on  = 'var(--gold)';
+  const off = 'rgba(255,255,255,.05)';
+  let out = `<svg viewBox="0 0 660 660" xmlns="http://www.w3.org/2000/svg" role="img"
+    aria-label="Around the World board — ${hit.size} of 63 outcomes hit">
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut+1}" fill="#111210"/>`;
+  DB_SECTORS.forEach((n,i)=>{
+    const st = i*DEG - DEG/2, en = st + DEG;
+    const band = (r1, r2, mult) =>
+      `<path d="${annulus(r1, r2, st, en)}" fill="${hit.has(n+':'+mult) ? on : off}"
+        stroke="#1b2a24" stroke-width="1"/>`;
+    out += band(R.bullOut, R.trebleIn, 1);      // single (inner)
+    out += band(R.trebleIn, R.trebleOut, 3);    // treble
+    out += band(R.trebleOut, R.doubleIn, 1);    // single (outer) — same outcome as inner
+    out += band(R.doubleIn, R.doubleOut, 2);    // double
+    const [tx,ty] = xy(R.numAt, i*DEG);
+    const done = [1,2,3].every(m => hit.has(n+':'+m));
+    out += `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" fill="${done ? on : '#8b958e'}"
+      font-size="20" font-family="Inter" font-weight="700" text-anchor="middle"
+      dominant-baseline="central">${n}</text>`;
+  });
+  out += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${hit.has('25:1') ? on : off}" stroke="#1b2a24"/>`;
+  out += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}"  fill="${hit.has('25:2') ? on : off}" stroke="#1b2a24"/>`;
+  return out + '</svg>';
+}
+
+function buildModeLane(p, i, s, L, o){
+  const active = i === s.currentIndex;
+  return laneHtml({
+    active, name: p.name, sub: o.sub,
+    cells: laneCellsHtml(o.cells),
+    big: o.big, bigUnit: o.bigUnit, bigSmall: o.bigSmall,
+  });
+}
+// A cell for a round that has not been reached yet. Kept as its own helper so
+// "not played" looks identical in all five modes.
+function pendingCell(label){ return { label, glyph: '', state: null }; }
 
 /* ---- voice announcements ----
    Spoken call-outs using the browser's built-in speechSynthesis (SpeechSynthesisUtterance)
