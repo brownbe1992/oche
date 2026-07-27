@@ -11949,7 +11949,14 @@ function awardOnceBadge(player, backendBadgeId, achId, snap, momentOpts, opts){
       earnedBadgeCache[player].add(backendBadgeId);
     }
     if(r && r.newlyEarned){
+      // The snapshot can have been voided while this POST was in flight — the
+      // player pressed undo before the award came back. trackBadgeForUndo()
+      // handles the persistence half by revoking immediately, but the
+      // celebration used to run regardless, so an undone turn still threw a
+      // "First time!" overlay and a shareable moment card for a badge the
+      // server no longer holds. Nothing to celebrate once it's been taken back.
       trackBadgeForUndo(snap, player, backendBadgeId);
+      if(snap && snap.voided) return;
       if(silent) return;
       queueBadge(achId, player, snap, 'First time!');
       fireMomentCard(achId, { ...momentOpts, player });
@@ -12559,7 +12566,17 @@ function isCurrentGameSavable(){
   // rebuildX01State() call, not beginMarathonLeg()) and come back with no
   // marathonSessionId at all — finishing it would silently complete as an
   // ordinary standalone practice game instead of continuing the session.
-  return !!(game && !game.done && !game.marathonSessionId && SAVABLE_GAME_TYPES.includes(game.gameType));
+  // Ghost races and the Daily Challenge are both excluded for the same reason,
+  // and both need saying out loud here: their gameType is plain 'x01', so
+  // SAVABLE_GAME_TYPES matches them (docs/archive/saved-games-roadmap.md "Scope"
+  // lists both as NOT savable). startGame()'s resume-or-abandon prompt already
+  // special-cases the pair for exactly this reason; without the same carve-out
+  // here the "⏸ Save for later" button appeared on both. Saving a challenge is
+  // the worse of the two — the attempt is registered the moment the game starts,
+  // so pausing it burns that calendar day's one attempt on a game the resume
+  // path would bring back as ordinary practice.
+  return !!(game && !game.done && !game.marathonSessionId && !game.hasGhost && !activeChallenge
+    && SAVABLE_GAME_TYPES.includes(game.gameType));
 }
 // Called from renderGameShell() (every new game/leg) and from finishUnit()'s
 // game-complete branch (neither of which touches the header/footer "⏸ Save
@@ -12962,6 +12979,15 @@ function askEndGame(){
     );
     return;
   }
+  // Marathon Mode (docs/archive/marathon-mode-roadmap.md): the ☰ menu's "End game" is
+  // reachable during a marathon leg, but ending one is a session-level decision,
+  // not a leg-level one — askEndMarathon() is the control that actually exists for
+  // it. Falling through to the generic path below cleared `game` and went back to
+  // setup while leaving marathonSession set, its 15-second banner interval running
+  // (so the banner reappeared over the setup screen) and the session itself never
+  // closed out server-side, meaning no MARATHON COMPLETE analysis and no
+  // session-end badges for everything already played. Redirect instead.
+  if (game && game.marathonSessionId) { askEndMarathon(); return; }
   const msg = activeChallenge
     ? "End today's Daily Challenge attempt now? You only get one attempt per calendar day, so this locks in as unfinished for today — there's no retrying until tomorrow."
     : (game && game.practice)
@@ -13934,8 +13960,12 @@ function enterTurnBaseball(){
 
   // snapshot state before mutations so undoLastTurn() can restore it — same
   // convention as X01/enterTurnCricket's own lastTurnSnapshot.
+  // sessionRuns is in this list even though it is session-scoped rather than
+  // leg-scoped: it feeds BASEBALL_RUNS_MILESTONE_LADDERS below as
+  // lifetimeRunsBase + sessionRuns, so leaving it out of the snapshot meant an
+  // undone visit's runs stayed counted and a lifetime tier could fire early.
   pushVisitSnapshot(p,
-    ['totalRuns', 'inningRuns', 'legDarts', 'setDarts', 'gameDarts'],
+    ['totalRuns', 'inningRuns', 'legDarts', 'setDarts', 'gameDarts', 'sessionRuns'],
     ['baseballInning']);
 
   p.totalRuns = ev.totalRuns; p.inningRuns = ev.inningRuns;
@@ -15989,7 +16019,24 @@ function resetPlayerForNextLegX01(p, game, newSet){
   p.score = p.startScore;
   p.legPoints = 0; p.legVisits = 0; p.legDarts = 0; p.legAvgDarts = 0; p.legBusts = 0;
   if(newSet) p.setDarts = 0;
-  p.legVisitScores = []; p.metronomeFired = false; p.pendingIceInTheVeins = false; p.legWorstDeficit = 0;
+  resetLegAchievementState(p);
+  p.legWorstDeficit = 0;
+}
+// The per-leg half of awardVisitAchievements()'s state. Metronome ("5 consecutive
+// visits within 15 points"), Cruise Control ("no visit below 40, the whole leg")
+// and Ice in the Veins ("a 50+ checkout on the very next visit after a bust") are
+// all scoped to ONE leg, so every mode with a leg boundary has to clear them at it.
+// X01 always did, inline; 121 Checkout Ladder and Dead Man Walking both started
+// calling awardVisitAchievements() later (BUG-37 / 2026-07) and carried the fields
+// on their players without ever resetting them — a ladder rung and a Dead Man
+// Walking round each ARE a leg (both advance game.legNo and record their turns
+// under it), so the three badges were being judged against the whole run instead:
+// Metronome could fire on five visits spanning three different rungs, Cruise
+// Control was unreachable after any sub-40 visit anywhere in the session, and a
+// bust on the last visit of one round armed Ice in the Veins for the first visit
+// of the next. Extracted rather than copied so a fourth mode can't repeat this.
+function resetLegAchievementState(p){
+  p.legVisitScores = []; p.metronomeFired = false; p.pendingIceInTheVeins = false;
 }
 function playerSnapshotX01(p){
   return {
@@ -16060,7 +16107,17 @@ const GAME_TYPES = {
     evaluateVisit,
     resetForNextLeg: resetPlayerForNextLegX01,
     resetLegState: resetLegStateNone,
-    buildConfig: (setup, startScore) => ({ startingScore: startScore }),
+    // `ghost` is written only when true — a Ghost race is the one X01 variant
+    // with no game_type of its own AND no server-side trace of its existence
+    // until it finishes (ghost_races is written at the END of the race, by
+    // recordGhostRace()). saveGame() needs to refuse a ghost race while it is
+    // still in progress, so the fact has to reach the server at creation time;
+    // games.config is where every other "what kind of X01 is this" fact already
+    // lives. Omitted rather than written as false on ordinary games so no
+    // existing row's config changes shape.
+    buildConfig: (setup, startScore) => (setup.mode === 'ghost'
+      ? { startingScore: startScore, ghost: true }
+      : { startingScore: startScore }),
     playerSnapshot: playerSnapshotX01,
     statDefs: STAT_DEFS,
     personalBestsRenderer: null,
@@ -17178,6 +17235,7 @@ function resetPlayerForNextLegCheckoutLadder(p, game, newSet){
   p.score = game.checkoutLadderTarget;
   p.legDarts = 0;
   if(newSet) p.setDarts = 0;
+  resetLegAchievementState(p);   // a rung is a leg — see that function's comment
 }
 function playerSnapshotCheckoutLadder(p){
   return { name:p.name, score:p.score, out:'double', legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0 };
@@ -17751,6 +17809,7 @@ function resolveDeadManWalkingRound(walkedOut){
   p.score = nextRound.target;
   p.doubleOut = true;
   p.legDarts = 0;
+  resetLegAchievementState(p);   // a round is a leg — see that function's comment
   game.legSummary = null;
   game.currentLegTurns = [];
   game.legVisitLogs = [];
@@ -17956,6 +18015,10 @@ function throwDartKiller(sector, zone, missZone, missDepth, bounced){
     throwerKills: thrower.kills,
     legDarts: thrower.legDarts, setDarts: thrower.setDarts, gameDarts: thrower.gameDarts,
     dartsThisVisit: game.killerDartsThisVisit,
+    // 🩸 First Blood latches on the match, not the leg, so undoing the dart that
+    // drew it left the latch stuck: whoever actually drew first blood next — a
+    // different player, after this dart was taken back — could never earn it.
+    firstBloodAwarded: game.killerFirstBloodAwarded,
     ltLen: game.currentLegTurns.length, stLen: game.sessionTurns.length,
     badgeReverts:[], voided:false };
   pushTurnSnapshot(_snap);
@@ -18044,6 +18107,7 @@ function undoLastTurnKiller(){
   thrower.kills = snap.throwerKills;
   thrower.legDarts = snap.legDarts; thrower.setDarts = snap.setDarts; thrower.gameDarts = snap.gameDarts;
   game.killerDartsThisVisit = snap.dartsThisVisit;
+  game.killerFirstBloodAwarded = snap.firstBloodAwarded;
   game.currentLegTurns.length = snap.ltLen;
   game.sessionTurns.length = snap.stLen;
 
@@ -18457,9 +18521,13 @@ function throwDartDoublesPractice(sector, zone, missZone, missDepth, bounced){
   const ev = evaluateDartDoublesPractice(dart, targets);
 
   // snapshot state before mutation so undoLastTurnDoublesPractice() can restore it
+  // sessionHits is session-scoped, not round-scoped, but still belongs here: it
+  // feeds DOUBLES_HIT_MILESTONE_LADDERS as lifetimeHitsBase + sessionHits, so an
+  // undone hit that stayed counted could fire a lifetime tier early.
   pushTurnSnapshot({ roundDarts:p.roundDarts, roundHits:p.roundHits,
     roundOver:game.roundOver, roundEndReason:game.roundEndReason,
-    dpLastDart:game.dpLastDart, sessionRoundsLen:p.sessionRounds.length });
+    dpLastDart:game.dpLastDart, sessionRoundsLen:p.sessionRounds.length,
+    sessionHits:p.sessionHits||0 });
 
   p.roundDarts += 1;
   if(ev.hit) p.roundHits += 1;
@@ -18519,6 +18587,7 @@ function undoLastTurnDoublesPractice(){
   game.roundEndReason = snap.roundEndReason;
   game.dpLastDart = snap.dpLastDart;
   p.sessionRounds.length = snap.sessionRoundsLen;
+  p.sessionHits = snap.sessionHits;
 
   _finishUndo(snap, renderGameDoublesPractice, { msg: 'Last dart undone.' });
 }

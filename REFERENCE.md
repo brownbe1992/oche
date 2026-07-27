@@ -2431,6 +2431,23 @@ co-fire with a chain badge or with each other in the same turn/leg:
 | 🎯 **Metronome** | 5 consecutive visits (raw attempted points, including busts) within 15 of each other: `max(last5) - min(last5) <= 15`. Fires at most once per leg (`p.metronomeFired`). |
 | 🚗 **Cruise Control** | `win && every visit this leg scored >= 40` (raw attempted points). |
 | ❄️ **Ice in the Veins** | `win && pendingIceInTheVeins && pointsThisVisit >= 50` — a 50+ checkout on the visit *immediately following* this player's own bust earlier in the leg. The eligibility flag is cleared after every visit (hit or miss both consume the window) so it only ever covers the very next visit. |
+
+The three badges above (Metronome / Cruise Control / Ice in the Veins) are the
+only per-**leg** state `awardVisitAchievements()` keeps: `legVisitScores`,
+`metronomeFired` and `pendingIceInTheVeins`. Every mode that calls that function
+and has a leg boundary must clear all three at it, via the shared
+`resetLegAchievementState(p)` helper. Three modes do, and each defines "a leg"
+differently:
+
+| Mode | What a leg is | Where the reset happens |
+|---|---|---|
+| X01 (and Marathon/Ghost/Daily Challenge, which are X01) | a leg | `resetPlayerForNextLegX01()` |
+| 121 Checkout Ladder | one rung | `resetPlayerForNextLegCheckoutLadder()` |
+| Dead Man Walking | one of the 15 rounds | inline in `resolveDeadManWalkingRound()`, which seeds the next round |
+
+Both drills advance `game.legNo` per rung/round and record their turns under it,
+so a rung and a round genuinely *are* legs; before they reset this state, all
+three badges were judged against the whole run instead of the unit they name.
 | 🧊 **Nerves of Steel** | Won a leg or set that was a genuine decider — both players tied at `legsPerSet - 1` legs (or `setsPerGame - 1` sets), entering this leg/set. Checked at two separate points in `onLegWon()`: once for a match-deciding set, once for a set-deciding (non-match) leg. |
 | 🔥 **Comeback Kid** | `legWorstDeficit >= 100` — the largest `(myRemaining - opponentRemaining)` seen at any point this leg was ≥100, and this player still won the leg. Requires exactly 2 players (H2H or a 2-player practice match). |
 | 🗡️ **Giant Slayer** | On a match win: `opponent's lifetime avg - winner's lifetime avg >= 15`. 2-player matches only. |
@@ -4869,6 +4886,29 @@ time by `getLeagueFixtures()`, never stored — same "compute from raw data"
 philosophy as a tournament match's status: `game_id IS NULL` → `pending`; else
 the linked game's `completed_at IS NULL` → `in_progress`; else `fulfilled`.
 
+**Abandoning a fixture's game releases the fixture.** An abandoned game gets
+`dnf_at`, never `completed_at`, so a fixture linked to one could otherwise never
+leave `in_progress` (no `completed_at` is ever coming) and could never be picked
+again from the New Game screen (`getPendingFixturesForPlayers()` only offers
+`game_id IS NULL`) — that pairing would be permanently unplayable for the rest of
+the season. An `onGameCompleted` hook in the league section therefore sets
+`league_fixtures.game_id = NULL` whenever the finishing game has `dnf_at`,
+returning the fixture to `pending`. An abandonment isn't a result —
+`_computeLeagueStandings()` already ignores it, since it counts only
+`winner_id IS NOT NULL` — so "as if the game was never created" is the honest
+state. Registered as a hook, not a line in `abandonGame()`, so every DNF path
+(today `abandonGame()` and `forfeitPlayer()`'s nobody-left-standing branch) gets
+it.
+
+**`createGame({ leagueFixtureId })` applies the same eligibility rules as
+auto-tagging.** Naming a fixture writes `games.league_id` directly, bypassing the
+`onGameCreated` auto-tag hook and therefore `_findEligibleLeagues()`. It is
+rejected (not silently untagged — an explicit choice fails loudly) when the game
+is `practice`, or when the fixture's league isn't `status = 'active'` and inside
+its `starts_at`/`ends_at` window. Without these two checks a caller could put a
+practice game, or a game played after the season ended, into standings that count
+every game carrying that `league_id`.
+
 ### `settings` (key/value)
 `key TEXT PRIMARY KEY`, `value TEXT NOT NULL DEFAULT ''` (booleans stored as
 `'1'`/`'0'`). Known keys: `collect_dart_timing`, `colorblind_mode`,
@@ -6901,7 +6941,29 @@ under the hood, so nothing extra is needed beyond restoring their
 **Not savable**: Daily Challenge (one attempt per calendar day is the whole
 format), Ghost mode (the opponent is a replay with in-memory script position),
 Doubles Practice/Just Chuckin' It/Checkout Trainer (open-ended solo drills
-with no meaningful "position" — ending and starting fresh loses nothing).
+with no meaningful "position" — ending and starting fresh loses nothing),
+Marathon Mode (a resumed leg would come back with no `marathonSessionId` and
+finish as an ordinary standalone practice game).
+
+Doubles Practice / Chuckin / Checkout Trainer / Killer are excluded by
+`game_type`, so `SAVABLE_GAME_TYPES` alone covers them. **Daily Challenge and
+Ghost mode are not** — both run as plain `x01`, so each needs its own check on
+both sides:
+
+| Mode | Client (`isCurrentGameSavable()`) | Server (`saveGame()`) |
+| --- | --- | --- |
+| Daily Challenge | `activeChallenge` is set | a `daily_challenge_attempts` row exists for this `game_id` |
+| Ghost race | `game.hasGhost` | `games.config.ghost` is true |
+| Marathon leg | `game.marathonSessionId` | — (a marathon leg is never offered a save button, and its session state is client-side) |
+
+`config.ghost` exists purely so the server can recognise a ghost race *while it
+is still being played*: `ghost_races` is written by `recordGhostRace()` when the
+race ends, which is too late to refuse a save. It's written by
+`GAME_TYPES.x01.buildConfig()` only when true, and validated as a boolean by
+`createGame()` like any other client-supplied config field. Saving a challenge
+is the worst case of the three — the attempt is registered against the calendar
+day at game start, so a pause-and-resume would burn that day's single attempt on
+a game the resume path brings back as ordinary practice.
 
 ### Schema — a context table, never a boolean on `games`
 
@@ -8121,6 +8183,16 @@ scoreboard showing elapsed/remaining time and leg count, `aria-live` on a
 **immediately** (not "wait for this leg to finish") via `POST
 /api/marathon/sessions/:id/end` — idempotent, so retrying a dropped response
 can't double-process anything.
+
+The ☰ game menu's **"🚪 End game"** is also reachable during a marathon leg, and
+`askEndGame()` redirects it to `askEndMarathon()` rather than running its own
+generic early-exit. Ending a marathon is a session-level decision and only
+`endMarathonMode()` performs it: the generic path cleared `game` and returned to
+New Game while leaving `marathonSession` set, its 15-second banner interval still
+running (so the banner reappeared over the setup screen) and the session never
+closed out server-side — no MARATHON COMPLETE analysis and no session-end badges
+for everything already played. "⏸ Save for later" is hidden for the same reason
+(`isCurrentGameSavable()` excludes `game.marathonSessionId`).
 
 ### A real bug found and fixed while building this (BUG-18-class)
 

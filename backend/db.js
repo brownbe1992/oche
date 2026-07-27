@@ -989,10 +989,32 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
     if (league.game_type !== resolvedGameType || league.category !== categoryStr) {
       throw httpError(400, "gameType/category must match the fixture's league");
     }
+    // The auto-tag path (_findEligibleLeagues(), used by the onGameCreated hook
+    // below) refuses a practice game and an out-of-window league; this path wrote
+    // games.league_id DIRECTLY and checked neither, so a caller naming a fixture id
+    // could put a practice game — or a game played after the season ended — into a
+    // league's standings, which count every game carrying that league_id. The two
+    // paths must agree on what a league game is, so the same two rules are applied
+    // here. (An out-of-window league is checked against the FIXTURE choice, not
+    // silently ignored, per the comment above: an explicit choice rejects.)
+    if (practice) throw httpError(400, "A practice game can't be logged to a league fixture");
+    const inWindow = db.prepare(`
+      SELECT 1 FROM leagues WHERE id = ? AND status = 'active'
+        AND date('now') >= starts_at AND (ends_at IS NULL OR date('now') <= ends_at)
+    `).get(league.id);
+    if (!inWindow) throw httpError(400, "That fixture's league is not currently running");
     const givenIds = (players || []).map(entry => ensurePlayer(entry.name).id);
     const fixtureIds = [fixture.player1_id, fixture.player2_id];
     const samePair = givenIds.length === 2 && fixtureIds.every(id => givenIds.includes(id)) && givenIds.every(id => fixtureIds.includes(id));
     if (!samePair) throw httpError(400, 'The selected players do not match this fixture');
+  }
+  // docs/archive/ghost-opponent-roadmap.md: `config.ghost` marks an X01 game as a ghost
+  // race from the moment it is created, so saveGame() can refuse one mid-race (the
+  // ghost_races row that would otherwise identify it is not written until the race
+  // ends). Validated like any other client-supplied config field reaching this
+  // function — a truthy non-boolean must not ride into games.config as-is.
+  if (config && config.ghost !== undefined && typeof config.ghost !== 'boolean') {
+    throw httpError(400, 'config.ghost must be a boolean');
   }
   // docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": pinnedTarget rides
   // games.config through this same path unchanged — validate it server-side like
@@ -2010,7 +2032,7 @@ function findSavedGameForParticipants(names, gameType) {
 }
 
 function saveGame(gameId) {
-  const game = db.prepare('SELECT id, game_type, completed_at, dnf_at FROM games WHERE id = ?').get(Number(gameId));
+  const game = db.prepare('SELECT id, game_type, config, completed_at, dnf_at FROM games WHERE id = ?').get(Number(gameId));
   if (!game) throw httpError(404, 'Game not found');
   // dnf_at, not just completed_at: a game ended via abandonGame()/forfeitPlayer()
   // (docs/open-roadmap-items.md "Forfeiting a multiplayer game") sets dnf_at,
@@ -2018,6 +2040,21 @@ function saveGame(gameId) {
   // still be saved and later "resumed" via getResumeState() below.
   if (game.completed_at != null || game.dnf_at != null) throw httpError(409, 'This game has already ended and cannot be saved');
   if (!SAVABLE_GAME_TYPES.includes(game.game_type)) throw httpError(400, `${game.game_type} games can't be saved for later`);
+  // Ghost races and the Daily Challenge are both listed as NOT savable by the
+  // roadmap doc, but neither has a game_type of its own to exclude — both run as
+  // plain 'x01', so the check above waves them through. Each is identified by the
+  // side table that owns it, which is the only durable record either one leaves
+  // on the game row. Enforced here as well as client-side because this file is
+  // the authority on savability ("never trusting the client's own eligibility
+  // check", the section header above): a paused challenge would come back through
+  // the ordinary rebuild path as regular practice, having already consumed that
+  // calendar day's single attempt.
+  if (db.prepare('SELECT 1 FROM daily_challenge_attempts WHERE game_id = ?').get(game.id)) {
+    throw httpError(400, "A Daily Challenge attempt can't be saved for later");
+  }
+  if (game.config && JSON.parse(game.config).ghost) {
+    throw httpError(400, "A Ghost race can't be saved for later");
+  }
   // A bowed-out participant's DNF status isn't threaded through the pure
   // rebuild/replay functions the resume path uses below (Known limitation,
   // REFERENCE.md §13 "Forfeiting a game / DNF") — resuming would silently
@@ -9044,6 +9081,28 @@ function getPendingFixturesForPlayers(playerName1, playerName2) {
     ORDER BY l.created_at DESC
   `).all(a, b);
 }
+
+// Hook: a fixture whose game was abandoned goes back to being unplayed.
+//
+// getLeagueFixtures() derives status from the linked game (pending while game_id
+// IS NULL, in_progress until it completes, fulfilled after), and
+// getPendingFixturesForPlayers() only ever offers a fixture with game_id IS NULL.
+// An abandoned game gets dnf_at, never completed_at — so before this hook, a
+// fixture whose game was abandoned sat at "in progress" forever: it could never
+// reach fulfilled (no completed_at is ever coming), and it could never be picked
+// again from the New Game screen (its game_id is set), leaving that pairing
+// permanently unplayable for the rest of the season. An abandonment is not a
+// result — _computeLeagueStandings() already ignores it for exactly that reason —
+// so the honest state to return to is the one before the game was created.
+//
+// Registered as a hook rather than a line inside abandonGame() so every DNF path
+// gets it: today that's abandonGame() and forfeitPlayer()'s "nobody left standing"
+// branch, both of which fire this same event with a null winner.
+onGameCompleted(({ gameId }) => {
+  const g = db.prepare('SELECT dnf_at FROM games WHERE id = ?').get(gameId);
+  if (!g || g.dnf_at == null) return;
+  db.prepare('UPDATE league_fixtures SET game_id = NULL WHERE game_id = ?').run(gameId);
+});
 
 function getLeague(id) {
   const league = db.prepare('SELECT * FROM leagues WHERE id = ?').get(Number(id));

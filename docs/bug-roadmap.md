@@ -2817,6 +2817,48 @@ completes at 63/63 in 63 darts, awards `guided_world` and sets `game.done`; run 
 starts fresh at 0/63 with the lifetime line reading its own separate total, which
 `GET /api/players/around-the-world` confirms at 63/63.
 
+### BUG-39 … BUG-48 — the 2026-07 game-mode audit, first pass **(all fixed)**
+
+A `/code-review` sweep across all 16 game modes, run on request rather than
+prompted by a report. Each finding below was reproduced independently before
+being fixed; all ten share one regression file,
+`backend/test/game-mode-audit-fixes.test.js` (16 cases).
+
+| ID | Where | The defect | The fix |
+|---|---|---|---|
+| BUG-39 | `frontend/scoring.js`, dart normalisation | A dart entered as a *ringed* miss (a double or treble on sector 0) kept its multiplier, so it counted as a different throw from a plain miss in every per-sector tally. A treble bull was likewise accepted as a real segment | Normalise both to multiplier 1 at the one place a dart is made |
+| BUG-40 | `rebuildKillerState()` | Lives were subtracted without checking the target still had any, so a player already on zero could be "eliminated" a second time and the elimination bookkeeping ran twice | Guard the transition on `livesBefore > 0` |
+| BUG-41 | Halve-It `resetLeg` | `roundHalved` was left populated from the previous leg, so leg two's first round could believe it had already been halved | Clear it in `resetLeg`; initialise it in `newPlayer` |
+| BUG-42 | Around the Clock race | `legWon` was set in a **solo** game, crediting a leg win in a mode with no opponent | Also require more than one player |
+| BUG-43 | 121 Checkout Ladder + Dead Man Walking turn records | `trebleLess` and `checkoutPoints` were missing, so session stats built from those records were wrong for both modes | Carry both fields |
+| BUG-44 | `evaluateDartDoublesPractice` | A comment described behaviour the function no longer had | Corrected |
+| BUG-45 | `createGame()`, Cricket | `config.numbers` was unvalidated — a malformed config could produce a game whose target list did not match the standard count | Validate against `CRICKET_STANDARD_NUMBERS.length` |
+| BUG-46 | `createGame()`, Shanghai | `config.rounds` was unvalidated | Bound to 1–20 |
+| BUG-47 | Shanghai `legWon` / `getShanghaiWonLegs()` | An abandoned game could register a Shanghai | Guard `legWon` via `isShanghaiWin()`; require `completed_at IS NOT NULL` on the instant-win branch |
+| BUG-48 | `getCheckoutLadderLeaderboard()` | A player with several runs in one game was double-counted | Group per `(player, game_id)` and reduce in JS, ties resolving to the earlier run |
+
+### BUG-49 … BUG-56 — the 2026-07 game-mode audit, second pass **(all fixed)**
+
+A second sweep over the same 16 modes, looking for what the first pass missed.
+Where the first pass found mostly *wrong arithmetic*, this one found a single
+recurring shape: **a rule that was enforced on one path and bypassed on
+another.** Backend cases are pinned by
+`backend/test/game-mode-audit-pass2.test.js` (9 cases, each confirmed to fail
+when its fix is reverted); the client-only cases have no server surface to
+assert against and are pinned by the verify-ui `mode-state-hygiene` check (16
+assertions).
+
+| ID | The defect | Why the existing guard missed it |
+|---|---|---|
+| BUG-49 **(HIGH)** | A **Daily Challenge** could be paused with "⏸ Save for later", **burning that calendar day's one attempt** — the attempt is registered at game start, and the resume path brings the game back as ordinary practice. A **Ghost race** could be paused too | Savability was enforced by `game_type`, and both modes run as plain `x01`. `startGame()`'s resume-or-abandon prompt already special-cased the pair for exactly this reason; `isCurrentGameSavable()` did not |
+| BUG-50 **(HIGH)** | **Metronome, Cruise Control and Ice in the Veins** were judged against a whole 121 Checkout Ladder or Dead Man Walking run instead of one rung/round: Metronome could fire on five visits spanning three rungs, Cruise Control was unreachable after one sub-40 visit anywhere, and a bust ending one round armed Ice in the Veins for the next round's first visit | X01 cleared the three fields inline at its leg boundary. Both drills started calling `awardVisitAchievements()` later (BUG-37 / BUG-34) and carried the fields without ever resetting them — even though a rung and a round each advance `game.legNo` and *are* legs. Now a shared `resetLegAchievementState(p)`, called from all three, so a fourth mode cannot repeat it |
+| BUG-51 **(MED)** | The ☰ menu's **"🚪 End game" during a Marathon** cleared `game` and returned to New Game while leaving `marathonSession` set, its 15-second banner interval running (the banner reappeared over the setup screen) and the session never closed out server-side — no MARATHON COMPLETE analysis, no session-end badges | `askEndGame()` special-cased tournament matches but not marathons. It now redirects to `askEndMarathon()`, the control that actually exists for it |
+| BUG-52 **(MED)** | A **league fixture whose game was abandoned was stuck forever**: it could never become `fulfilled` (no `completed_at` was coming) and could never be offered again (its `game_id` was set), so that pairing was unplayable for the rest of the season | Fixture status derives from `completed_at`; an abandoned game only ever sets `dnf_at`. An `onGameCompleted` hook now releases the fixture, so every DNF path gets it rather than just `abandonGame()` |
+| BUG-53 **(MED)** | `createGame({ leagueFixtureId })` accepted a **practice game**, and a game in a league that had already **ended**, writing `games.league_id` for both — and standings count every game carrying that id | The auto-tag path applies `_findEligibleLeagues()`, which checks both. The fixture path wrote `league_id` directly and consulted neither |
+| BUG-54 **(LOW)** | Baseball's `sessionRuns` survived an undo, so an undone visit's runs stayed counted and its lifetime milestone tier could fire early | The field is session-scoped rather than leg-scoped, so it was left out of a snapshot whose other members are all per-leg |
+| BUG-55 **(LOW)** | Doubles Practice's `sessionHits` had the identical defect, for the identical reason | As above |
+| BUG-56 **(LOW)** | Killer's `game.killerFirstBloodAwarded` was not restored on undo, so undoing the dart that drew first blood left the latch stuck and **whoever actually drew it next could never earn the badge**. Also: `awardOnceBadge()` still fired its overlay and moment card for a badge the same call had just revoked, when the turn was undone while the award POST was in flight | The latch lives on `game`, not on a player, and Killer's snapshot listed only player fields plus the visit counter. Reachable only with 3+ players — with two, an elimination wins the leg and clears the snapshots |
+
 ## Standing practice
 
 When a functional bug is found: add it here with a repro and a fix outline before fixing,
