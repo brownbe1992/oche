@@ -622,25 +622,27 @@ Big moments — a 180, a Big Fish, a nine-darter, a match win, any of the 23 [ac
 
 Open **`http://<your-server>:8046/display`** on a TV or second monitor. It updates in real time via Server-Sent Events (SSE) — no refreshing needed.
 
-**Layout presets** — pick **Full**, **Compact**, or **Minimal** from **Settings → Live Scoreboard**, or override per-screen with `?layout=compact` in the URL (handy when different screens in the same room want different densities). Checkout suggestions, achievement flashes, and the match bar always show regardless of layout — only the denser rows (dart counts, leg/game averages, and the 180/Big Fish/Bust counters) are hidden on Compact and Minimal, so a smaller screen isn't stuck showing TV-sized clutter.
+**Layout presets** — pick **Full**, **Compact**, or **Minimal** from **Settings → Live Scoreboard**, or override per-screen with `?layout=compact` in the URL (handy when different screens in the same room want different densities). Achievement flashes and the match score always show regardless of layout — Compact drops the chalked visit history and the leg/game averages, and Minimal also drops the throw strip, so a smaller screen isn't stuck showing TV-sized clutter.
 
-**Portrait and landscape** — the scoreboard automatically detects which orientation the screen is in and reshapes itself: landscape keeps the usual side-by-side player cards, while portrait (e.g. a tablet or spare phone mounted upright) stacks every player's card in a single full-width column instead of squeezing them into narrow side-by-side cells. Rotating the device mid-match updates the layout immediately, without waiting for the next dart or turn.
+**Portrait and landscape** — the scoreboard automatically detects which orientation the screen is in and reshapes itself: landscape runs each player's statistics across the width, while portrait (e.g. a tablet or spare phone mounted upright) wraps them under the name instead of squeezing them into narrow cells. Rotating the device mid-match updates the layout immediately, without waiting for the next dart or turn.
 
 **Top bar:**
 - Game format and current leg/set
+- The match score (H2H, 2+ players) — e.g. **Ben 2 — 1 Sam**
 - 🎯 180s · 🐟 Big Fish · 💥 Busts for the current game (Full layout only)
 - Live connection indicator
 
-**Match bar** (H2H only, 2+ players) — an in-flow strip below the top bar with one row per player, showing Sets and/or Legs as bold boxed numbers (styled after broadcast dart scoreboards). The throwing player's row and stat boxes are gold-outlined.
+**Player lanes** — one full-width row per player rather than a card, so the numbers worth reading run across the screen instead of stacking into a column with empty space under it. The player at the oche has a gold edge and a ▸ marker. Each lane shows that mode's own headline number on the right (remaining score in X01, **MPR in Cricket**, runs in Baseball, lives in Killer, and so on), the statistics that matter for it, and — in X01 — the leg's own visits chalked under the name, with busts struck through and the winning checkout in gold.
 
-**Checkout strip** — appears prominently below the match bar whenever the active player is on a finishing number, showing the full route in large text (e.g. `T20 → T19 → D12`). Flashes when updated after each dart.
+**In solo practice the second lane is your session** — legs played, darts per leg, best visit, busts, treble-less %, your session average, and every checkout you've hit so far. There's no opponent to put there, and your session is the thing you're actually competing with.
 
-**Player cards** (one per player):
-- Remaining score
-- "Darts Thrown" — **Leg / Set / Game** for H2H; **Leg / Session** for Practice (Full layout only)
-- Leg average · game average (Full layout only)
-- Active player's card shows each dart thrown in the current visit, plus the checkout route inline
-- Bust overlay (red) and Game Shot overlay (green) flash on the active card
+**The throw strip** runs across the bottom at all times: the three darts of the current visit at TV size, what the visit is worth, and what's needed — the checkout route in X01, the numbers still open in Cricket, the next number in Around the Clock. Modes that commit one dart at a time (Around the Clock, Around the World, Just Chuckin' It, Doubles Practice, Killer) show the dart that just landed instead of three slots; Just Chuckin' It shows its last nine darts, since it has no visit.
+
+**Around the Clock and Around the World get a board, not a lane** — a full-size dial centre screen showing exactly what's been hit and what's left. Around the World's ring splits every number into its three outcomes (single, treble, double, reading outward like a real board), so a part-finished number is obvious at a glance. **Just Chuckin' It** gets the same treatment with its session heatmap, since with no score, no target and no round there's nothing else to show.
+
+**When a leg or match ends**, the board composes the result in place — a verdict line stating the result and what it cost ("Ben takes the leg — 15 darts · 84.20 average"), the same lanes now showing what each player did rather than what they had left, the winner marked, and a tally band for the 180s, Big Fish and busts. In solo practice it never says you beat anyone.
+
+**Colour is never the only signal** — a closed Cricket number, a halved Halve-It round, a walked-out Dead Man Walking round and a lost Killer life all carry a glyph as well as a colour, so the board survives colourblind mode and a screen reader alike.
 
 **Cricket games** replace the per-player cards with a single traditional
 chalkboard-style scorecard table spanning the whole screen — one row per

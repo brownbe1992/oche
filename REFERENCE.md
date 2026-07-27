@@ -1930,7 +1930,7 @@ head-to-head), so it's excluded from that specific toggle's `Object.values(...)
 check while still appearing on the Player Profile's own toggle (whose filter
 doesn't check `homeTabRenderer` at all).
 
-**Live Scoreboard**: `renderers.chuckin.card()` (`frontend/display.html`) shows
+**Live Scoreboard**: `renderers.chuckin.stage()` (`frontend/display.html`) shows
 a live, **session-only** dartboard heatmap alongside the darts-thrown counter
 and the running 3-dart average — a genuinely different dataset from the
 lifetime one the Player Profile fetches via `getChuckinHeatmap()`, gradually
@@ -2107,9 +2107,9 @@ axis for an open-ended, cross-session tracker. None take a `mode` param —
 same "always practice=1 by construction" reasoning as Doubles Practice's own
 Home boards.
 
-**Live Scoreboard**: `renderers.around_the_world.card()` (`frontend/display.html`)
+**Live Scoreboard**: `renderers.around_the_world.stage()` (`frontend/display.html`)
 shows the compact `buildOutcomeGridCompact()` progress grid alongside the running
-progress counter. `renderers.around_the_clock.card()` instead shows
+progress counter. `renderers.around_the_clock.stage()` instead shows
 **`buildClockBoard()`** — a real dartboard shape (one wedge per number 1-20,
 bull excluded since it's never a target in this mode), filled solid gold with a
 ✓ once its single has been hit, dark/unfilled otherwise, sized deliberately
@@ -2781,9 +2781,11 @@ A Daily Challenge attempt is plain X01 underneath (`game.gameType` stays
 `'x01'` the whole attempt), so without extra plumbing `/display` would show
 the raw rigged starting score as if it were a real category — literally
 "1000" for the three filler-start formats. `GAME_TYPES.x01.liveModeState`
-(`frontend/index.html`) is the fix: `null` for every ordinary X01 game
-(`activeChallenge` is only ever non-null during a real attempt), but during a
-challenge it returns (`challengeMetric` computed via the active format's own
+(`frontend/index.html`) is the fix. It returns the lane figures alone for an
+ordinary X01 game (`activeChallenge` is only ever non-null during a real
+attempt — it used to return `null`; `display.html` keys the challenge treatment
+off `challengeFormat` being present, so an ordinary game is unaffected), and
+during a challenge it merges in (`challengeMetric` computed via the active format's own
 `CHALLENGE_FORMAT_DEFS[format].liveMetric(game, p)` — the same in-progress
 value on every dart, not just once `checkCompletion`'s threshold is met, and
 `challengeTrebleNumbers` via `extraResultData(game)`, `null` for every format
@@ -2796,7 +2798,7 @@ that doesn't define one):
   challengeTrebleNumbers }                                // Treble Run only
 ```
 
-`renderers.x01.card()` (`frontend/display.html`) branches on
+`renderers.x01.lane()` (`frontend/display.html`) branches on
 `s.modeState.challengeFormat`:
 - **Bullseye Gauntlet / Treble Run / Steady Hand** (the three filler-start,
   exactly-3-visit formats): the hero `.score` number becomes the challenge
@@ -2968,6 +2970,92 @@ counter is only incremented (and its cleanup listener registered) *after* the
 SSE handshake (`writeHead`/initial `write`) actually succeeds, so a socket that
 dies mid-handshake can't leak a permanently-stuck slot.
 
+### Layout — "Lower Third" + "The Ring" (2026-07 redesign)
+
+Chosen by the owner from four `/frontend-design` directions after the old board
+was measured on a real 1920×1080 screen: ~45% of every player card was a hole,
+the biggest object was the remaining score (which changes once every three
+darts) while the average, the checkout and the darts just thrown sat at 1.7vmin
+along the bottom, Cricket's MPR was absent entirely, and every non-X01 mode was
+shoehorned into an X01-shaped card.
+
+**The shell.** A slim top bar (format, match score, tallies, live dot), the
+mode's own area, and a permanent **throw strip** across the bottom carrying the
+darts in hand at 8vmin, what they are worth, and what is needed. The old
+`.matchbar` — its own strip repeating every player's name directly above the
+cards that already printed them — is absorbed into the top bar as the match
+score alone; the old `.co-strip` is absorbed into the strip's third pane.
+
+**Every game type declares exactly one of two renderers**, dispatched by
+`render()` in this order: `lane() > stage()`, with `legSummary` winning over
+both. There is no third branch — the fourteen `card()`/`scorecard()` renderers
+they replaced were deleted once unreachable.
+
+- **`lane(p, i, s, L)`** — a full-width row per player. Stats run *across* the
+  width (the resource a 16:9 screen has most of, which the card grid spent none
+  of); the mode's headline number sits right; the leg's own visits are chalked
+  under the name. Built via `laneHtml()`, with `laneCellsHtml()` for a row of
+  per-round cells and `buildModeLane()` for the five modes that are one idea
+  wearing five names (Cricket, Baseball, Shanghai, Halve-It, Pressure Chamber:
+  a fixed round sequence, a running total, a card of how each round went).
+  `extraLanes(s, L)` adds a lane that is **not a player** — on a solo practice
+  board the second lane is the session, since in practice your opponent is your
+  own session (the same dual-scope framing §2's leg-complete panel uses).
+- **`stage(s, L)`** — the mode takes the whole area because the board *is* the
+  content. Around the Clock and Around the World use **direction C, "The Ring"**
+  (the owner's separate pick for the two guided drills): a board-shaped dial
+  centre stage with the figures flanking it. `buildWorldRing()` splits each
+  wedge into the three outcomes that number owes, reading outward as a real
+  board does, so a part-finished number reads at a glance — which a 63-cell grid
+  never did across a room. Just Chuckin' It joins them: with no score, no target
+  and no round, its heatmap is the only thing there is to show.
+
+**Cells never carry state by colour alone.** A `.lcell` takes `glyph` (text,
+escaped) or `glyphHtml` (already-safe markup — Cricket's mark glyphs carry a
+screen-reader span, and escaping them printed tag source into every cell). Two
+fields rather than a flag, so which one escapes is greppable.
+
+**Per-dart modes get their own strip.** Three pending slots and a visit total
+are both lies for Around the Clock/World, Chuckin, Doubles Practice and Killer:
+there is no visit to total and there are not three darts pending.
+`singleDartStrip()` shows the dart that just landed; Chuckin's third pane
+carries its run of the last nine darts instead of a requirement.
+
+**The chalk-dust burst** (this screen's signature) follows the numeral:
+`triggerChalkEffects()` tracks `.lane-big`, not the deleted `.score`.
+
+### Post-leg / post-match result view (2026-07)
+
+The TV counterpart to §2's "Trophy Cabinet" panels, and a fix for a conflict
+that predated it: the moment a leg ended got **two** treatments fighting over
+the same 3.5 seconds — a full-screen black banner announcing "LEG COMPLETE" sat
+directly on top of the summary cards, for exactly as long as those numbers were
+worth reading, then vanished. The result is now composed **in place**, and the
+banner is suppressed whenever `s.legSummary` is present. It still fires for the
+moments that have no result view of their own (a set win).
+
+`renderResultView()` reuses the same `laneHtml()` the live board uses, so the
+lanes stay in the positions they held during play and only their *contents*
+change — no longer what you have left, but what it cost you. The winner keeps
+the gold edge; the `▸` does **not** follow it, because it means "throwing" and
+nobody is. Three parts:
+
+- **The verdict line** — the result and its cost in one breath ("LEG COMPLETE —
+  10 darts · 150.3 average"), which is how a commentator says it and why this
+  isn't just a heading. Its wording comes from the controller's own `s.message`
+  (already solo-practice aware, so a solo session never reads as beating
+  anyone); a later push carrying the same summary with no message names the
+  winner rather than falling back to a bare "LEG COMPLETE".
+- **The lanes**, one per `legSummary` row, headed by the first stat the mode
+  names — its own answer to "how did that go".
+- **The tally band**, which takes the throw strip's slot so the screen doesn't
+  jump while the band's job changes from "what is being thrown" to "what this
+  leg produced".
+
+Per-mode figures come from `resultStats(p, s)` where a mode declares one, and
+otherwise from `resultStatsFromRow(p)`, which reads whatever that mode's own
+`legSummary` row carries and labels it — so no mode can show blanks here.
+
 ### Payload shape (`liveSnapshot()`, `frontend/index.html`)
 
 Built fresh on every `pushLive()` call from the current `game` object: active
@@ -2980,7 +3068,12 @@ Chuckin: session darts/trebles plus a live `heatmap` array and `sessionAvg` via
 World: `hitNumbers`/`hitOutcomes` plain arrays plus a running hit/progress
 count via `playerSnapshotAroundTheClock`/`playerSnapshotAroundTheWorld`, §3's
 "Guided Around the Clock / Around the World" coverage), current visit's
-darts, checkout hint (X01 only — always empty for Cricket/Baseball), status,
+darts, **`visitScored`** (what the darts in hand are worth so far — the `darts`
+array carries labels like `T20`, which can't be summed, and the redesigned
+board's throw strip states the visit total beside them; it is a TOP-LEVEL key,
+so unlike anything nested in `modeState` it needs its own `ALLOWED_LIVE_KEYS`
+entry — BUG-28's exact shape), checkout hint (X01 only — always empty for
+Cricket/Baseball), status,
 `pendingAchievement` (§5), one-shot fields (`lastTurnEvent`, `matchResult`,
 `legStart` — cleared immediately after each push, so they only ever announce
 once), a `checkoutTarget` for voice announcements, and (tournament matches
@@ -3001,10 +3094,26 @@ Checkout Ladder's `checkoutLadderTarget`/`checkoutLadderVisits`, Killer's
 Doubles Practice's `doublesTargets`/`dpLastDart`/`roundOver`/`roundEndReason`,
 guided Around the Clock's `atcLastDart` (sharing `roundOver`/`roundEndReason`
 with Doubles Practice), Chuckin's `chuckinLastDart`, and guided Around the
-World's `atwLastDart`. `liveSnapshot()` builds it via `GAME_TYPES[game.gameType]
-.liveModeState(game)` — each mode declares this as a registry member next to
-its `playerSnapshot`/`evaluateVisit` (X01 has none, so `modeState` is `null`
-for X01 games).
+World's `atwLastDart`, and Just Chuckin' It's `chuckinRecent` (a rolling,
+undo-safe run of the last nine darts — with no visit and no round it is the
+only "what just happened" that mode has). `liveSnapshot()` builds it via
+`GAME_TYPES[game.gameType].liveModeState(game)` — each mode declares this as a
+registry member next to its `playerSnapshot`/`evaluateVisit`.
+
+**Lane figures (2026-07).** X01, Checkout Ladder and Dead Man Walking also
+merge `liveLaneState(game)` into their `modeState`: a `lanes` array (one entry
+per player) and, for a solo practice session only, a `session` aggregate. Both
+come from `scoring.js`'s `liveLaneStats()`, which is built on the same
+`pracAggregate()` the leg-complete panel uses — so a figure on the TV and the
+same figure on the results screen **cannot** be computed two different ways.
+`turnsForPlayer()` does the per-player split, and its rule is load-bearing: a
+wholly *unattributed* turn list belongs to whoever asks (true in a solo
+session, and filtering it by name would return nothing and silently blank the
+lane's history line), while a *partially* attributed list is treated as
+attributed so an opponent's visits are never credited to this player. X01's
+turn record carries `player` for exactly this. Cricket instead carries `mpr`/
+`roundsThrown`/`bestRound`/`nineMarkRounds` on its **player snapshot**, read
+from the same per-visit marks log the completion panel's hero uses.
 
 `ALLOWED_LIVE_KEYS` on the server allow-lists the generic top-level fields
 above plus `modeState` and `tournamentRoundLabel` as opaque values (the same
@@ -3016,13 +3125,13 @@ silently dropped (413 if the sanitized payload still exceeds 64KB).
 server guarantees nothing about the shape *inside* it, so every renderer must
 treat each nested field as possibly absent — a truthiness check on a container
 followed by unguarded reads of its nested fields is a bug (`docs/bug-roadmap.md`
-BUG-30: `renderers.pressure_chamber.scorecard()` checked only that the card
+BUG-30: `renderers.pressure_chamber.scorecard()` (now `lane()`) checked only that the card
 existed, then read `card.target.label`, so a card missing `target` threw). Two
 rules follow, both required:
 
 1. **Guard the nested shape at the renderer.** A field group that can't be
    rendered is omitted, not half-built — see `hasBanner` in
-   `renderers.pressure_chamber.scorecard()` and the `Array.isArray()` checks in
+   `renderers.pressure_chamber.lane()` and the `Array.isArray()` checks in
    `renderers.halve_it`.
 2. **Every redraw goes through `renderSafe()`, never `render()` directly.**
    `render()` writes to the DOM incrementally (format bar → player grid →
@@ -3048,7 +3157,7 @@ now only ever need touching in its `GAME_TYPES` entry's `liveModeState` and in
 `tournamentRoundLabel` does) still needs adding to `ALLOWED_LIVE_KEYS` in the
 same change, same as before.
 
-Cricket's live scoreboard (`renderers.cricket.scorecard()` in `display.html`,
+Cricket's live scoreboard (`renderers.cricket.lane()` in `display.html`,
 mirrored by `renderGameCricket()` on the controller in `frontend/index.html`)
 is a single traditional chalkboard-style table — not per-player cards like X01.
 Rows are the match's in-play numbers (highest to lowest, Bull last); columns
@@ -6812,7 +6921,7 @@ where scores start.
 
 `playerSnapshotX01()` includes `startScore` in the live payload (rides
 inside the already-unrestricted per-player `players[]` array — no
-`ALLOWED_LIVE_KEYS` change needed). `display.html`'s `renderers.x01.card()`
+`ALLOWED_LIVE_KEYS` change needed). `display.html`'s `renderers.x01.lane()`
 shows a "STARTED 401" tag next to a player's name whenever their own
 `startScore` differs from the game's `category` — visible only for the
 handicapped player, so the handicap is legible from the second screen
@@ -6981,7 +7090,7 @@ liveModeState` adds `checkoutLadderTarget`/`checkoutLadderVisits` to
 `liveSnapshot()` treats this game type as X01-shaped for the
 checkout-hint calculation (`isX01` also matches `'checkout_ladder'`, since
 it's a genuine double-out visit). `display.html`'s
-`renderers.checkout_ladder.card()` mirrors X01's own card almost exactly —
+`renderers.checkout_ladder.lane()` mirrors X01's own lane almost exactly —
 swapping the "Leg N" standing line for "Target N · Attempt N · Visit N/3."
 
 ### Saved games
