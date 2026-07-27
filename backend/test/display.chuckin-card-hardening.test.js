@@ -1,5 +1,5 @@
 'use strict';
-// Committed regression test for docs/bug-roadmap.md BUG-12: renderers.chuckin.card()
+// Committed regression test for docs/bug-roadmap.md BUG-12: renderers.chuckin.stage()
 // in frontend/display.html called p.sessionAvg.toFixed(1) directly on a value taken
 // straight from the /api/live broadcast payload (whose per-player array shape
 // ALLOWED_LIVE_KEYS deliberately leaves unrestricted). A non-numeric value threw
@@ -11,7 +11,7 @@
 // live-payload array field in the file.
 //
 // display.html has no build step and isn't require()-able, so this extracts the
-// real source for every function renderers.chuckin.card() actually depends on
+// real source for every function renderers.chuckin.stage() actually depends on
 // (dartClass, DB_SECTORS, buildChuckinLiveHeatmap, esc/escapeHtml, num, and the
 // renderers object itself) via targeted regexes into one vm context, then calls the
 // function directly — exercising the actual shipped code, not a hand-copied
@@ -47,47 +47,53 @@ function loadChuckinCard() {
     extract(src, /^function escapeHtml\(s\)\{.*\}$/m, 'escapeHtml()'),
     extract(src, /function esc\(v\)\{[^}]*\}/, 'esc()'),
     extract(src, /function num\(v\)\{[^}]*\}/, 'num()'),
+    extract(src, /^function laneHtml\(o\)\{[\s\S]*?^\}$/m, 'laneHtml()'),
+    extract(src, /^function laneCellsHtml\(cells\)\{[\s\S]*?^\}$/m, 'laneCellsHtml()'),
+    extract(src, /^function laneRecentHtml\(recent\)\{[\s\S]*?^\}$/m, 'laneRecentHtml()'),
+    extract(src, /^function buildModeLane\(p, i, s, L, o\)\{[\s\S]*?^\}$/m, 'buildModeLane()'),
+    extract(src, /^function pendingCell\(label\)\{.*\}$/m, 'pendingCell()'),
+    extract(src, /^function stageSideHtml\(o\)\{[\s\S]*?^\}$/m, 'stageSideHtml()'),
     extract(src, /const renderers = \{[\s\S]*\n\};\n\/\/ Traditional chalkboard marks:/, 'renderers').replace(/\n\/\/ Traditional chalkboard marks:$/, ''),
   ];
   const context = {};
   vm.createContext(context);
   vm.runInContext(`${pieces.join('\n')}\nthis.renderers = renderers;`, context);
-  return context.renderers.chuckin.card;
+  return context.renderers.chuckin.stage;
 }
 
 const L = { showMeta: true }; // minimal layout-options object card() reads
 
-describe('BUG-12 — renderers.chuckin.card() tolerates a non-numeric sessionAvg', () => {
+describe('BUG-12 — renderers.chuckin.stage() tolerates a non-numeric sessionAvg', () => {
   test('a non-numeric sessionAvg renders "—" instead of throwing', () => {
     const card = loadChuckinCard();
     const p = { name: 'Attacker', sessionDarts: 10, sessionTrebles: 2, sessionAvg: '</div><script>alert(1)</script>', heatmap: [] };
-    const s = { currentIndex: 0, chuckinLastDart: null };
+    const s = { currentIndex: 0, players: [p], modeState: {} };
     let html;
-    assert.doesNotThrow(() => { html = card(p, 0, s, L); });
-    assert.match(html, /class="dart-count-val">—<\/span>/, 'falls back to the em-dash placeholder');
+    assert.doesNotThrow(() => { html = card(s, L); });
+    assert.match(html, /class="v">—<\/span>/, 'falls back to the em-dash placeholder');
     assert.ok(!html.includes('<script>alert(1)</script>'), 'the crafted value must not reach the output unescaped');
   });
 
   test('a legitimate numeric sessionAvg still renders correctly', () => {
     const card = loadChuckinCard();
     const p = { name: 'Normal', sessionDarts: 30, sessionTrebles: 5, sessionAvg: 45.678, heatmap: [] };
-    const s = { currentIndex: 0, chuckinLastDart: null };
-    const html = card(p, 0, s, L);
-    assert.match(html, /class="dart-count-val">45\.7<\/span>/);
+    const s = { currentIndex: 0, players: [p], modeState: {} };
+    const html = card(s, L);
+    assert.match(html, /class="v">45\.7<\/span>/);
   });
 
   test('a non-array (crafted) heatmap value does not crash the card', () => {
     const card = loadChuckinCard();
     const p = { name: 'Attacker2', sessionDarts: 1, sessionTrebles: 0, sessionAvg: 10, heatmap: 'not-an-array' };
-    const s = { currentIndex: 0, chuckinLastDart: null };
-    assert.doesNotThrow(() => card(p, 0, s, L));
+    const s = { currentIndex: 0, players: [p], modeState: {} };
+    assert.doesNotThrow(() => card(s, L));
   });
 
   test('a missing/null sessionAvg (normal early-session state) still renders "—"', () => {
     const card = loadChuckinCard();
     const p = { name: 'JustStarted', sessionDarts: 0, sessionTrebles: 0, sessionAvg: null, heatmap: [] };
-    const s = { currentIndex: 0, chuckinLastDart: null };
-    const html = card(p, 0, s, L);
-    assert.match(html, /class="dart-count-val">—<\/span>/);
+    const s = { currentIndex: 0, players: [p], modeState: {} };
+    const html = card(s, L);
+    assert.match(html, /class="v">—<\/span>/);
   });
 });

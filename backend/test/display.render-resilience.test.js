@@ -14,7 +14,7 @@
 // allowlist entries is what removed the third sync point behind BUG-28), so the shape
 // of everything inside it is guaranteed only by the frontend producer agreeing with
 // display.html's reader. A Pressure Chamber card missing its `target` made
-// renderers.pressure_chamber.scorecard() throw
+// renderers.pressure_chamber.lane() throw
 // "TypeError: Cannot read properties of undefined (reading 'label')" — reproduced live,
 // with the header updating to the new game while the card below still showed the
 // previous one.
@@ -44,14 +44,15 @@ function loadRenderers() {
   const src = fs.readFileSync(DISPLAY_HTML_PATH, 'utf8');
   const pieces = [
     extract(src, /function dartClass\(label\)\{[\s\S]*?\n\}/, 'dartClass()'),
-    extract(src, /function buildDartSlots\(darts\)\{[\s\S]*?\n\}/, 'buildDartSlots()'),
-    extract(src, /function buildScorecardHeadCells\(players, active\)\{[\s\S]*?\n\}/, 'buildScorecardHeadCells()'),
-    extract(src, /function buildScorecardFootCells\(players, active, valueFn\)\{[\s\S]*?\n\}/, 'buildScorecardFootCells()'),
-    extract(src, /function buildScorecardThrowRow\(labelHtml, darts\)\{[\s\S]*?\n\}/, 'buildScorecardThrowRow()'),
-    extract(src, /function roundOverrunInfo\(current, max, noun\)\{[\s\S]*?\n\}/, 'roundOverrunInfo()'),
     extract(src, /^function escapeHtml\(s\)\{.*\}$/m, 'escapeHtml()'),
     extract(src, /function esc\(v\)\{[^}]*\}/, 'esc()'),
     extract(src, /function num\(v\)\{[^}]*\}/, 'num()'),
+    extract(src, /^function laneHtml\(o\)\{[\s\S]*?^\}$/m, 'laneHtml()'),
+    extract(src, /^function laneCellsHtml\(cells\)\{[\s\S]*?^\}$/m, 'laneCellsHtml()'),
+    extract(src, /^function laneRecentHtml\(recent\)\{[\s\S]*?^\}$/m, 'laneRecentHtml()'),
+    extract(src, /^function buildModeLane\(p, i, s, L, o\)\{[\s\S]*?^\}$/m, 'buildModeLane()'),
+    extract(src, /^function pendingCell\(label\)\{.*\}$/m, 'pendingCell()'),
+    extract(src, /^function stageSideHtml\(o\)\{[\s\S]*?^\}$/m, 'stageSideHtml()'),
     extract(src, /const renderers = \{[\s\S]*\n\};\n\/\/ Traditional chalkboard marks:/, 'renderers')
       .replace(/\n\/\/ Traditional chalkboard marks:$/, ''),
   ];
@@ -77,31 +78,34 @@ describe('BUG-30 — a structurally incomplete modeState must not throw out of a
   ];
 
   for (const [label, cards] of cases) {
-    test(`pressure_chamber scorecard survives ${label}`, () => {
+    test(`pressure_chamber lane survives ${label}`, () => {
       const renderers = loadRenderers();
       const s = snapshotWith({ pressureChamberRound: 1, pressureChamberDeadline: null, pressureChamberCards: cards });
       let html;
-      assert.doesNotThrow(() => { html = renderers.pressure_chamber.scorecard(s, { showTag: true }); },
+      assert.doesNotThrow(() => { html = renderers.pressure_chamber.lane(s.players[0], 0, s, { showTag: true }); },
         'the renderer must degrade rather than throw — throwing is what tore the screen');
       assert.equal(typeof html, 'string');
-      // It still renders the scorecard itself; only the banner it can't build is dropped.
-      assert.match(html, /cs-table/, 'the table should still render without the banner');
-      assert.doesNotMatch(html, /pc-banner/, 'an unbuildable banner should be omitted, not half-built');
+      // The lane still renders; a card it can't read simply contributes no cell.
+      // (The Pressure Chamber banner the old scorecard built lives on the
+      // CONTROLLER now — the live board shows each round's outcome instead —
+      // so what is guarded here is that a malformed card degrades to a missing
+      // cell rather than throwing out of the renderer, which is what tore the
+      // screen in BUG-30.)
+      assert.match(html, /class="lane/, 'the lane must still render');
     });
   }
 
-  test('a well-formed card still renders its banner', () => {
-    // Guards against "fixed" by never showing the banner at all.
+  test('a well-formed card still renders its round cell', () => {
+    // Guards against "fixed" by never rendering the round at all.
     const renderers = loadRenderers();
     const s = snapshotWith({
       pressureChamberRound: 1,
       pressureChamberDeadline: null,
       pressureChamberCards: [{ target: { label: 'T20' }, modifier: { key: 'heat', icon: '@', label: 'Heat', flavor: 'go' } }],
     });
-    const html = renderers.pressure_chamber.scorecard(s, { showTag: true });
-    assert.match(html, /pc-banner/);
-    assert.match(html, /T20/);
-    assert.match(html, /Heat/);
+    const html = renderers.pressure_chamber.lane(s.players[0], 0, s, { showTag: true });
+    assert.match(html, /class="lcell/, 'the round contributes a cell');
+    assert.match(html, /class="lane-big/, 'and the running CP total is shown');
   });
 });
 

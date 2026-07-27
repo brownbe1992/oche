@@ -97,18 +97,17 @@
   .pname{font-weight:600;font-size:3.6vmin;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ptag{font-size:1.5vmin;font-weight:700;letter-spacing:.08em;color:var(--gold);border:1px solid var(--wire);border-radius:.8vmin;padding:.5vmin .9vmin;flex:none}
   .throwflag{margin-left:auto;font-size:1.7vmin;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);flex:none}
-  .score{font-family:'Bebas Neue';font-size:clamp(56px, 17vmin, 280px);line-height:.78;color:var(--cream);letter-spacing:.01em;margin:.4vmin 0 .2vmin;
-    display:inline-block; transform:rotate(-0.6deg); transition:transform .15s ease}
+  /* Chalk never sits perfectly straight on a real board — the faint alternating
+     tilt and the dust burst moved onto .lane-big with the numeral itself. */
   /* Chalk never sits perfectly straight on a real board — a faint alternating
      tilt per card (never per-digit, which would need per-character markup) so
      the numerals read as hand-chalked rather than machine-typeset. */
-  .grid > *:nth-child(even) .score{transform:rotate(0.5deg)}
-  .pcard.active .score{color:#fff}
+
   /* Chalk-dust burst (item: signature live-scoreboard treatment) — fires when a
      score's displayed text actually changes (see triggerChalkEffects() below),
      not on every /api/live push (most pushes don't change every card). */
   @keyframes chalk-flash{0%{text-shadow:0 0 2.4vmin rgba(247,245,238,.9)}100%{text-shadow:0 0 0 rgba(247,245,238,0)}}
-  .score.chalk-flash{animation:chalk-flash .5s ease-out}
+  .lane-big.chalk-flash{animation:chalk-flash .5s ease-out}
   .chalk-mote{position:absolute;border-radius:50%;background:var(--chalk);pointer-events:none;
     animation:chalk-mote-drift .7s ease-out forwards}
   @keyframes chalk-mote-drift{
@@ -116,8 +115,8 @@
     100%{opacity:0;transform:var(--mote-end,translate(0,-4vmin)) scale(.4)}
   }
   @media(prefers-reduced-motion:reduce){
-    .score{transition:none}
-    .score.chalk-flash{animation:none}
+    .lane-big{transition:none}
+    .lane-big.chalk-flash{animation:none}
     .chalk-mote{display:none}
   }
   /* Compact/Minimal free up card space by dropping rows below — let the score grow into it */
@@ -1022,7 +1021,11 @@ function spawnChalkDust(scoreEl){
 // knowledge) is the one check that works identically for every renderer.
 let lastScoreTexts = [];
 function triggerChalkEffects(){
-  const scoreEls = grid.querySelectorAll('.score');
+  // .lane-big, not the old .score — the lane's headline numeral inherited the
+  // chalk-dust burst when the cards it used to live on were replaced. Left
+  // pointing at .score it would have found nothing and silently lost the
+  // signature treatment of this screen.
+  const scoreEls = grid.querySelectorAll('.lane-big');
   scoreEls.forEach((el, i) => {
     const text = el.textContent;
     if(lastScoreTexts[i] !== undefined && lastScoreTexts[i] !== text){
@@ -1031,9 +1034,9 @@ function triggerChalkEffects(){
     }
     lastScoreTexts[i] = text;
   });
-  // A shorter list than last time (fewer players, or scorecard/summary layout
-  // with no .score elements at all) — drop the stale trailing entries so a
-  // later return to a per-player card layout doesn't compare against them.
+  // A shorter list than last time (fewer players, or a stage layout with no
+  // lanes at all) — drop the stale trailing entries so a later return to lanes
+  // doesn't compare against them.
   lastScoreTexts.length = scoreEls.length;
 }
 
@@ -1116,81 +1119,11 @@ function buildSingleDartBox(dart, extraBadgeHtml){
   return `<div class="throwbox"><div class="darts single"><div class="dart ${dartClass(dart.label)}">${esc(dart.label)}</div></div>${extraBadgeHtml||''}</div>`;
 }
 
-// The BUST/won flash shown over an active player's card — identical shape
-// across X01, Checkout Ladder, and Dead Man Walking, differing only in the
-// win label text.
-function statusFlash(active, status, winLabel){
-  if(!active) return '';
-  if(status==='bust') return `<div class="flash bust">BUST</div>`;
-  if(status==='won')  return `<div class="flash shot">${winLabel}</div>`;
-  return '';
-}
 
-// The scorecard-layout column header row — identical across the five
-// cs-table-based renderers (cricket, baseball, shanghai, halve_it,
-// pressure_chamber): one head cell per player, with a "throwing" chip on
-// whichever one is active.
-function buildScorecardHeadCells(players, active){
-  return players.map((p,i)=>{
-    const isActive = i===active;
-    return `<div class="cs-col-head${isActive?' active':''}">
-      <span>${escapeHtml(p.name)}</span>
-      ${isActive?'<span class="cs-throw-chip">▸ throwing</span>':''}
-    </div>`;
-  }).join('');
-}
 
-// The scorecard-layout footer total-row cells — identical across baseball/
-// shanghai/halve_it/pressure_chamber, differing only in which field of `p`
-// holds the running total.
-function buildScorecardFootCells(players, active, valueFn){
-  return players.map((p,i)=>{
-    const isActive = i===active;
-    return `<div class="cs-cell${isActive?' active':''}"><span class="cs-points${isActive?' active':''}">${num(valueFn(p))}</span></div>`;
-  }).join('');
-}
 
-// The scorecard-layout trailing "who's throwing + their darts" row — identical
-// across every cs-table renderer (cricket, baseball, shanghai, halve_it,
-// pressure_chamber, bobs_27), differing only in the label text.
-function buildScorecardThrowRow(labelHtml, darts){
-  return `<div class="cs-throw-row">
-    <span class="cs-throw-lbl">${labelHtml}</span>
-    <div class="darts">${buildDartSlots(darts)}</div>
-  </div>`;
-}
 
-// "Round N of M" / "Inning N of 9" overrun bookkeeping — baseball/shanghai/
-// halve_it/pressure_chamber's scorecards all extend their row count past the
-// game's normal length once play runs long (extra innings/rounds), each
-// re-deriving the same "how many rows, and what suffix to show" logic.
-function roundOverrunInfo(current, max, noun){
-  return {
-    lastCount: Math.max(max, current),
-    suffix: current > max ? ` (extra ${noun})` : '',
-  };
-}
 
-// The end-of-leg summary card shell — identical across every game type's
-// summary(): a name (+ optional 🏆 crown), an optional extra name-suffix
-// badge (Killer's ☠️), and a row of {value,label} stat pairs. Only the stats
-// shown differ per type.
-function buildSummaryCard(p, stats, opts){
-  const o = opts || {};
-  const winnerClass = o.noWinner ? '' : (p.won ? ' winner' : '');
-  const crown = o.noWinner ? '' : (p.won ? '<span class="sum-crown">🏆</span>' : '');
-  const nameSuffix = o.nameSuffix ? o.nameSuffix(p) : '';
-  const statsHtml = stats.map(st => `
-          <div class="sum-stat">
-            <div class="sv">${st.value}</div>
-            <div class="sl">${st.label}</div>
-          </div>`).join('');
-  return `
-      <div class="sum-card${winnerClass}">
-        <div class="sum-name">${escapeHtml(p.name)}${crown}${nameSuffix}</div>
-        <div class="sum-stats">${statsHtml}</div>
-      </div>`;
-}
 
 // Standard dartboard number ordering, clockwise from the top — mirror-copied
 // from frontend/index.html's DB_SECTORS (this file has no shared module with
@@ -1416,26 +1349,6 @@ function buildClockBoard(hitNumbers){
   return s;
 }
 
-// Compact progress grid for Around the World (docs/game-modes-roadmap.md
-// "Guided Around the Clock / Around the World") — mirror-copied from
-// frontend/index.html's buildOutcomeGridHtml() (this file has no shared module
-// with index.html, per the established convention above). hitKeys is a plain
-// array of `${sector}:${mult}` strings (Around the Clock always uses mult 1) —
-// index.html's playerSnapshotAroundTheClock()/playerSnapshotAroundTheWorld()
-// send hitNumbers/hitOutcomes respectively, normalized to that shape below.
-function buildOutcomeGridCompact(hitKeys){
-  const hitSet = new Set(hitKeys||[]);
-  const cell = (label, key, title) => {
-    const hit = hitSet.has(key);
-    return `<div title="${esc(title)}" style="width:24px;height:24px;border-radius:.5vmin;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;position:relative;
-      background:${hit?'var(--gold)':'rgba(255,255,255,.08)'};color:${hit?'#111':'#8a8a80'}">${label}${hit ? '<span aria-hidden="true" style="position:absolute;bottom:-1px;right:0;font-size:7px">✓</span>' : ''}</div>`;
-  };
-  const numberCells = Array.from({length:20},(_,i)=>i+1).map(n=>
-    `<div style="display:flex;gap:2px">${cell('S'+n,`${n}:1`,'Single '+n)}${cell('D'+n,`${n}:2`,'Double '+n)}${cell('T'+n,`${n}:3`,'Treble '+n)}</div>`
-  ).join('');
-  const specialCells = `<div style="display:flex;gap:2px">${cell('25',`25:1`,'Outer bull')}${cell('Bull',`25:2`,'Double bull')}${cell('Miss',`0:1`,'Miss')}</div>`;
-  return `<div style="display:flex;flex-wrap:wrap;gap:3px">${numberCells}${specialCells}</div>`;
-}
 
 /* ---- per-game-type renderers ----
    The shell above (top bar, match bar, checkout strip, banners, achievement
@@ -1446,80 +1359,6 @@ function buildOutcomeGridCompact(hitKeys){
    type (Baseball, etc.) plugs in the same way without touching either. */
 const renderers = {
   x01: {
-    card(p, i, s, L){
-      const active = i===s.currentIndex;
-      // H2H standing (sets/legs) now lives in the match bar above the grid, not here —
-      // showing it twice was redundant, and the match bar's boxed chips are more legible.
-      const standing = s.practice ? `Leg ${num(s.legNo)}` : '';
-      // Daily Challenge (frontend/index.html's GAME_TYPES.x01.liveModeState) —
-      // still an X01 game underneath, but formats whose real score is a
-      // deliberately-too-high filler (the engine never busts/wins mid-attempt;
-      // `challengeUsesFillerScore`, generic — not a hardcoded format-name list,
-      // since display.html has no access to the CHALLENGE_FORMAT_DEFS registry
-      // that decides this) swap the hero number for the actual challenge metric
-      // instead. The formats that keep a real countdown (Checkout Sprint, Speed
-      // to Zero, The Long Game) show it unchanged, with the metric as a
-      // secondary line instead.
-      const cm = (s.modeState && s.modeState.challengeFormat) ? s.modeState : null;
-      const heroScore = (cm && cm.challengeUsesFillerScore) ? cm.challengeMetric : p.score;
-      let throwbox = '';
-      if(active){
-        const co = s.checkout
-          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${formatCheckoutRoute(s.checkout)}</span></div>`
-          : '';
-        throwbox = `<div class="throwbox"><div class="darts">${buildDartSlots(s.darts)}</div>${co}</div>`;
-      }
-      const flash = statusFlash(active, s.status, 'GAME SHOT');
-
-      const dartCounts = !L.showDartCounts ? '' : `
-          <div class="dart-counts">
-            <div class="dart-counts-title">Darts Thrown</div>
-            <div class="dart-count-row"><span class="dart-count-val">${num(p.legDarts)}</span><span class="dart-count-lbl">Leg</span></div>
-            ${s.practice
-              ? `<div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Session</span></div>`
-              : `<div class="dart-count-row"><span class="dart-count-val">${num(p.setDarts)}</span><span class="dart-count-lbl">Set</span></div>
-                 <div class="dart-count-row"><span class="dart-count-val">${num(p.gameDarts)}</span><span class="dart-count-lbl">Game</span></div>`
-            }
-          </div>`;
-      // Daily Challenge's own progress block, replacing dartCounts above — "Set
-      // darts"/"Session darts" mean nothing for a one-off attempt, so this shows
-      // whichever numbers actually decide the challenge instead: the metric label
-      // (already fully formatted client-side — "3 bulls", "2 trebles", "45 pts",
-      // "7 darts", "2 visits"), a visit-progress pip row for formats with a
-      // fixed visit cap (`challengeVisitCap`, generic — 3, 6, whatever a format
-      // declares; open-ended formats show no pips), and (where the format
-      // provides it) which numbers so far.
-      const challengeBox = !cm ? '' : `
-          <div class="dart-counts">
-            <div class="challenge-metric">${esc(cm.challengeMetricLabel)}</div>
-            ${cm.challengeVisitCap ? `<div class="challenge-pips">${Array.from({length:cm.challengeVisitCap},(_,vi)=>vi).map(vi=>
-              `<span class="pip ${vi<cm.challengeVisitsCompleted?'done':(active && vi===cm.challengeVisitsCompleted)?'live':''}"></span>`
-            ).join('')}</div>` : ''}
-            ${(cm.challengeTrebleNumbers && cm.challengeTrebleNumbers.length)
-              ? `<div class="challenge-chips">${cm.challengeTrebleNumbers.map(n=>`<span class="chip">T${n}</span>`).join('')}</div>` : ''}
-          </div>`;
-      const metaParts = [];
-      if(L.showAverages) metaParts.push(`<span>leg <b>${p.legAvg!=null?esc(p.legAvg):'—'}</b></span><span>game <b>${p.gameAvg!=null?esc(p.gameAvg):'—'}</b></span>`);
-      if(standing) metaParts.push(`<span class="standing">${standing}</span>`);
-      const meta = (!L.showMeta || !metaParts.length) ? '' : `<div class="meta">${metaParts.join('')}</div>`;
-
-      return `<div class="pcard ${active?'active':''}">
-        ${flash}
-        <div>
-          <div class="prow1">
-            <span class="pname">${escapeHtml(p.name)}</span>
-            ${cm ? `<span class="ptag">🎯 CHALLENGE</span>` : ''}
-            ${L.showTag ? `<span class="ptag">${p.out==='double'?'DOUBLE OUT':'SINGLE OUT'}</span>` : ''}
-            ${p.startScore != null && String(p.startScore) !== String(s.category) ? `<span class="ptag" title="Handicap: started this leg from ${num(p.startScore)} instead of ${esc(s.category)}">STARTED ${num(p.startScore)}</span>` : ''}
-            ${active?'<span class="throwflag">▸ throwing</span>':''}
-          </div>
-          <div class="score">${num(heroScore)}</div>
-          ${cm ? challengeBox : dartCounts}
-        </div>
-        ${meta}
-        ${throwbox}
-      </div>`;
-    },
     /* ---- LOWER THIRD lane (2026-07) ----
        Replaces the old .pcard, whose remaining score was 17vmin while the
        average, the checkout and the darts just thrown sat at 1.7vmin along the
@@ -1587,13 +1426,6 @@ const renderers = {
         big: p.gameAvg != null ? p.gameAvg : '—', bigUnit: 'avg',
       });
     },
-    summary(p){
-      return buildSummaryCard(p, [
-        { value: p.avg!=null?esc(p.avg):'—', label:'Average' },
-        { value: num(p.darts), label:'Darts' },
-        { value: num(p.busts), label:'Busts' },
-      ]);
-    }
   },
   cricket: {
     /* MPR leads, because MPR is Cricket's three-dart average — the live board
@@ -1624,49 +1456,6 @@ const renderers = {
     // A single shared chalkboard-style table (rows=numbers, columns=players)
     // rather than per-player cards — matches how cricket is scored on a real
     // board. Replaces the per-player marks-grid design used before.
-    scorecard(s, L){
-      const players = s.players;
-      const active = s.currentIndex;
-      const numberSet = new Set();
-      players.forEach(p=>Object.keys(p.marks||{}).forEach(n=>numberSet.add(Number(n))));
-      const nums = Array.from(numberSet).filter(n=>n!==25).sort((a,b)=>b-a);
-      if(numberSet.has(25)) nums.push(25);
-
-      const headCells = buildScorecardHeadCells(players, active);
-
-      const bodyRows = nums.map(n=>{
-        const lbl = n===25 ? 'Bull' : String(n);
-        const cells = players.map((p,i)=>{
-          const m = (p.marks && p.marks[n]) || 0;
-          const isActive = i===active;
-          return `<div class="cs-cell${isActive?' active':''}">${cricketMarkGlyph(m, lbl)}</div>`;
-        }).join('');
-        return `<div class="cs-row"><div class="cs-label">${lbl}</div>${cells}</div>`;
-      }).join('');
-
-      const pointCells = buildScorecardFootCells(players, active, p=>p.points);
-
-      const thrower = players[active];
-      // docs/archive/cutthroat-cricket-roadmap.md: the one visible difference from
-      // standard on this screen — everything else (marks grid, points cells)
-      // renders identically either way.
-      const ptsLabel = (s.modeState||{}).cricketVariant === 'cutthroat' ? 'Pts (lowest wins)' : 'Pts';
-
-      return `<div class="cs-wrap" style="--cs-cols:${players.length}">
-        <div class="cs-table">
-          <div class="cs-row cs-head"><div class="cs-label"></div>${headCells}</div>
-          ${bodyRows}
-          <div class="cs-row cs-foot"><div class="cs-label">${ptsLabel}</div>${pointCells}</div>
-        </div>
-        ${buildScorecardThrowRow(thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche`:'', s.darts)}
-      </div>`;
-    },
-    summary(p){
-      return buildSummaryCard(p, [
-        { value: num(p.points), label:'Points' },
-        { value: num(p.closed), label:'Closed' },
-      ]);
-    }
   },
   // Baseball (docs/game-modes-roadmap.md): same shared chalkboard-table shape as
   // Cricket's (rows=innings 1-9, columns=players) rather than per-player cards —
@@ -1691,38 +1480,6 @@ const renderers = {
       });
     },
     resultStats(p){ return [{ v: p.totalRuns, k: 'runs' }]; },
-    scorecard(s, L){
-      const players = s.players;
-      const active = s.currentIndex;
-      const inning = (s.modeState||{}).baseballInning || 1;
-      const { lastCount: lastInning, suffix: inningSuffix } = roundOverrunInfo(inning, 9, 'innings');
-      const rows = [];
-      for(let i=1;i<=lastInning;i++){
-        const isCurrentInning = i===inning;
-        const cells = players.map((p,pi)=>{
-          const r = p.inningRuns && p.inningRuns[i];
-          const isActive = pi===active && isCurrentInning;
-          return `<div class="cs-cell${isActive?' active':''}">${r!=null?`<span class="cs-points">${num(r)}</span>`:''}</div>`;
-        }).join('');
-        rows.push(`<div class="cs-row"><div class="cs-label">${i}</div>${cells}</div>`);
-      }
-
-      const headCells = buildScorecardHeadCells(players, active);
-      const totalCells = buildScorecardFootCells(players, active, p=>p.totalRuns);
-      const thrower = players[active];
-
-      return `<div class="cs-wrap" style="--cs-cols:${players.length}">
-        <div class="cs-table">
-          <div class="cs-row cs-head"><div class="cs-label"></div>${headCells}</div>
-          ${rows.join('')}
-          <div class="cs-row cs-foot"><div class="cs-label">Runs</div>${totalCells}</div>
-        </div>
-        ${buildScorecardThrowRow(thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Inning ${Math.min(inning,9)} of 9${inningSuffix}`:'', s.darts)}
-      </div>`;
-    },
-    summary(p){
-      return buildSummaryCard(p, [{ value: num(p.totalRuns), label:'Runs' }]);
-    }
   },
   // Shanghai (docs/archive/shanghai-roadmap.md): same shared chalkboard-table shape as
   // Baseball's own (rows=rounds 1-config.rounds, columns=players) — all players
@@ -1746,40 +1503,6 @@ const renderers = {
       });
     },
     resultStats(p){ return [{ v: p.totalPoints, k: 'points' }]; },
-    scorecard(s, L){
-      const players = s.players;
-      const active = s.currentIndex;
-      const maxRounds = (s.modeState||{}).shanghaiMaxRounds || 7;
-      const round = (s.modeState||{}).shanghaiRound || 1;
-      const { lastCount: lastRound, suffix: roundSuffix } = roundOverrunInfo(round, maxRounds, 'rounds');
-      const rows = [];
-      for(let i=1;i<=lastRound;i++){
-        const isCurrentRound = i===round;
-        const target = i<=maxRounds ? i : maxRounds;
-        const cells = players.map((p,pi)=>{
-          const r = p.roundPoints && p.roundPoints[i];
-          const isActive = pi===active && isCurrentRound;
-          return `<div class="cs-cell${isActive?' active':''}">${r!=null?`<span class="cs-points">${num(r)}</span>`:''}</div>`;
-        }).join('');
-        rows.push(`<div class="cs-row"><div class="cs-label">${target}</div>${cells}</div>`);
-      }
-
-      const headCells = buildScorecardHeadCells(players, active);
-      const totalCells = buildScorecardFootCells(players, active, p=>p.totalPoints);
-      const thrower = players[active];
-
-      return `<div class="cs-wrap" style="--cs-cols:${players.length}">
-        <div class="cs-table">
-          <div class="cs-row cs-head"><div class="cs-label"></div>${headCells}</div>
-          ${rows.join('')}
-          <div class="cs-row cs-foot"><div class="cs-label">Points</div>${totalCells}</div>
-        </div>
-        ${buildScorecardThrowRow(thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}${roundSuffix}`:'', s.darts)}
-      </div>`;
-    },
-    summary(p){
-      return buildSummaryCard(p, [{ value: num(p.totalPoints), label:'Points' }]);
-    }
   },
   // Halve-It (docs/archive/halve-it-roadmap.md): same shared chalkboard-table
   // shape as Shanghai's own, with row labels showing the round's own TARGET
@@ -1811,43 +1534,6 @@ const renderers = {
       });
     },
     resultStats(p){ return [{ v: p.total, k: 'total' }]; },
-    scorecard(s, L){
-      const players = s.players;
-      const active = s.currentIndex;
-      const targets = ((s.modeState||{}).halveItTargets && s.modeState.halveItTargets.length) ? s.modeState.halveItTargets : [{sector:20}];
-      const maxRounds = targets.length;
-      const round = (s.modeState||{}).halveItRound || 1;
-      const { lastCount: lastRound, suffix: roundSuffix } = roundOverrunInfo(round, maxRounds, 'rounds');
-      const targetAt = i => targets[Math.min(i, maxRounds) - 1];
-      const targetLabel = t => halveItTargetLabel(t);
-      const rows = [];
-      for(let i=1;i<=lastRound;i++){
-        const isCurrentRound = i===round;
-        const cells = players.map((p,pi)=>{
-          const r = p.roundTotals && p.roundTotals[i];
-          const halved = p.roundHalved && p.roundHalved[i];
-          const isActive = pi===active && isCurrentRound;
-          return `<div class="cs-cell${isActive?' active':''}">${r!=null?`<span class="cs-points">${halved?'½ ':''}${num(r)}</span>`:''}</div>`;
-        }).join('');
-        rows.push(`<div class="cs-row"><div class="cs-label">${escapeHtml(targetLabel(targetAt(i)))}</div>${cells}</div>`);
-      }
-
-      const headCells = buildScorecardHeadCells(players, active);
-      const totalCells = buildScorecardFootCells(players, active, p=>p.total);
-      const thrower = players[active];
-
-      return `<div class="cs-wrap" style="--cs-cols:${players.length}">
-        <div class="cs-table">
-          <div class="cs-row cs-head"><div class="cs-label"></div>${headCells}</div>
-          ${rows.join('')}
-          <div class="cs-row cs-foot"><div class="cs-label">Total</div>${totalCells}</div>
-        </div>
-        ${buildScorecardThrowRow(thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}${roundSuffix}, target ${escapeHtml(targetLabel(targetAt(round)))}`:'', s.darts)}
-      </div>`;
-    },
-    summary(p){
-      return buildSummaryCard(p, [{ value: num(p.total), label:'Total' }]);
-    }
   },
   // The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md): same shared
   // cs-table chalkboard shape as Shanghai/Halve-It's own (rows=rounds
@@ -1880,65 +1566,6 @@ const renderers = {
     resultStats(p){
       return [{ v: p.totalCp, k: 'composure points' }, { v: p.rating, k: 'rating' }];
     },
-    scorecard(s, L){
-      const players = s.players;
-      const active = s.currentIndex;
-      const ms = s.modeState || {};
-      const cards = Array.isArray(ms.pressureChamberCards) ? ms.pressureChamberCards : [];
-      const maxRounds = cards.length || 15;
-      const round = ms.pressureChamberRound || 1;
-      const { lastCount: lastRound } = roundOverrunInfo(round, maxRounds, 'rounds');
-      const cardAt = i => cards[Math.min(i, maxRounds) - 1];
-      const OUTCOME_ICON = { full:'✅', partial:'➗', miss:'❌' };
-      const rows = [];
-      for(let i=1;i<=lastRound;i++){
-        const isCurrentRound = i===round;
-        const c = cardAt(i);
-        const cells = players.map((p,pi)=>{
-          const r = p.roundResults && p.roundResults[i];
-          const isActive = pi===active && isCurrentRound;
-          return `<div class="cs-cell${isActive?' active':''}">${r?`<span class="cs-points">${OUTCOME_ICON[r]||''}</span>`:''}</div>`;
-        }).join('');
-        rows.push(`<div class="cs-row"><div class="cs-label">${i}</div>${cells}</div>`);
-      }
-
-      const headCells = buildScorecardHeadCells(players, active);
-
-      const totalCells = buildScorecardFootCells(players, active, p=>p.totalCp);
-      const thrower = players[active];
-
-      const liveCard = cardAt(round);
-      const noWarmup = liveCard && liveCard.modifier && liveCard.modifier.key === 'no_warmup';
-      const remainingSec = (noWarmup && ms.pressureChamberDeadline != null) ? Math.max(0, Math.ceil((ms.pressureChamberDeadline - Date.now())/1000)) : null;
-      // docs/bug-roadmap.md BUG-30: the banner needs BOTH nested objects, not just a
-      // truthy card — `liveCard ?` alone let a card missing `target`/`modifier` through
-      // and then threw on `.label`, which (before renderSafe()) tore the whole screen.
-      // Same Array.isArray()/shape-check discipline renderers.halve_it already applies
-      // to its own targets list; a card that isn't fully formed simply gets no banner.
-      const hasBanner = !!(liveCard && liveCard.target && liveCard.modifier);
-      const banner = hasBanner ? `<div class="pc-banner">
-        <div style="font-size:22px;font-weight:800">${escapeHtml(liveCard.target.label)}</div>
-        <div style="font-size:16px;font-weight:700;margin-top:4px">${escapeHtml(liveCard.modifier.icon)} ${escapeHtml(liveCard.modifier.label)}</div>
-        <div style="font-style:italic;font-size:13px;margin-top:2px">${escapeHtml(liveCard.modifier.flavor)}</div>
-        ${remainingSec!=null?`<div style="margin-top:6px;font-size:20px;font-weight:800">${remainingSec}s</div>`:''}
-      </div>` : '';
-
-      return `<div class="cs-wrap" style="--cs-cols:${players.length}">
-        <div class="cs-table">
-          <div class="cs-row cs-head"><div class="cs-label"></div>${headCells}</div>
-          ${rows.join('')}
-          <div class="cs-row cs-foot"><div class="cs-label">CP</div>${totalCells}</div>
-        </div>
-        ${banner}
-        ${buildScorecardThrowRow(thrower?`<b>${escapeHtml(thrower.name)}</b> at the oche — Round ${Math.min(round,maxRounds)} of ${maxRounds}`:'', s.darts)}
-      </div>`;
-    },
-    summary(p){
-      return buildSummaryCard(p, [
-        { value: num(p.totalCp), label:'CP' },
-        { value: escapeHtml(p.rating||''), label:'Rating' },
-      ]);
-    }
   },
   // Bob's 27 (docs/archive/practice-ladders-roadmap.md Part A): same shared
   // chalkboard-table shape as Cricket/Baseball's (rows=rounds D1-D20, one
@@ -1963,29 +1590,6 @@ const renderers = {
       });
     },
     resultStats(p){ return [{ v: p.running, k: 'final score' }]; },
-    scorecard(s, L){
-      const p = s.players[0];
-      const round = (s.modeState||{}).bobs27Round || 1;
-      const rows = [];
-      for(let r=1;r<=20;r++){
-        const isCurrentRound = r===round;
-        const result = p.roundResults && p.roundResults[r];
-        const cellText = result==null ? '' : `<span class="cs-points">${result>0?'+'+num(result):'−'+num(r*2)}</span>`;
-        rows.push(`<div class="cs-row"><div class="cs-label">D${r}</div><div class="cs-cell${isCurrentRound?' active':''}">${cellText}</div></div>`);
-      }
-
-      return `<div class="cs-wrap" style="--cs-cols:1">
-        <div class="cs-table">
-          <div class="cs-row cs-head"><div class="cs-label"></div><div class="cs-col-head active"><span>${escapeHtml(p.name)}</span><span class="cs-throw-chip">▸ throwing</span></div></div>
-          ${rows.join('')}
-          <div class="cs-row cs-foot"><div class="cs-label">Score</div><div class="cs-cell"><span class="cs-points active">${num(p.running)}</span></div></div>
-        </div>
-        ${buildScorecardThrowRow(`<b>${escapeHtml(p.name)}</b> at the oche — D${round}, running score ${num(p.running)}`, s.darts)}
-      </div>`;
-    },
-    summary(p){
-      return buildSummaryCard(p, [{ value: num(p.running), label:'Final Score' }]);
-    }
   },
   // 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B): solo drill,
   // always exactly one player/card — a genuine X01-shaped visit (double-out,
@@ -2013,38 +1617,6 @@ const renderers = {
         stats, big: num(p.score),
       });
     },
-    card(p, i, s, L){
-      const active = i===s.currentIndex;
-      const target = num((s.modeState||{}).checkoutLadderTarget || 121);
-      const visit = Math.min(((s.modeState||{}).checkoutLadderVisits||0)+1, 3);
-      let throwbox = '';
-      if(active){
-        const co = s.checkout
-          ? `<div class="checkout"><span class="lab">Checkout</span><span class="route">${formatCheckoutRoute(s.checkout)}</span></div>`
-          : '';
-        throwbox = `<div class="throwbox"><div class="darts">${buildDartSlots(s.darts)}</div>${co}</div>`;
-      }
-      const flash = statusFlash(active, s.status, 'TARGET CLEARED');
-
-      const meta = !L.showMeta ? '' : `<div class="meta"><span class="standing">Target ${target} · Attempt ${num(s.legNo)} · Visit ${visit}/3</span></div>`;
-
-      return `<div class="pcard ${active?'active':''}">
-        ${flash}
-        <div>
-          <div class="prow1">
-            <span class="pname">${escapeHtml(p.name)}</span>
-            ${L.showTag ? `<span class="ptag">DOUBLE OUT</span>` : ''}
-            ${active?'<span class="throwflag">▸ throwing</span>':''}
-          </div>
-          <div class="score">${num(p.score)}</div>
-        </div>
-        ${meta}
-        ${throwbox}
-      </div>`;
-    },
-    summary(p){
-      return buildSummaryCard(p, [{ value: num(p.legDarts), label:'Darts This Attempt' }], { noWinner:true });
-    }
   },
   // Killer (docs/game-modes-roadmap.md "Killer"): elimination H2H, always
   // multiple players/cards (never scorecard-layout) — one card per player showing
@@ -2084,32 +1656,6 @@ const renderers = {
     resultStats(p){
       return [{ v: p.kills, k: 'kills' }, { v: 'D' + num(p.number), k: 'their number' }];
     },
-    card(p, i, s, L){
-      const active = i===s.currentIndex && !p.eliminated;
-      const livesTarget = num((s.modeState||{}).killerLives) || 3;
-      const lives = num(p.lives);
-      const pips = Array.from({length: Math.max(lives, livesTarget)}, (_,k) =>
-        `<span aria-hidden="true">${k < lives ? '●' : '○'}</span>`).join(' ');
-      const flash = p.eliminated ? `<div class="flash eliminated">ELIMINATED</div>` : '';
-      return `<div class="pcard ${active?'active':''}">
-        ${flash}
-        <div>
-          <div class="prow1">
-            <span class="pname">${escapeHtml(p.name)}</span>
-            <span class="ptag">№ ${num(p.number)}${p.isKiller?' · 🔪 KILLER':''}</span>
-            ${active?'<span class="throwflag">▸ throwing</span>':''}
-          </div>
-          <div class="score" aria-label="${lives} of ${livesTarget} lives">${pips || '—'}</div>
-        </div>
-        <div class="meta"><span class="standing">${num(p.kills)} kill${num(p.kills)===1?'':'s'}</span></div>
-      </div>`;
-    },
-    summary(p){
-      return buildSummaryCard(p, [
-        { value: `№ ${num(p.number)}`, label:'Number' },
-        { value: num(p.kills), label:'Kills' },
-      ], { nameSuffix: p => p.eliminated ? ' <span style="opacity:.7">☠️</span>' : '' });
-    }
   },
   // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md): solo drill,
   // X01-shaped double-out countdown against a par-darts budget — mirrors
@@ -2140,39 +1686,6 @@ const renderers = {
       });
     },
     resultStats(p){ return [{ v: `${num(p.walkedOut)}/15`, k: 'walked out' }]; },
-    card(p, i, s, L){
-      const active = i===s.currentIndex;
-      const ms = s.modeState || {};
-      const dartsLeft = Math.max(0, num(ms.dmwBudget) - num(ms.dmwDartsUsed));
-      let throwbox = '';
-      if(active){
-        throwbox = `<div class="throwbox"><div class="darts">${buildDartSlots(s.darts)}</div></div>`;
-      }
-      const flash = statusFlash(active, s.status, 'WALKED OUT');
-
-      const meta = !L.showMeta ? '' : `<div class="meta"><span class="standing">Round ${num(s.legNo)} of 15 · ${dartsLeft} dart${dartsLeft===1?'':'s'} left · Walked Out ${num(ms.dmwWalkedOut)}</span></div>`;
-
-      return `<div class="pcard ${active?'active':''}">
-        ${flash}
-        <div>
-          <div class="prow1">
-            <span class="pname">${escapeHtml(p.name)}</span>
-            ${L.showTag ? `<span class="ptag">💀 DOUBLE OUT</span>` : ''}
-            ${active?'<span class="throwflag">▸ throwing</span>':''}
-          </div>
-          <div class="score">${num(p.score)}</div>
-        </div>
-        ${meta}
-        ${throwbox}
-      </div>`;
-    },
-    summary(p){
-      // finishUnit()'s DMW legSummary entry is {name, walkedOut, won} — the
-      // walked-out tally is the run's headline result (an earlier version read
-      // p.gameDarts, a field that entry never carries, so the card always
-      // showed 0).
-      return buildSummaryCard(p, [{ value: `${num(p.walkedOut)} / 15`, label:'Walked Out' }]);
-    }
   },
   // Doubles Practice (docs/game-modes-roadmap.md): solo drill, always exactly one
   // player/card — no legSummary, no scorecard, so this always goes through the
@@ -2205,38 +1718,6 @@ const renderers = {
         big: `${hits}/${darts}`, bigUnit: 'hits', bigSmall: true,
       });
     },
-    card(p, i, s, L){
-      const active = i===s.currentIndex;
-      const ms = s.modeState || {};
-      const targets = Array.isArray(ms.doublesTargets) ? ms.doublesTargets : [];
-      const targetLabel = targets.map(n => n===25 ? 'Bull' : 'D'+n).join(', ');
-      const pct = p.roundDarts ? Math.round(p.roundHits/p.roundDarts*100) : 0;
-      let flash = '';
-      if(active && ms.roundOver){
-        flash = `<div class="flash bust">${ms.roundEndReason==='so-close' ? 'SO CLOSE' : 'WRONG DOUBLE'}</div>`;
-      }
-      let throwbox = '';
-      if(active && ms.dpLastDart && !ms.roundOver){
-        throwbox = buildSingleDartBox(ms.dpLastDart);
-      }
-      return `<div class="pcard ${active?'active':''}">
-        ${flash}
-        <div>
-          <div class="prow1">
-            <span class="pname">${escapeHtml(p.name)}</span>
-            ${active?'<span class="throwflag">▸ throwing</span>':''}
-          </div>
-          <div class="score">${num(p.roundHits)}</div>
-          <div class="dart-counts">
-            <div class="dart-counts-title">Practicing ${esc(targetLabel)}</div>
-            <div class="dart-count-row"><span class="dart-count-val">${pct}%</span><span class="dart-count-lbl">This round</span></div>
-            <div class="dart-count-row"><span class="dart-count-val">${num(p.roundDarts)}</span><span class="dart-count-lbl">Darts</span></div>
-          </div>
-        </div>
-        <div class="meta"><span class="standing">Round ${num(s.legNo)}</span></div>
-        ${throwbox}
-      </div>`;
-    }
   },
   // Just Chuckin' It (docs/game-modes-roadmap.md): solo, freeform, no rounds/legs
   // at all — always exactly one player/card, no legSummary, no scorecard, so this
@@ -2281,47 +1762,6 @@ const renderers = {
         ${buildChuckinLiveHeatmap(p.heatmap || [])}
       </div>`;
     },
-    card(p, i, s, L){
-      const active = i===s.currentIndex;
-      const pct = p.sessionDarts ? Math.round(p.sessionTrebles/p.sessionDarts*100) : 0;
-      // docs/bug-roadmap.md BUG-12: p.sessionAvg comes straight from the /api/live
-      // broadcast payload's per-player array, which ALLOWED_LIVE_KEYS deliberately
-      // leaves unrestricted in shape — a non-numeric value here previously called
-      // .toFixed(1) directly and threw inside renderState()'s render loop, freezing
-      // the whole scoreboard on every subsequent live event. null/undefined is the
-      // legitimate "no darts thrown yet this session" case (Number(null) is 0, NOT
-      // NaN, so it has to be excluded explicitly rather than folded into the same
-      // Number.isFinite() check as actual garbage) — Number.isFinite() then guards
-      // everything else the same way num() already guards every other live-payload
-      // numeric field in this file.
-      const sessionAvgNum = p.sessionAvg == null ? null : Number(p.sessionAvg);
-      const avgText = Number.isFinite(sessionAvgNum) ? sessionAvgNum.toFixed(1) : '—';
-      let throwbox = '';
-      const chuckinLastDart = (s.modeState||{}).chuckinLastDart;
-      if(active && chuckinLastDart){
-        const treble = chuckinLastDart.isTreble ? '<span class="flash shot" style="position:static;display:inline-block;margin-left:8px">TREBLE</span>' : '';
-        throwbox = buildSingleDartBox(chuckinLastDart, treble);
-      }
-      return `<div class="pcard ${active?'active':''}">
-        <div class="chuckin-layout">
-          <div class="chuckin-stats">
-            <div class="prow1">
-              <span class="pname">${escapeHtml(p.name)}</span>
-              ${active?'<span class="throwflag">▸ throwing</span>':''}
-            </div>
-            <div class="score">${num(p.sessionDarts)}</div>
-            <div class="dart-counts">
-              <div class="dart-counts-title">Just chuckin' it</div>
-              <div class="dart-count-row"><span class="dart-count-val">${avgText}</span><span class="dart-count-lbl">3-dart average</span></div>
-              <div class="dart-count-row"><span class="dart-count-val">${pct}%</span><span class="dart-count-lbl">Trebles this session</span></div>
-              <div class="dart-count-row"><span class="dart-count-val">${num(p.sessionTrebles)}</span><span class="dart-count-lbl">Trebles</span></div>
-            </div>
-            ${throwbox}
-          </div>
-          <div class="chuckin-board">${buildChuckinLiveHeatmap(p.heatmap||[])}</div>
-        </div>
-      </div>`;
-    }
   },
   // Guided Around the Clock (docs/game-modes-roadmap.md): solo drill, always
   // exactly one player/card — no legSummary, no scorecard, goes through the
@@ -2367,54 +1807,11 @@ const renderers = {
         stats: [{ v: left.length, k: left.length === 1 ? 'number left' : 'numbers left' }],
       });
     },
-    card(p, i, s, L){
-      const active = i===s.currentIndex;
-      const ms = s.modeState || {};
-      const hitNumbers = Array.isArray(p.hitNumbers) ? p.hitNumbers : [];
-      // No "CLOCK COMPLETE" flash branch here (2026-07): completing the clock
-      // now ends the whole game immediately (finishUnit('game', ...)), so by
-      // the time roundOver ever broadcasts true, s.legSummary is ALSO already
-      // set — render()'s own legSummary branch takes over before this card
-      // would ever draw a completed state, the same "a run IS the game" shape
-      // Gauntlet/Bob's 27/Dead Man Walking's cards never needed a live/done
-      // hybrid state for either.
-      let throwbox = '';
-      if(active && ms.atcLastDart){
-        throwbox = buildSingleDartBox(ms.atcLastDart);
-      }
-      return `<div class="pcard ${active?'active':''}">
-        <div class="chuckin-layout">
-          <div class="chuckin-stats">
-            <div class="prow1">
-              <span class="pname">${escapeHtml(p.name)}</span>
-              ${active?'<span class="throwflag">▸ throwing</span>':''}
-            </div>
-            <div class="score">${num(p.hit)}<span style="font-size:0.4em;opacity:.7"> / 20</span></div>
-            <div class="dart-counts">
-              <div class="dart-counts-title">Around the Clock</div>
-              <div class="dart-count-row"><span class="dart-count-val">${num(p.roundDarts)}</span><span class="dart-count-lbl">Darts thrown</span></div>
-            </div>
-            ${throwbox}
-          </div>
-          <div class="clock-board">${buildClockBoard(hitNumbers)}</div>
-        </div>
-      </div>`;
-    },
     // CLOCK COMPLETE — the live-scoreboard half of the "every completed game
     // gets a stats screen" work (2026-07): darts/trebles/doubles/misses/
     // duration for the just-finished clock, mirroring index.html's own
     // aroundTheClockSummary block on the in-app GAME OVER screen (same
     // underlying legSummary entry, two renderings of the same data).
-    summary(p){
-      const mins = Math.floor((p.durationSec||0)/60), secs = (p.durationSec||0)%60;
-      return buildSummaryCard(p, [
-        { value: num(p.darts), label:'Darts' },
-        { value: num(p.trebles), label:'Trebles' },
-        { value: num(p.doubles), label:'Doubles' },
-        { value: num(p.misses), label:'Misses' },
-        { value: `${mins}:${String(secs).padStart(2,'0')}`, label:'Time' },
-      ], { noWinner:true });
-    }
   },
   // Guided Around the World (docs/game-modes-roadmap.md): solo, no rounds/legs at
   // all — always exactly one player/card, same shape as Chuckin.
@@ -2461,33 +1858,6 @@ const renderers = {
         chalk: `<em>${63 - hit.size}</em> outcomes to go`,
       });
     },
-    card(p, i, s, L){
-      const active = i===s.currentIndex;
-      const hitOutcomes = Array.isArray(p.hitOutcomes) ? p.hitOutcomes : [];
-      const atwLastDart = (s.modeState||{}).atwLastDart;
-      let throwbox = '';
-      if(active && atwLastDart){
-        const newOutcome = atwLastDart.isNewLifetimeOutcome ? '<span class="flash shot" style="position:static;display:inline-block;margin-left:8px">NEW!</span>' : '';
-        throwbox = buildSingleDartBox(atwLastDart, newOutcome);
-      }
-      return `<div class="pcard ${active?'active':''}">
-        <div class="chuckin-layout">
-          <div class="chuckin-stats">
-            <div class="prow1">
-              <span class="pname">${escapeHtml(p.name)}</span>
-              ${active?'<span class="throwflag">▸ throwing</span>':''}
-            </div>
-            <div class="score">${num(p.progress)}<span style="font-size:0.4em;opacity:.7"> / 63</span></div>
-            <div class="dart-counts">
-              <div class="dart-counts-title">Around the World</div>
-              <div class="dart-count-row"><span class="dart-count-val">${num(p.sessionDarts)}</span><span class="dart-count-lbl">Darts this session</span></div>
-            </div>
-            ${throwbox}
-          </div>
-          <div class="chuckin-board">${buildOutcomeGridCompact(hitOutcomes)}</div>
-        </div>
-      </div>`;
-    }
   }
 };
 // Traditional chalkboard marks: blank (0), / (1), X (2), circled X (3+/closed).
@@ -3026,13 +2396,10 @@ function render(s){
     lastStandingKey = '';
   }
 
-  const n = s.players.length;
+  // Every game type declares exactly one of lane() or stage(). The old card()/
+  // scorecard() renderers they replaced are gone, so there is no third branch.
   const hasStage = typeof renderer.stage === 'function' && !s.legSummary;
   const hasLane  = typeof renderer.lane  === 'function' && !s.legSummary;
-  // A scorecard table is now only for the modes that have not been converted to
-  // a lane yet — lane()/stage() win where a mode declares one.
-  const isScorecardLayout = !hasStage && !hasLane
-    && typeof renderer.scorecard === 'function' && !s.legSummary;
 
   if(s.legSummary){
     renderResultView(renderer, s, L);
@@ -3051,26 +2418,15 @@ function render(s){
     // practice board shows where the opponent would be.
     const extra = typeof renderer.extraLanes === 'function' ? renderer.extraLanes(s, L) : '';
     grid.innerHTML = s.players.map((p,i)=>renderer.lane(p, i, s, L)).join('') + extra;
-  } else if(isScorecardLayout){
-    grid.className = 'grid';
-    grid.style.gridTemplateColumns = '1fr';
-    grid.innerHTML = renderer.scorecard(s, L);
-  } else {
-    grid.className = 'grid';
-    grid.style.gridTemplateColumns = `repeat(${isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3)}, 1fr)`;
-    grid.innerHTML = s.players.map((p,i)=>renderer.card(p, i, s, L)).join('');
   }
 
   if(!s.legSummary){ verdict.classList.add('hidden'); tallies.classList.add('hidden'); }
   renderStrip(renderer, s, L);
 
-  // Scorecard/lane/stage layouts render no .score elements at all — skip the
-  // query/effects pass entirely instead of running it to find nothing every
-  // tick. NOT skipped for a legSummary render (any game type can show one
-  // transiently between legs): triggerChalkEffects()'s own truncation of
-  // lastScoreTexts to the current (zero) element count is what keeps a later
-  // return to per-player cards from comparing against stale leg data.
-  if(!isScorecardLayout && !hasStage && !hasLane) triggerChalkEffects();
+  // Nothing renders a .score element any more — the chalk-dust burst it drove
+  // now belongs to the lane's own big numeral, which triggerChalkEffects()
+  // tracks by the same displayed-text comparison.
+  triggerChalkEffects();
 
   // achievement flashes (180, Big Fish, nine-darter)
   if(s.achievement && s.achievement.ts){

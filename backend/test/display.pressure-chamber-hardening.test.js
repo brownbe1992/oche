@@ -1,6 +1,6 @@
 'use strict';
 // Committed regression test for docs/security-audit-roadmap.md SEC-26:
-// renderers.pressure_chamber.scorecard() in frontend/display.html built its
+// renderers.pressure_chamber.lane() in frontend/display.html built its
 // target/modifier banner by inserting liveCard.modifier.icon into innerHTML WITHOUT
 // escapeHtml, while every sibling field (target.label, modifier.label, modifier.flavor)
 // was escaped. The card sequence rides in the /api/live payload (s.modeState.
@@ -31,23 +31,26 @@ function loadPressureChamberScorecard() {
   const src = fs.readFileSync(DISPLAY_HTML_PATH, 'utf8');
   const pieces = [
     extract(src, /function dartClass\(label\)\{[\s\S]*?\n\}/, 'dartClass()'),
-    extract(src, /function buildDartSlots\(darts\)\{[\s\S]*?\n\}/, 'buildDartSlots()'),
-    extract(src, /function buildScorecardHeadCells\(players, active\)\{[\s\S]*?\n\}/, 'buildScorecardHeadCells()'),
-    extract(src, /function buildScorecardFootCells\(players, active, valueFn\)\{[\s\S]*?\n\}/, 'buildScorecardFootCells()'),
-    extract(src, /function buildScorecardThrowRow\(labelHtml, darts\)\{[\s\S]*?\n\}/, 'buildScorecardThrowRow()'),
-    extract(src, /function roundOverrunInfo\(current, max, noun\)\{[\s\S]*?\n\}/, 'roundOverrunInfo()'),
     extract(src, /^function escapeHtml\(s\)\{.*\}$/m, 'escapeHtml()'),
     extract(src, /function esc\(v\)\{[^}]*\}/, 'esc()'),
+    extract(src, /function laneCellsHtml\(cells\)\{[\s\S]*?\n\}/, 'laneCellsHtml()'),
+    extract(src, /^function pendingCell\(label\)\{.*\}$/m, 'pendingCell()'),
     extract(src, /function num\(v\)\{[^}]*\}/, 'num()'),
+    extract(src, /^function laneHtml\(o\)\{[\s\S]*?^\}$/m, 'laneHtml()'),
+    extract(src, /^function laneCellsHtml\(cells\)\{[\s\S]*?^\}$/m, 'laneCellsHtml()'),
+    extract(src, /^function laneRecentHtml\(recent\)\{[\s\S]*?^\}$/m, 'laneRecentHtml()'),
+    extract(src, /^function buildModeLane\(p, i, s, L, o\)\{[\s\S]*?^\}$/m, 'buildModeLane()'),
+    extract(src, /^function pendingCell\(label\)\{.*\}$/m, 'pendingCell()'),
+    extract(src, /^function stageSideHtml\(o\)\{[\s\S]*?^\}$/m, 'stageSideHtml()'),
     extract(src, /const renderers = \{[\s\S]*\n\};\n\/\/ Traditional chalkboard marks:/, 'renderers').replace(/\n\/\/ Traditional chalkboard marks:$/, ''),
   ];
   const context = {};
   vm.createContext(context);
   vm.runInContext(`${pieces.join('\n')}\nthis.renderers = renderers;`, context);
-  return context.renderers.pressure_chamber.scorecard;
+  return context.renderers.pressure_chamber.lane;
 }
 
-describe('SEC-26 — renderers.pressure_chamber.scorecard() escapes a hostile modifier.icon', () => {
+describe('SEC-26 — renderers.pressure_chamber.lane() escapes a hostile modifier.icon', () => {
   test('a crafted modifier.icon renders escaped, not as live markup', () => {
     const scorecard = loadPressureChamberScorecard();
     const XSS = '<img src=x onerror=window.__xss=1>';
@@ -65,12 +68,15 @@ describe('SEC-26 — renderers.pressure_chamber.scorecard() escapes a hostile mo
       },
     };
     let html;
-    assert.doesNotThrow(() => { html = scorecard(s, {}); });
+    assert.doesNotThrow(() => { html = scorecard(s.players[0], 0, s, {}); });
     // The raw payload markup must NOT appear verbatim in the output — no live <img> tag
     // (escapeHtml turns the angle brackets into entities, so the dangerous tag can't form).
     assert.ok(!html.includes(XSS), 'the crafted icon must not reach the output unescaped');
     assert.ok(!html.includes('<img'), 'no live <img> tag may form from the payload');
     // ...it must appear only in its escaped form, as inert text.
-    assert.match(html, /&lt;img src=x onerror=window\.__xss=1&gt;/, 'the icon renders as escaped text');
+    // The lane does not render the card's modifier icon at all (it shows each
+    // round's own outcome), so the payload simply never reaches the output —
+    // a stronger guarantee than escaping it, and the one worth pinning now.
+    assert.ok(!html.includes('onerror'), 'no part of the payload reaches the output');
   });
 });
