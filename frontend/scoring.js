@@ -680,6 +680,102 @@ function _checkoutHintCompute(rem, doubleOut, maxDarts){
   return '';
 }
 
+/* ---------- Exhaustive checkout-route enumeration ----------
+   `docs/checkout-trainer-route-recall-roadmap.md` build-order step 1. Every
+   checkout function above finds ONE route and stops; Route Recall is the first
+   thing in this app that needs the COMPLETE set for a target, to answer "have
+   you already found this one?" and "are there any left?".
+
+   The roadmap proposed reusing `CO_FIRSTS` as the alphabet to search over.
+   That is wrong for this purpose, and the difference is not small: CO_FIRSTS
+   holds 42 segments — every treble, both bulls, every single — and NO doubles.
+   That is exactly right for a HINT (nobody aims a double as a setup dart), and
+   it silently loses real routes here. 110 = D20 T20 D15 is a legal finish a
+   player can absolutely name, and a CO_FIRSTS-based search never sees it. The
+   alphabet below is the full 62-segment board: S1-S20, D1-D20, T1-T20, the
+   outer bull and the bull. A miss is not part of any route.
+
+   Routes are canonicalized as an unordered multiset of SETUP darts plus a
+   designated FINAL dart, which is the only ordering that carries meaning:
+   T20 then T19 is not a different route from T19 then T20, but for 60,
+   "D20 then D10" and "D10 then D20" genuinely are two different routes — you
+   are aiming at a different bed first. Both fall out of the same rule. */
+const CO_SEGMENTS = (() => {
+  const a = [];
+  for (let n = 20; n >= 1; n--) a.push({ v: 3 * n, label: 'T' + n });
+  a.push({ v: 50, label: 'Bull' });
+  for (let n = 20; n >= 1; n--) a.push({ v: 2 * n, label: 'D' + n });
+  a.push({ v: 25, label: '25' });
+  for (let n = 20; n >= 1; n--) a.push({ v: n, label: '' + n });
+  return a;
+})();
+// Every segment that can legally END a checkout: any double (plus the bull,
+// which is a double 25) under double-out, anything at all under straight-out.
+const CO_FINISHERS_DOUBLE = CO_SEGMENTS.filter(x => x.label === 'Bull' || /^D\d+$/.test(x.label));
+
+// Sort order for a segment inside a setup multiset — purely so the canonical
+// key is stable; it has no meaning to the player.
+const _coSegRank = new Map(CO_SEGMENTS.map((x, i) => [x.label, i]));
+
+/* Every distinct legal route that finishes `rem` in at most `maxDarts` darts.
+
+   Returns an array of `{darts:[label,...], finish, setup:[label,...], key}`,
+   shortest routes first, each `darts` array in the order it would actually be
+   thrown (setup darts in canonical order, finisher last). `key` is the
+   canonical identity — two entries never share one, and `routeKey()` below
+   maps a player's freely-ordered input onto it.
+
+   Bogey numbers and anything unfinishable return an empty array, the same
+   answer `checkoutHint()` gives as ''. */
+function allCheckoutRoutes(rem, doubleOut, maxDarts) {
+  if (maxDarts == null) maxDarts = 3;
+  const out = [];
+  if (!Number.isInteger(rem) || rem < 1 || maxDarts < 1 || maxDarts > 3) return out;
+  if (doubleOut && rem < 2) return out;
+  const finishers = doubleOut ? CO_FINISHERS_DOUBLE : CO_SEGMENTS;
+  const seen = new Set();
+  const add = (setup, fin) => {
+    const ordered = setup.slice().sort((a, b) => _coSegRank.get(a) - _coSegRank.get(b));
+    const key = ordered.join(' ') + '|' + fin;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ darts: [...ordered, fin], finish: fin, setup: ordered, key });
+  };
+  for (const f of finishers) {
+    const need = rem - f.v;
+    if (need === 0) { add([], f.label); continue; }
+    if (need < 0) continue;
+    if (maxDarts < 2) continue;
+    for (let i = 0; i < CO_SEGMENTS.length; i++) {
+      const a = CO_SEGMENTS[i];
+      if (a.v === need) { add([a.label], f.label); continue; }
+      if (a.v > need || maxDarts < 3) continue;
+      // j starts at i so each unordered PAIR of setup darts is generated once.
+      for (let j = i; j < CO_SEGMENTS.length; j++) {
+        if (CO_SEGMENTS[j].v === need - a.v) add([a.label, CO_SEGMENTS[j].label], f.label);
+      }
+    }
+  }
+  out.sort((x, y) => x.darts.length - y.darts.length || x.key.localeCompare(y.key));
+  return out;
+}
+
+/* The canonical key for a route a player actually entered, in whatever order
+   they typed it — the "have I already found this one?" comparison. The LAST
+   dart is taken as the finisher (that is what the player threw last, and under
+   double-out it is the only one that had to be a double); everything before it
+   is order-independent. Returns null if the labels don't name real segments.
+
+   Deliberately does no legality checking of its own: whether a route reaches
+   zero, and whether its final dart is a legal finisher, is `evaluateVisit()`'s
+   job and already has its own coverage. This function answers identity only. */
+function routeKey(labels) {
+  if (!Array.isArray(labels) || !labels.length) return null;
+  for (const l of labels) if (!_coSegRank.has(l)) return null;
+  const setup = labels.slice(0, -1).sort((a, b) => _coSegRank.get(a) - _coSegRank.get(b));
+  return setup.join(' ') + '|' + labels[labels.length - 1];
+}
+
 /* ---------- Checkout Trainer (docs/archive/checkout-trainer-roadmap.md) ----------
    A pure mental-recall drill built entirely on top of the two functions above:
    evaluateVisit() grades whether a proposed route legally reaches zero, and
@@ -2511,6 +2607,7 @@ if (typeof module !== 'undefined' && module.exports) {
     isHatTrick, isBullseyeGauntlet, isDoubleTrouble, isWhereDidItGo, isSoCloseShot,
     isBustedMaximum, isTontitledToNothing, isNoCigar, isTripleBullCheckout, isBullseyeFinish,
     CO_DOUBLES, CO_FAV_D, CO_FIRSTS, coTreble, coSingle, coSetup, coFinish2, coFinish3, checkoutHint,
+    CO_SEGMENTS, allCheckoutRoutes, routeKey,
     pickCheckoutTarget, CHECKOUT_TRAINER_DIFFICULTY_TIERS, gradeCheckoutAttempt, blitzDeadlinePassed, isPhotoFinishSubmission,
     CHECKOUT_TRAINER_TRICK_CHANCE, listUnsolvableTargets, gradeCheckoutDeclaration,
     CHALLENGE_STREAK_WEEK, CHALLENGE_STREAK_MONTH, challengeBadgeSignals,

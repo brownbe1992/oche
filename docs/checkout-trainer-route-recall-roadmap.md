@@ -1,11 +1,80 @@
 # Checkout Trainer — "Route Recall" Sub-Mode Design Roadmap
 
-> Status (2026-07): **Not started.** This is a new third sub-mode for Checkout
+> Status (2026-07): **Build-order step 1 is done and both blocking design
+> decisions are made** (see "Resolved" below); steps 3-7 — the core loop, data
+> model, stats, ladders — are not built. This is a new third sub-mode for Checkout
 > Trainer (`docs/archive/checkout-trainer-roadmap.md`, fully shipped — Freeform
 > and Checkout Blitz), proposed by the owner: "given a number, try to list all
 > of the possible checkouts." Filed as its own doc rather than reopening the
 > archived one, since Freeform/Blitz are complete and this is new, separable
 > work — see `CLAUDE.md`'s roadmap-doc convention.
+
+## Resolved (2026-07)
+
+### Step 1 shipped: `allCheckoutRoutes()` / `routeKey()`
+
+In `frontend/scoring.js`, with `backend/test/scoring.all-checkout-routes.test.js`
+(12 cases) proving it before anything is built on top, exactly as the build order
+below requires.
+
+**This section's proposed alphabet was wrong, and the correction matters.** It said
+to reuse `CO_FIRSTS` as the segment table to search over. `CO_FIRSTS` holds 42
+segments — every treble, both bulls, every single — and **no doubles at all**. That
+is precisely right for a *hint* (nobody aims a double as a setup dart) and it
+silently loses real routes here: 110 = D20 T20 D15 is a finish a player can name,
+and a `CO_FIRSTS`-based search never sees it. The enumerator uses the full
+62-segment board instead. This is exactly the failure this doc's own testing note
+warned about — an enumeration that misses a valid route tells a player a correct
+answer is wrong — so it is worth stating plainly rather than quietly fixing.
+
+Canonicalization is as this doc specified: an unordered multiset of setup darts
+plus a designated final dart. Both halves matter — T20 then T19 is not a different
+route from T19 then T20, but for 60, "D20 then D10" and "D10 then D20" genuinely
+are two different routes, and one rule produces both answers.
+
+Proven against an **independent brute-force oracle** over all 180 targets × both
+out-modes × all three ceilings (1,080 set comparisons), plus legality, no
+duplicates, ceiling monotonicity, the bogey numbers, and this doc's own suggested
+sanity check that the shortest enumerated route matches `checkoutHint()`'s dart
+count (compared as a *length*, since several targets have many equally short
+routes and `checkoutHint()` returns whichever its preference order reaches first).
+
+One deliberate difference from `checkoutHint()`: no `rem > 170` cutoff. That bound
+is an X01 double-out convention, and 171 = T20 T20 T17 is a real straight-out
+finish, so a general enumerator must not carry it.
+
+### The route counts, and what they decided
+
+The two open questions below both turned on numbers nobody had. Here they are:
+
+| ceiling | finishable targets | total routes | worst target |
+|---|---|---|---|
+| double-out, 1 dart | 21 | 21 | 1 route |
+| double-out, 2 darts | 102 | 1,323 | **36** (target 40) |
+| double-out, 3 darts | 162 | 42,336 | **730** (target 58) |
+| straight-out, 3 darts | 167 | 124,979 | **1,882** (target 60) |
+
+At the 3-dart double-out ceiling, **81 of the 162 finishable targets have 200+
+routes**. "Find them all" is not a task there, and no amount of UI copy makes it
+one. This doc assumed straight-out was the explosion risk and that double-out
+"sidesteps the worst of it" — **both explode**; double-out is merely a third the
+size of straight-out.
+
+**Owner's decision (2026-07), which resolves the first three open questions at
+once:**
+
+- **1- and 2-dart ceilings ship the drill as designed** — the complete set, the
+  total revealed up front, the "🎉 Every route found!" completion moment, coverage %
+  against a real denominator. The worst case is 36 routes, which is a genuine,
+  closeable study task.
+- **The 3-dart ceiling ships as a different thing wearing the same clothes**: an
+  open-ended "how many can you find" score, with **no** total revealed, no finish
+  line, and no completion moment. Coverage is still measurable against the real
+  denominator internally, but it is not presented as a fraction to be closed.
+- Consequently **no target needs excluding** (open question 2): the tier framing,
+  not a blocklist, is what keeps every target meaningful.
+- **Both out-modes are viable** under that framing, so double-out-only is no longer
+  a necessary v1 restriction — though double-out remains the sensible default.
 
 ## Goal
 
@@ -234,19 +303,14 @@ Per `CLAUDE.md`'s standing conventions, not yet addressed beyond this sketch:
 
 ## Open questions for whoever picks this up
 
-- **Every mathematically valid route, or double-out only?** Straight-out
-  mode's "any dart can finish" rule could make some targets' full route list
-  large and not very instructive (see "New required logic" above) — worth
-  deciding whether v1 ships double-out only (the far more common real-world
-  practice context anyway) and defers straight-out, rather than solving the
-  explosion problem for both from day one.
-- **Should some numbers be excluded from this mode entirely** if their full
-  route count at the 3-dart ceiling is too large to be a meaningful "find
-  them all" task (as opposed to a difficulty tier just being harder)? Needs
-  real numbers run through `allCheckoutRoutes()` once it exists before this
-  can be answered with actual data rather than a guess.
-- **Reveal the total up front, or keep a hidden running count?** Both
-  options are sketched above as real alternatives, not decided.
+- ~~**Every mathematically valid route, or double-out only?**~~ **Resolved** — see
+  "Resolved (2026-07)" above. The premise was wrong (double-out explodes too), and
+  the per-tier framing solves it for both out-modes.
+- ~~**Should some numbers be excluded from this mode entirely?**~~ **Resolved: no.**
+  The 3-dart tier's open-ended framing means a 730-route target is a deep well
+  rather than an impossible checklist.
+- ~~**Reveal the total up front, or keep a hidden running count?**~~ **Resolved:
+  both, by tier** — revealed at 1-2 darts, hidden at 3.
 - **Timed variant?** Freeform has an untimed and a timed (Blitz) sibling —
   worth deciding whether Route Recall eventually gets its own timed variant
   ("find as many routes as you can for this one target in 60 seconds") or

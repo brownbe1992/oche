@@ -231,6 +231,47 @@ red/green confusion is a *hue* problem, which is what colorblind mode already
 solves. A luminance floor there would look like accessibility work while doing
 none. The committed test says so in place of the assertion.
 
+### Applied: the Player Profile's heading outline and scope announcements (2026-07)
+
+Found by `docs/ui-overhaul-roadmap.md`'s design-phase audit, which measured the
+profile before redesigning it. Three defects, all on the app's densest screen —
+roughly three viewports of scroll on a phone *and* on a tablet, ~1,100 DOM
+nodes, 34 buttons:
+
+- **No headings at all.** All 21 section titles were styled `<div>`s. On a page
+  that long, jump-by-heading is the navigation, and it did not exist: the
+  profile was one flat run of text from the player's name to the Rename button.
+  Fixed by making the name an `<h2>` and every section title an `<h3>`. The
+  collapsible sections keep their `<summary>` — that element is the disclosure
+  *button*, and losing it would be a straight trade of one affordance for
+  another — and carry an `<h3>` nested inside, so the section is reachable both
+  ways. Verified as semantics-only: the page's `scrollHeight` is identical
+  before and after, to the pixel, on both viewports.
+- **Nothing announced when the scope changed.** The Overall/H2H/Practice tabs,
+  the Stats/Player Settings tabs and the game-mode select each replace the
+  entire contents of the page. Focus stays on the control, so with a screen
+  reader the several screens of statistics silently became *different*
+  statistics. All three now call the app's existing `announce()` — the same
+  `#sr-announcer` region every committed visit already uses; no new region was
+  needed, it simply was not being used here.
+- **Ten buttons called "Drill".** Every checkout row's 🎯 Drill button had the
+  same accessible name, so listing the page's buttons gave ten indistinguishable
+  entries. Each now carries `aria-label="Drill <score> in Checkout Trainer"` —
+  matching the `title` it already had — while the visible label stays short.
+
+Pinned by the verify-ui `profile-a11y` check (10 assertions), which asserts the
+heading outline *structurally* (an H2, no skipped levels, every summary carrying
+a heading) rather than as a list of expected titles, so adding a section to the
+profile does not mean editing the check. Each of the three fixes was confirmed
+to fail it when reverted.
+
+Deliberately **not** done here: the layout findings from the same audit (the
+profile renders as a fixed ~740px column, so a 1180px tablet shows the phone
+layout with 37% dead space either side, and nine visually identical collapsed
+accordions carry no priority order). Those are a redesign, tracked separately on
+`docs/open-roadmap-items.md`; this was the accessibility half, shipped on its own
+so it did not have to wait for one.
+
 ## Open questions for whoever picks this up
 
 - How much should `aria-live="polite"` vs. `aria-live="assertive"` be used for

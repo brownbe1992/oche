@@ -25,6 +25,7 @@ const CHECKS = {
   'leg-reset': './checks/leg-reset',
   'resume-fidelity': './checks/resume-fidelity',
   'pad-reuse': './checks/pad-reuse',
+  'profile-a11y': './checks/profile-a11y',
   'live-scoreboard': './checks/live-scoreboard',
   'live-shell': './checks/live-shell',
   'home-settings': './checks/home-settings',

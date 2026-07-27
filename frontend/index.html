@@ -1178,7 +1178,11 @@
   .stat-block .stat-val{font-family:'Bebas Neue';font-size:28px;color:var(--cream);line-height:1}
   .stat-block .stat-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:4px}
   .pp-section{margin-bottom:18px}
-  .pp-section-title{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:8px}
+  .pp-section-title{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin:0 0 8px}
+  /* A heading nested inside a <summary> so the section is reachable both ways —
+     as a disclosure button and as a heading. It must contribute no styling of its
+     own; the <summary> already carries .pp-section-title. */
+  .pp-sum-h{font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;margin:0;display:inline}
   /* every player-profile section becomes a real panel — previously .pp-section only
      added spacing, so the chart/heatmap (the two things worth featuring) looked
      identical to a two-line text list like "Practice — Legs Thrown". */
@@ -4880,7 +4884,11 @@ function hofSection(rows, mode=''){
 // small 🎯 Drill button on a Top Finishes/Top Checkouts row — stopPropagation() so
 // tapping it doesn't also toggle the row's own checkout-route expansion.
 function drillButtonHtml(jName, score){
+  // The visible label stays "🎯 Drill" (the row it sits on already says which score),
+  // but every one of these on a page had the same accessible name — a screen-reader
+  // user listing the buttons heard "Drill" ten times with nothing to tell them apart.
   return `<button type="button" class="drill-btn" title="Drill ${score} in Checkout Trainer"
+    aria-label="Drill ${score} in Checkout Trainer"
     onclick="event.stopPropagation(); drillCheckout('${jName}', ${score})">🎯 Drill</button>`;
 }
 
@@ -8683,13 +8691,25 @@ function setPlayerDefaultLoadout(name, value){
     DB.setDefaultLoadout(name, value ? Number(value) : null).catch(logErr);
   });
 }
+// The three scope controls below (Overall/H2H/Practice, Stats/Player Settings,
+// and the game-mode select) each replace the ENTIRE contents of the profile.
+// Sighted, that reads as the page changing under you; with a screen reader
+// nothing happened at all — focus stays on the control, and the several
+// screens of stats that just changed are silent until you go looking. They now
+// announce what they switched to, through the app's existing #sr-announcer
+// (docs/accessibility-roadmap.md; the same live region every committed visit
+// already uses). Kept to "what is showing now", not a summary of it — a
+// screen-reader user navigates to the numbers themselves by heading.
+const PLAYER_TAB_LABELS = { overall: 'All games', h2h: 'Head-to-head games', practice: 'Practice games' };
 function switchPlayerTab(tab){
   playerPageTab = tab;
   renderPlayerPage();
+  announce(`Showing ${PLAYER_TAB_LABELS[tab] || tab}.`);
 }
 function switchPlayerSection(section, focus){
   playerPageSection = section;
   renderPlayerPage();
+  announce(section === 'settings' ? 'Player settings.' : 'Statistics.');
   if(focus){ const el = document.getElementById('pp-tab-'+section); if(el) el.focus(); }
 }
 // Roving-tabindex keyboard support for the Stats/Player Settings tablist
@@ -8719,6 +8739,9 @@ function switchPlayerGameType(type){
   // metric to select for it anyway.
   if(type !== 'daily_challenge') selectedStat = activeStatDefs()[0].key;
   renderPlayerPage();
+  const label = type === 'daily_challenge' ? 'Daily Challenge'
+    : ((GAME_TYPES[type] || {}).label || type);
+  announce(`Showing ${label} statistics.`);
 }
 function showPlayer(name){
   // profileSectionCache is cleared wholesale (not just this player's entry) rather
@@ -8809,7 +8832,7 @@ function renderPlayerPage(){
   const gameStatsHtml = `
     <div class="pp-section spotlight">
       ${bubblesHtml}
-      <div class="pp-section-title" id="chart-metric-title" style="margin-top:14px">${(defs.find(d=>d.key===selectedStat)||defs[0]||{label:''}).label} over time</div>
+      <h3 class="pp-section-title" id="chart-metric-title" style="margin-top:14px">${(defs.find(d=>d.key===selectedStat)||defs[0]||{label:''}).label} over time</h3>
       <div class="chart-periods">
         <button class="chart-period-btn${cp==='today'?' active':''}" data-period="today" onclick="loadAvgChart('today')">Today</button>
         <button class="chart-period-btn${cp==='week'?' active':''}" data-period="week" onclick="loadAvgChart('week')">Week</button>
@@ -8828,41 +8851,41 @@ function renderPlayerPage(){
       <div id="avg-chart-body"></div>
     </div>
     <div class="pp-section spotlight" id="dart-heatmap-section" hidden>
-      <div class="pp-section-title">Dartboard Heatmap</div>
+      <h3 class="pp-section-title">Dartboard Heatmap</h3>
       <p class="pp-meta" style="margin:0 0 8px">Where every dart has landed — brighter means more hits (Dartboard-mode taps only split inner/outer singles and misses by direction; Pad-mode darts still count, just without that extra precision).</p>
       <div id="dart-heatmap-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
       <p class="pp-meta" id="bounce-out-count" style="margin-top:6px"></p>
     </div>
     <div class="pp-section">
-      <div class="pp-section-title">Personal Bests</div>
+      <h3 class="pp-section-title">Personal Bests</h3>
       <div id="player-personal-bests"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </div>
     <div class="pp-section" id="coaching-section" hidden>
-      <div class="pp-section-title">Coaching Insights</div>
+      <h3 class="pp-section-title">Coaching Insights</h3>
       <div id="coaching-insights-body"></div>
     </div>
     <div class="pp-section" id="on-this-day-section" hidden>
-      <div class="pp-section-title">On This Day</div>
+      <h3 class="pp-section-title">On This Day</h3>
       <div id="player-on-this-day"></div>
     </div>
     <details class="pp-section">
-      <summary class="pp-section-title">Badge Case</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">Badge Case</h3></summary>
       <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
     <details class="pp-section">
-      <summary class="pp-section-title">Around the World Progress</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">Around the World Progress</h3></summary>
       <div id="player-atw-progress"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
     <details class="pp-section">
-      <summary class="pp-section-title">🥋 Gauntlet Scar Map</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">🥋 Gauntlet Scar Map</h3></summary>
       <div id="player-gauntlet-scarmap"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
     <details class="pp-section">
-      <summary class="pp-section-title">Top Checkouts</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">Top Checkouts</h3></summary>
       <div id="player-top-finishes"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
     <details class="pp-section" id="dart-analytics-section">
-      <summary class="pp-section-title">Dart Analytics</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">Dart Analytics</h3></summary>
       <div id="dart-analytics-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>`;
 
@@ -8921,7 +8944,7 @@ function renderPlayerPage(){
     : '';
   const gamesAndH2hSectionHtml = `
     <div class="pp-section">
-      <div class="pp-section-title">${escapeHtml(modeLabel)} — Games &amp; H2H</div>
+      <h3 class="pp-section-title">${escapeHtml(modeLabel)} — Games &amp; H2H</h3>
       ${gamesAndH2hSummaryHtml}
       ${categoryChipsHtml}
     </div>`;
@@ -8929,13 +8952,13 @@ function renderPlayerPage(){
   // gated the same way the profile's other X01-only surfaces are.
   const tournamentStatsSection = gt==='x01' ? `
     <details class="pp-section">
-      <summary class="pp-section-title">Tournaments</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">Tournaments</h3></summary>
       <div id="player-tournament-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>` : '';
   // League mode is X01 or Cricket (docs/archive/league-mode-roadmap.md) — shown on both tabs.
   const leagueStatsSection = (gt==='x01' || gt==='cricket') ? `
     <details class="pp-section">
-      <summary class="pp-section-title">Leagues</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">Leagues</h3></summary>
       <div id="player-league-stats"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>` : '';
   // Household Elo (docs/archive/rating-and-handicap-roadmap.md Part A): unlike
@@ -8944,7 +8967,7 @@ function renderPlayerPage(){
   // once regardless of which per-game-type toggle is active.
   const eloSection = `
     <details class="pp-section">
-      <summary class="pp-section-title">📈 Household Rating</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">📈 Household Rating</h3></summary>
       <div id="player-elo-body"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>`;
   const h2hSection = `
@@ -8965,7 +8988,7 @@ function renderPlayerPage(){
     : '<span style="color:var(--muted)">none yet</span>';
   const practiceSection = `
     <details class="pp-section">
-      <summary class="pp-section-title">Practice — Legs Thrown</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">Practice — Legs Thrown</h3></summary>
       <div class="pp-cat-lines">${pracHtml}</div>
     </details>`;
 
@@ -8978,11 +9001,11 @@ function renderPlayerPage(){
   // every other selection gets).
   const challengeSection = `
     <details class="pp-section" open>
-      <summary class="pp-section-title">Daily Challenge History</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">Daily Challenge History</h3></summary>
       <div id="player-challenge-history"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>
     <details class="pp-section">
-      <summary class="pp-section-title">Badge Case</summary>
+      <summary class="pp-section-title"><h3 class="pp-sum-h">Badge Case</h3></summary>
       <div id="player-badges"><p class="pp-meta" style="padding:4px 0">Loading…</p></div>
     </details>`;
 
@@ -9013,7 +9036,7 @@ function renderPlayerPage(){
       ${modePickerHtml}
       ${gameStatsHtml}
       <details class="pp-section">
-        <summary class="pp-section-title">Legs Thrown</summary>
+        <summary class="pp-section-title"><h3 class="pp-sum-h">Legs Thrown</h3></summary>
         <div class="pp-cat-lines">${pracHtml}</div>
       </details>`;
   }
@@ -9054,7 +9077,7 @@ function renderPlayerPage(){
   body.innerHTML = `
     <div class="pp-header">
       <div class="pp-name-row">
-        <div class="pp-name">${escapeHtml(name)}</div>
+        <h2 class="pp-name">${escapeHtml(name)}</h2>
         <span class="ach-counter" id="pp-ach-counter" title="Achievements earned" hidden>🏆 —/—</span>
       </div>
       <div class="stat-bubbles" id="player-header-stats">${HEADER_STAT_DEFS.map(d=>
@@ -9295,7 +9318,7 @@ function renderPlayerBadges(data){
     .map(s => {
       const blocks = s.ids.map(badgeBlock).join('');
       if(!blocks) return ''; // every badge in this section is hidden by the current filter — skip the empty section entirely
-      return `<div class="pp-section-title" style="margin:16px 0 6px">${s.title}</div>
+      return `<h3 class="pp-section-title" style="margin:16px 0 6px">${s.title}</h3>
         <div class="summary-grid">${blocks}</div>`;
     })
     .join('');
@@ -9521,9 +9544,9 @@ function renderChallengeHistory(data){
   }).join('');
 
   container.innerHTML = `${summaryHtml}
-    <div class="pp-section-title" style="font-size:13px;margin-bottom:8px">Best result per format</div>
+    <h3 class="pp-section-title" style="font-size:13px;margin-bottom:8px">Best result per format</h3>
     <div class="summary-grid" style="margin-bottom:14px">${bestHtml}</div>
-    <div class="pp-section-title" style="font-size:13px;margin-bottom:4px">Full history</div>
+    <h3 class="pp-section-title" style="font-size:13px;margin-bottom:4px">Full history</h3>
     <div>${rows || '<p class="pp-meta" style="padding:4px 0">No attempts recorded yet.</p>'}</div>`;
 }
 async function shareEarnedBadge(badgeId){

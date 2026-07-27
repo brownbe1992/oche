@@ -3804,13 +3804,54 @@ next animation frame — necessary because most screen readers won't re-announce
 a live region whose text content didn't change (e.g. two busts in a row need
 this clear-then-set to both actually be spoken).
 
-Two, and only two, triggers — deliberately scoped to avoid talking over every
-intermediate dart tap:
+Three triggers — deliberately scoped to avoid talking over every intermediate
+dart tap:
 1. **`enterTurn()`'s committed result** — "Alice scores 60, 201 remaining." /
    "Alice busts, stays on 140." / "Alice checks out with 40. Leg won."
 2. **Every achievement as `pumpAchievementQueue()` shows it** (§5) — player
    name, badge label, and the same `BADGE_INFO[...].desc` text used everywhere
    else.
+3. **A Player Profile scope change** (2026-07) — `switchPlayerTab()`,
+   `switchPlayerSection()` and `switchPlayerGameType()` each announce what is
+   now showing ("Showing Head-to-head games.", "Showing Cricket statistics.",
+   "Player settings."). All three replace the profile's ENTIRE contents while
+   focus stays on the control they were operated from, so without this a
+   screen-reader user gets no signal at all that three viewports of statistics
+   just became different statistics. Deliberately states *what is showing*
+   rather than summarising it — the numbers themselves are reached by heading
+   (see below).
+
+### The Player Profile's heading outline (2026-07)
+
+The profile is the app's longest screen — around three viewports of scroll on a
+phone *and* on a tablet, ~1,100 DOM nodes — which makes jump-by-heading the
+primary way to navigate it without sight. Until 2026-07 it had **no headings at
+all**: all 21 section titles were `<div class="pp-section-title">`.
+
+The structure now:
+
+- the player's name is the page's `<h2>` (`.pp-name`);
+- every section title is an `<h3>`, carrying the same `.pp-section-title` class;
+- a **collapsible** section keeps its `<summary class="pp-section-title">` and
+  nests an `<h3 class="pp-sum-h">` inside it. The `<summary>` is the disclosure
+  *button* and replacing it with a heading would trade one affordance for
+  another, so the section is exposed as both. `.pp-sum-h` inherits every visual
+  property and contributes no styling of its own.
+
+`.pp-section-title`'s `margin-bottom:8px` became `margin:0 0 8px` so that heading
+elements bring no user-agent margin with them — the change is semantic only, and
+the page's rendered `scrollHeight` is identical to the pixel before and after at
+both viewports.
+
+The verify-ui `profile-a11y` check asserts this **structurally** (an H2 first, no
+skipped levels, every `summary.pp-section-title` containing an `h3`) rather than
+against a list of expected titles, so a new profile section inherits the
+requirement without anyone editing the check.
+
+Related: every `.drill-btn` carries `aria-label="Drill <score> in Checkout
+Trainer"`. The visible label stays "🎯 Drill" — the row it sits on already names
+the score — but a profile renders one per checkout, and without the label they
+were N buttons sharing a single accessible name.
 
 **Next-thrower suffix (`announceTurn()` / `nextThrowerPhrase()`).** Every
 multi-visit turn-based mode (X01, Cricket, Baseball, Shanghai, Halve-It,
@@ -5939,6 +5980,37 @@ staged up-to-3-dart visit. When the session has trick questions on
 (`config.trickQuestions`), a "🚫 No possible checkout" button appears
 alongside Submit — the declaration answer path (see **Trick questions**
 below).
+
+**Complete-route enumeration** — `allCheckoutRoutes(rem, doubleOut, maxDarts)`
+and `routeKey(labels)` (`frontend/scoring.js`, 2026-07). Every other checkout
+function in the app finds ONE route and stops; these answer "what are ALL of
+them?", which is what a "name every way to check this out" drill needs
+(`docs/checkout-trainer-route-recall-roadmap.md`, build-order step 1 — the
+sub-mode itself is not built).
+
+- The alphabet is the **full 62-segment board** (`CO_SEGMENTS`: S1-20, D1-20,
+  T1-20, the outer bull, the bull) — deliberately **not** `CO_FIRSTS`, which has
+  no doubles. That omission is correct for `checkoutHint()` (nobody aims a double
+  as a setup dart) and would silently lose real routes here: 110 = D20 T20 D15 is
+  a finish a player can name.
+- A route's identity is an **unordered multiset of setup darts plus a designated
+  final dart** — the only ordering that carries meaning. T20 then T19 is not a
+  different route from T19 then T20; but for 60, "D20 then D10" and "D10 then
+  D20" genuinely are two routes, and the same rule produces both answers.
+  `routeKey()` maps a player's freely-ordered input onto that identity, taking
+  the last dart as the finisher. It does no legality checking — that is
+  `evaluateVisit()`'s job — only identity.
+- Returns shortest-first, each entry `{darts, finish, setup, key}`. Unfinishable
+  targets return `[]`, matching `checkoutHint()`'s `''`.
+- It does **not** carry `checkoutHint()`'s `rem > 170` cutoff, which is an X01
+  double-out convention: 171 = T20 T20 T17 is a real straight-out finish.
+
+Route counts, for anyone designing against this: at the 2-dart double-out
+ceiling the worst target is 40 with **36** routes; at 3 darts it is 58 with
+**730**, and 81 of the 162 finishable targets exceed 200. Covered by
+`backend/test/scoring.all-checkout-routes.test.js`, which compares against an
+independent brute-force oracle across all 180 targets × both out-modes × all
+three ceilings.
 
 **Game type**: `checkout_trainer`, one of `KNOWN_GAME_TYPES` (`backend/db.js`).
 Every dart-count attempt is its own 1-3 dart `turns` row — the same per-dart-
