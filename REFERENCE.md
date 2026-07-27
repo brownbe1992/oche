@@ -1626,16 +1626,31 @@ record.
 
 ### Head-to-Head (`getH2HRecord()`, `getH2HSummary()`)
 
-`getH2HRecord(p1, p2)`: counts completed, non-practice games where both named
-players participated (via a double `game_players` join). **Note**: this does
-*not* require exactly two participants — a 3+-player free-for-all where both
-named players took part is still counted, since the join only guarantees "both
-were in this game," not "only these two were in this game."
+Both functions count **duels only** — completed, non-practice games with
+**exactly two participants** (`g.player_count = 2`, the shared `H2H_PAIR_ONLY`
+clause). A pairwise record answers "how have these two done against each
+other", and a game a third person also played is not a result between them:
+before 2026-07 the double `game_players` join guaranteed only "both were in
+this game," so a four-player Cricket win landed in the winner's record against
+each of the three losers. This is the same rule `getSessionRecap()` has always
+applied to Tonight's Recap's own pairwise grid, so the two pairwise surfaces now
+agree.
+
+The aggregate win-rate leaderboards are deliberately **count-agnostic** and
+unaffected — there, a 4-player winner beat three people and the other three each
+took a loss, which is exactly what a win rate should say. The distinction is
+between "who has beaten whom" (pairwise, duels only) and "how often does this
+player win" (aggregate, any count).
+
+`getH2HRecord(p1, p2)`: `{ p1, p2, p1Wins, p2Wins, total }` over those duels.
 
 `getH2HSummary(p1, p2, excludeGameId)`: `{ totalGames, previousWinner }` —
 `previousWinner` looks at the most recent qualifying game *excluding* the game
 just finished (used immediately after a match completes, to answer "who won
-last time before this one" for the Rematch/Grudge Match badges — see §4).
+last time before this one" for the Rematch/Grudge Match badges — see §4). The
+pair filter is load-bearing here beyond scoping: `previousWinner` resolves the
+winner as "p1, else p2", which is only sound when the game had exactly those two
+participants.
 
 ### On This Day (`getOnThisDay(name, tz)`)
 
@@ -6532,12 +6547,6 @@ already-shipped limitations, not just unbuilt future features:
   (though its turns are already persisted per-visit). Renaming a player mid-game also
   doesn't update `game.players[].name`, so a resume path, if added, would need to
   reconcile that. Unspecified state-machine behavior, not a data-loss bug.
-- **`getH2HSummary().previousWinner` can mislabel in a 3+-player free-for-all** — the
-  double `game_players` join counts any game where both named players took part (not
-  exactly-two-player games, per §3's note), so if a *third* player won the most-recent
-  such game, `previousWinner` still reports one of the two named players. Only reaches
-  the Rematch/Grudge badges, which the controller evaluates for 2-player matches only,
-  so it's latent in practice.
 - **Tournament mode is feature-complete** — single- and double-elimination,
   generation/advancement/reset logic, the setup screen, the tabbed double-elim
   bracket view, badges, and Player Profile stats all ship (§15). (Optional future

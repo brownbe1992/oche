@@ -2414,11 +2414,18 @@ against the pre-fix source (2 of 3 assertions, reading 41 instead of 3). `REFERE
 §3's Average Pace row now states the shared-constant requirement explicitly instead of
 leaving it to a comment. Full backend suite green.
 
-**Not done, and deliberately deferred:** fix step 4's full sweep of `getMetricHistory()`'s
-remaining arms against their bubble siblings. This is the second scope mismatch found in
-that one function and it stays the largest uncovered block in `db.js`, so the sweep is
-still worth doing — it is a substantially larger piece of work than this fix and is
-tracked as its own item on `docs/open-roadmap-items.md` rather than being half-done here.
+**Fix step 4's sweep is now also done (2026-07, tracker item 73).**
+`backend/test/db.metric-history-parity.test.js` asserts every charted metric
+against the bubble it sits under, across all seven charted families and both
+tabs, with the pair list **derived from the app's own `STAT_DEFS`/
+`BUBBLE_KEY_MAP` declarations** rather than restated in the test — so a metric
+added there arrives with a parity assertion already pointing at it. The sweep
+found no further live divergence; its value is that the next one cannot ship
+unnoticed. Proven by reverting each of the two historical fixes in turn and
+watching the suite go red (`pace`: chart 14.4 vs bubble 3.0; `avgdartsperleg`:
+chart 7.67 vs bubble 8.5) — which required the fixture to carry timestamped
+guided Around the World darts and a Checkout Ladder leg that checks out, without
+which neither bug is observable at all.
 
 **What actually goes wrong (plain language):** "Average Pace" measures how fast someone
 throws, in darts per minute, from the gap between consecutive darts. Some game types
@@ -2498,7 +2505,8 @@ end `... ${NOT_CONTINUOUS_STREAM}`.
    hand-picked number. That form of assertion is what makes the three stay in step
    through future edits — it is the same "derive the expected value from the real
    engine" shape `db.pressure-chamber-stats.test.js` already uses.
-4. **Sweep the rest of `getMetricHistory()` against its bubble siblings.** This is the
+4. **Sweep the rest of `getMetricHistory()` against its bubble siblings.** ✅ Done —
+   see the status note above. This is the
    second scope mismatch found in this one function (the first was `avgdartsperleg`
    missing `X01_ONLY`, fixed earlier in 2026-07 under BUG-27's umbrella), it is the
    largest uncovered block in `db.js`, and its arms are exactly the code a green suite

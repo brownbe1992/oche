@@ -861,37 +861,43 @@ add tests. And the `DB.*` wrapper boundary is unprincipled — three do-nothing
 pass-through GET wrappers vs ~122 direct `Backend.get` calls and split
 player-mutation homes; either drop the dead wrappers or write the rule down.
 
-## Item 60 — `DB.saveGame()` can race ahead of a still-queued `DB.recordTurn()`
+## Item 60 — `DB.saveGame()` can race ahead of a still-queued `DB.recordTurn()` ✅ DONE (2026-07)
 
 Found incidentally while live-verifying item 37's resume rewrite (a test
 script that called `enterTurn()` then `DB.saveGame()` back-to-back with zero
 delay saw every type's resume "revert to the fresh start state," e.g. X01
 back to 501 instead of the score after several visits). Root cause:
 `DB.recordTurn()` serializes its `POST /api/games/:id/turns` writes through
-`DB._queue`/`DB._chain` (`frontend/index.html` ≈ 1690's own comment notes
-this), but `DB.saveGame()` deliberately bypasses that queue and fires its
-`POST /api/games/:id/save` immediately. If the save request reaches the
-server and completes before the still-in-flight turn write does, the game
-gets marked saved with fewer turns recorded than the player actually
-completed — a real (if narrow) data-loss window, not just a test artifact:
-any real user who taps "Pause" fast enough after their last dart (double-tap,
-a laggy connection reordering the two requests, etc.) can hit it, not only
-an automated script with literally zero delay.
+`DB._queue`/`DB._chain`, but `DB.saveGame()` deliberately bypassed that queue
+and fired its `POST /api/games/:id/save` immediately. Resume is replay, not
+snapshot — the position is rebuilt from recorded turns — so a save that
+resolves while turn writes are still in flight lets a player press Resume
+against a game the server has only partly heard about.
 
-Confirmed harmless for typical human timing (hundreds of ms between a last
-dart and manually tapping Pause is enough for the turn write to land first),
-and confirmed the backend registry/rebuild functions themselves are correct
-once the race is avoided — this is purely a client-side request-ordering
-gap, not a bug in item 37's registry dispatch or the `rebuild*State()`
-functions it calls.
+**Reproduced deterministically before the fix**: three visits thrown, one
+recorded, a 501 leg coming back on 321 instead of 141. Not merely a
+zero-delay test artifact — a double-tap, or a laggy connection reordering two
+requests, reaches the same window.
 
-**Shape:** have `DB.saveGame()` await `DB._chain` (the same promise
-`DB.recordTurn()` chains onto) before firing its own request, so a save
-can never be sent while a turn write for the same game is still in flight —
-mirroring the ordering guarantee `DB._queue` already gives same-type writes,
-just extended to this one cross-type ordering dependency.
+**Fixed** by having `saveGame()` **chain onto** `_chain` rather than **join**
+it:
 
----
+```js
+saveGame(gameId){ return this._chain.then(()=>Backend.send('POST',`/api/games/${gameId}/save`)); },
+```
+
+Chained, not queued, because the caller needs this promise to *be* the answer
+(a save has to be known to have succeeded before navigating away), which
+`_queue`'s fire-and-forget shape cannot provide. `_chain` never rejects —
+every `_queue` task carries its own `.catch(logErr)` — so a failed turn write
+can never leave a player unable to save.
+
+Covered by the new verify-ui check **`save-resume`** (6 assertions), which
+drives the real buttons' code path with zero artificial delay and was
+confirmed to fail 4/6 with the fix reverted. It lives in verify-ui rather than
+`backend/test/` because the defect was entirely in the browser's request
+ordering: the backend was correct throughout, and no amount of coverage over
+`db.js` could have seen it.
 
 ## Items 64–70 — Full-frontend `/simplify` pass (2026-07-22), deferred findings
 

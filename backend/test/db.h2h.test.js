@@ -58,14 +58,42 @@ describe('getH2HRecord', () => {
     assert.equal(db.getH2HRecord('H2H_Lonely', 'H2H_Nobody'), null);
   });
 
-  test('a 3+ player free-for-all still counts if both named players took part (documented, not a bug)', () => {
+  // Item 74 (2026-07). This previously counted, and was documented as
+  // deliberate; it no longer does. A pairwise record answers "how have these two
+  // done against each other", and a game a third person also played — or won —
+  // is not a result between them. Tonight's Recap already applied exactly this
+  // rule to its own pairwise grid, so the change makes the two agree rather
+  // than introducing a new opinion.
+  test('a 3+ player free-for-all does NOT count toward a pairwise record', () => {
     const p1 = 'H2H_FFA_P1', p2 = 'H2H_FFA_P2', p3 = 'H2H_FFA_P3';
     db.addPlayer(p1); db.addPlayer(p2); db.addPlayer(p3);
-    completeAt(h2hGame([p1, p2, p3]).gameId, p3, 1); // neither p1 nor p2 won, but both took part
+    completeAt(h2hGame([p1, p2, p3]).gameId, p3, 1); // a third player won it
     const rec = db.getH2HRecord(p1, p2);
-    assert.equal(rec.total, 1, 'both were in this game, even though a third player won it');
+    assert.equal(rec.total, 0, 'three people played; this was never a duel between p1 and p2');
     assert.equal(rec.p1Wins, 0);
     assert.equal(rec.p2Wins, 0);
+  });
+
+  test('a 3-player game WON by one of the two still does not count', () => {
+    // The case that actually inflated records: the winner really did beat the
+    // other named player — alongside somebody else. It is a win, and it counts
+    // on the win-rate leaderboard; it is not a duel, so it does not count here.
+    const p1 = 'H2H_FFA2_P1', p2 = 'H2H_FFA2_P2', p3 = 'H2H_FFA2_P3';
+    db.addPlayer(p1); db.addPlayer(p2); db.addPlayer(p3);
+    completeAt(h2hGame([p1, p2, p3]).gameId, p1, 1);
+    assert.equal(db.getH2HRecord(p1, p2).total, 0);
+  });
+
+  test('duels alongside free-for-alls: only the duels are counted', () => {
+    const p1 = 'H2H_Mix_P1', p2 = 'H2H_Mix_P2', p3 = 'H2H_Mix_P3';
+    db.addPlayer(p1); db.addPlayer(p2); db.addPlayer(p3);
+    completeAt(h2hGame([p1, p2]).gameId, p1, 1);          // a real duel
+    completeAt(h2hGame([p1, p2, p3]).gameId, p1, 2);      // not a duel
+    completeAt(h2hGame([p1, p2]).gameId, p2, 3);          // a real duel
+    const rec = db.getH2HRecord(p1, p2);
+    assert.equal(rec.total, 2, 'the three-player game is excluded');
+    assert.equal(rec.p1Wins, 1);
+    assert.equal(rec.p2Wins, 1);
   });
 });
 
@@ -101,6 +129,43 @@ describe('getH2HSummary', () => {
     completeAt(onlyGame.gameId, p1, 1);
     const summary = db.getH2HSummary(p1, p2, onlyGame.gameId);
     assert.equal(summary.previousWinner, null);
+  });
+
+  // Item 74 (2026-07) — the two badges this function exists for.
+  test('The Rematch cannot fire as revenge for a game that was not a duel', () => {
+    // previousWinner drives The Rematch ("revenge over X"). Before the pair
+    // filter, a four-player game the opponent happened to win counted as the
+    // last result between them, so beating them in an unrelated duel later
+    // announced itself as revenge for a match that never happened.
+    const p1 = 'H2H_Rematch_P1', p2 = 'H2H_Rematch_P2', p3 = 'H2H_Rematch_P3';
+    db.addPlayer(p1); db.addPlayer(p2); db.addPlayer(p3);
+    completeAt(h2hGame([p1, p2]).gameId, p1, 1);        // the real last duel: p1 won
+    completeAt(h2hGame([p1, p2, p3]).gameId, p2, 2);    // later, but three-handed
+    const summary = db.getH2HSummary(p1, p2);
+    assert.equal(summary.totalGames, 1, 'only the duel counts');
+    assert.equal(summary.previousWinner, p1, 'the three-player game is not "the last time these two met"');
+  });
+
+  test('previousWinner is never a player who was not in the game', () => {
+    // The latent wrong answer the filter also removes: previousWinner resolves
+    // the winner as "p1 or else p2", which is only sound for a two-participant
+    // game. A three-player game won by somebody else entirely used to report p2
+    // as the winner of a game p2 lost.
+    const p1 = 'H2H_Ghost_P1', p2 = 'H2H_Ghost_P2', p3 = 'H2H_Ghost_P3';
+    db.addPlayer(p1); db.addPlayer(p2); db.addPlayer(p3);
+    completeAt(h2hGame([p1, p2, p3]).gameId, p3, 1);
+    const summary = db.getH2HSummary(p1, p2);
+    assert.equal(summary.totalGames, 0);
+    assert.equal(summary.previousWinner, null, 'these two have never met, so nobody won last time');
+  });
+
+  test('Grudge Match counts duels only toward its 10-game milestone', () => {
+    const p1 = 'H2H_Grudge_P1', p2 = 'H2H_Grudge_P2', p3 = 'H2H_Grudge_P3';
+    db.addPlayer(p1); db.addPlayer(p2); db.addPlayer(p3);
+    for (let i = 0; i < 6; i++) completeAt(h2hGame([p1, p2]).gameId, i % 2 ? p1 : p2, i + 1);
+    for (let i = 0; i < 6; i++) completeAt(h2hGame([p1, p2, p3]).gameId, p3, 10 + i);
+    assert.equal(db.getH2HSummary(p1, p2).totalGames, 6,
+      'twelve games contained both players, but only six were between them');
   });
 
   test('an unknown player returns null', () => {

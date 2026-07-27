@@ -7976,6 +7976,20 @@ async function fireHaWebhook(event, payload) {
   });
 }
 
+// A PAIRWISE record — "how these two have done against each other" — so it
+// counts duels only (`player_count = 2`), not every non-practice game the two
+// happened to both be in. A four-player Cricket game one of them won is not a
+// result between them, and counting it made "Ben leads Sam 5-3" include games
+// that were never a contest between Ben and Sam.
+//
+// This is the rule getSessionRecap() already applies to Tonight's Recap's own
+// pairwise grid ("A single 3+ player game has no single 'matchup' pair") — the
+// two pairwise surfaces now agree instead of the app disagreeing with itself.
+// The aggregate win-rate leaderboards are deliberately count-AGNOSTIC and
+// unaffected: there, a 4-player winner beat three people and the other three
+// each took a loss, which is exactly right for a win rate.
+const H2H_PAIR_ONLY = `AND g.player_count = 2`;
+
 function getH2HRecord(name1, name2) {
   if(!name1 || !name2) return null;
   // COLLATE NOCASE to match players.name's case-insensitive uniqueness and every
@@ -7989,7 +8003,7 @@ function getH2HRecord(name1, name2) {
     SELECT g.winner_id FROM games g
     JOIN game_players gp1 ON gp1.game_id=g.id AND gp1.player_id=?
     JOIN game_players gp2 ON gp2.game_id=g.id AND gp2.player_id=?
-    WHERE g.practice=0 AND g.winner_id IS NOT NULL
+    WHERE g.practice=0 AND g.winner_id IS NOT NULL ${H2H_PAIR_ONLY}
   `).all(p1.id, p2.id);
   const p1Wins = rows.filter(r=>r.winner_id===p1.id).length;
   const p2Wins = rows.filter(r=>r.winner_id===p2.id).length;
@@ -7999,6 +8013,15 @@ function getH2HRecord(name1, name2) {
 // Used by the Grudge Match / Rematch badges (docs/archive/achievements-badges-roadmap.md).
 // excludeGameId lets the caller ask "who won the last time before this one" right
 // after the current match has just been recorded.
+//
+// Duels only, via the same H2H_PAIR_ONLY rule as getH2HRecord() above — both
+// badges are explicitly about a rivalry between two people, so The Rematch must
+// not fire as "revenge" for a four-player game the opponent happened to win, and
+// Grudge Match's 10-game milestone must not be reached by games that were never
+// duels. The filter also removes a latent wrong answer: `previousWinner` below
+// resolves the winner as "p1 or else p2", which is only sound when the game had
+// exactly those two participants — in a 3+ player game won by somebody else
+// entirely it silently reported name2.
 function getH2HSummary(name1, name2, excludeGameId) {
   if(!name1 || !name2) return null;
   const p1 = getPlayer(name1), p2 = getPlayer(name2);
@@ -8007,7 +8030,7 @@ function getH2HSummary(name1, name2, excludeGameId) {
     SELECT g.id, g.winner_id FROM games g
     JOIN game_players gp1 ON gp1.game_id=g.id AND gp1.player_id=?
     JOIN game_players gp2 ON gp2.game_id=g.id AND gp2.player_id=?
-    WHERE g.practice=0 AND g.winner_id IS NOT NULL
+    WHERE g.practice=0 AND g.winner_id IS NOT NULL ${H2H_PAIR_ONLY}
     ORDER BY g.completed_at DESC, g.id DESC
   `).all(p1.id, p2.id);
   const totalGames = rows.length;

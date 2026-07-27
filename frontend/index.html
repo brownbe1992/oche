@@ -2690,7 +2690,17 @@ const DB = {
   // could race each other), and the caller needs to await the real response
   // (a resume needs the actual payload; a save/abandon needs to know it
   // actually succeeded before navigating away) rather than fire-and-forget.
-  saveGame(gameId){ return Backend.send('POST',`/api/games/${gameId}/save`); },
+  //
+  // saveGame AWAITS the write queue without joining it (item 60). A resume
+  // replays the game's recorded turns, so a save that resolves while turn
+  // writes are still in flight lets the player press Resume against a game the
+  // server has only partly heard about — measured at 1 turn out of 3 recorded,
+  // i.e. a 501 leg coming back on 321 instead of 141. Chained onto rather than
+  // pushed onto _chain because this promise IS the caller's answer, which
+  // _queue's fire-and-forget shape can't give it; and _chain never rejects
+  // (every _queue task carries its own .catch), so one failed turn write can
+  // never leave a player unable to save.
+  saveGame(gameId){ return this._chain.then(()=>Backend.send('POST',`/api/games/${gameId}/save`)); },
   abandonSavedGame(gameId){ return Backend.send('DELETE',`/api/saved-games/${gameId}`); },
 
   async reset(){ await Backend.send('POST','/api/reset').catch(logErr); await this.refreshStats(); },

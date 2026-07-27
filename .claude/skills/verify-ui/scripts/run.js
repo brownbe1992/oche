@@ -21,6 +21,7 @@ const CHECKS = {
   'scoring-modes': './checks/scoring-modes',
   'all-game-types': './checks/all-game-types',
   'turn-loop': './checks/turn-loop',
+  'save-resume': './checks/save-resume',
   'live-scoreboard': './checks/live-scoreboard',
   'live-shell': './checks/live-shell',
   'home-settings': './checks/home-settings',
