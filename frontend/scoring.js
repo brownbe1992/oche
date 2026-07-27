@@ -165,6 +165,46 @@ function pracFirst9Average(legTurns){
   return first3.reduce((s, t) => s + t.scored, 0) / darts * 3;
 }
 
+// The slice of a turn list belonging to one player.
+//
+// X01's turn records carry a `player` field, but they did not always, and the
+// solo drills that reuse this shape push records for the only person at the
+// oche. So: if NOTHING in the list is attributed, every turn belongs to whoever
+// is asking — that is the truth in a solo session and the only safe reading of
+// an unattributed list. Filtering an unattributed list by name would return
+// nothing and silently blank the scoreboard's history line instead.
+function turnsForPlayer(turns, name){
+  const list = turns || [];
+  if(!list.some(t => t && t.player != null)) return list.slice();
+  return list.filter(t => t && t.player === name);
+}
+
+// Everything the live scoreboard's lane shows for one player, for one scope.
+// Built on pracAggregate() rather than beside it, so a figure on the live board
+// and the same figure on the leg-complete panel can never be computed two
+// different ways — the same property the panel's own two scopes already have.
+//
+// `recent` is the tail of the visit list in THROWN order (oldest first), which
+// is how a chalked column reads; the panel's own lists sort descending because
+// they are rankings, and these are a sequence. Different rules on purpose.
+function liveLaneStats(turns, name, recentCount){
+  const mine = turnsForPlayer(turns, name);
+  const agg = pracAggregate(mine);
+  const n = recentCount == null ? 4 : recentCount;
+  return {
+    visits: agg.visits,
+    darts: agg.darts,
+    busts: agg.busts,
+    bestVisit: agg.bestVisit,
+    tonPlus: agg.tonPlus,
+    oneEighties: agg.oneEighties,
+    treblelessPct: agg.treblelessPct,
+    checkouts: agg.checkouts,
+    first9: pracFirst9Average(mine),
+    recent: mine.slice(-n).map(t => ({ scored: t.scored, bust: !!t.bust, checkout: !!t.checkout })),
+  };
+}
+
 function dartValue(sector, mult){
   if(sector === 0) return 0;
   if(sector === 25) return mult === 2 ? 50 : 25;   // bull: 25 or double-bull 50, no treble
@@ -2414,7 +2454,7 @@ function aroundTheHornProgress(visitLogs){
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
-    pracAggregate, pracFirst9Average,
+    pracAggregate, pracFirst9Average, turnsForPlayer, liveLaneStats,
     BOARD_SCHEMES, BOARD_SCHEME_IDS, BOARD_SECTOR20_SCHEME_DEFAULT,
     normaliseSchemeId, hexToRgb, relativeLuminance, contrastRatio, boardLabelColor,
     resolveBoardColors, BOARD_LABEL_LIGHT, BOARD_LABEL_DARK,

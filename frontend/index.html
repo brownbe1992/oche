@@ -13293,7 +13293,11 @@ function enterTurn(){
   awardVisitAchievements(p, ev, _snap);
 
   // record turn for practice session stats display
-  { const _t = { scored:ev.scored, trebleLess:!!ev.trebleLess, bust:!!ev.bust,
+  // `player` (2026-07): the live scoreboard's lane shows each player's own run
+  // of visits, which an unattributed shared record can't support in an H2H leg.
+  // turnsForPlayer() treats a wholly unattributed list as belonging to whoever
+  // asks, so solo practice and any older record shape still read correctly.
+  { const _t = { player:p.name, scored:ev.scored, trebleLess:!!ev.trebleLess, bust:!!ev.bust,
       checkout:!!ev.win, checkoutPoints:ev.win?ev.pointsThisVisit:null, darts:game.darts.length };
     game.currentLegTurns.push(_t); game.sessionTurns.push(_t); }
 
@@ -14694,9 +14698,11 @@ function panelHeroesByPlayer(winner, valueFor, subFor){
     value: valueFor(p), small: game.players.length > 2 }));
 }
 // Every scored visit of the scope, best first — the shelf for the score-based
-// H2H modes. X01's own turn records carry no player field (enterTurn() pushes a
-// shared record for the practice-stats panel), so this is honestly pooled across
-// everyone at the oche rather than pretending to be per-player.
+// H2H modes. Deliberately POOLED across everyone at the oche, not split per
+// player: "the best darts thrown in this leg" is the shelf this panel wants,
+// and the per-player figures are already in the columns below it. (The records
+// do carry `player` now — the live scoreboard's lane needs it — so splitting
+// them would be possible; it just isn't what this shelf is for.)
 function panelBestVisitCells(turns, limit){
   const top = pracAggregate(turns).topVisits.slice(0, limit || 5);
   return top.length ? top.map((v,i) => ({ label:v, plain:true, best:i===0 }))
@@ -15756,6 +15762,29 @@ function playerSnapshotX01(p){
 // parameterized query engine across X01 (leg/win-based), Cricket (marks-based),
 // and drill modes (no legs, no opponent) is a real, separate design problem the
 // roadmap doc leaves open, not something this pass forces an abstraction onto.
+/* The per-player figures the live scoreboard's lanes show (/frontend-design
+   direction A, "Lower Third", 2026-07). Every game type whose visits go through
+   the X01-shaped turn record — X01 itself, Checkout Ladder, Dead Man Walking —
+   merges this into its own liveModeState, so the board can't disagree with
+   itself between modes, and the arithmetic is scoring.js's liveLaneStats()
+   rather than anything restated here.
+
+   `session` is populated only for a solo practice session, where the second
+   lane on the board IS the session (there is no opponent to put there) — the
+   same dual-scope framing the leg-complete panel already uses. */
+function liveLaneState(game){
+  const legTurns = game.currentLegTurns || [];
+  const soloPractice = !!game.practice && game.players.length === 1;
+  let session = null;
+  if(soloPractice){
+    const s = liveLaneStats(game.sessionTurns || [], game.players[0].name, 0);
+    session = { darts:s.darts, busts:s.busts, bestVisit:s.bestVisit, oneEighties:s.oneEighties,
+      treblelessPct:s.treblelessPct, checkouts:s.checkouts.slice(0, 6), legs:game.legNo,
+      dartsPerLeg: game.legNo ? Number((s.darts / game.legNo).toFixed(1)) : null };
+  }
+  return { lanes: game.players.map(p => liveLaneStats(legTurns, p.name)), session };
+}
+
 const GAME_TYPES = {
   x01: {
     id: 'x01',
@@ -15807,12 +15836,17 @@ const GAME_TYPES = {
       game.practice && game.players.length === 1 && kind === 'leg'
         ? x01PracticePanelSpec(game) : x01H2hPanelSpec(game, winner, kind),
     liveModeState: (game) => {
-      if(!activeChallenge || !game.players[0] || activeChallenge.player !== game.players[0].name) return null;
+      // Lane figures always; the Daily Challenge block only during an actual
+      // attempt. display.html keys the challenge treatment off challengeFormat
+      // being present, so an ordinary X01 game returning lanes-only is inert
+      // there — same as the null this used to return.
+      const base = liveLaneState(game);
+      if(!activeChallenge || !game.players[0] || activeChallenge.player !== game.players[0].name) return base;
       const p = game.players[0];
       const fmt = activeChallenge.format;
       const visitLogs = game.legVisitLogs || [];
       const metric = CHALLENGE_FORMAT_DEFS[fmt].liveMetric(game, p);
-      return {
+      return Object.assign(base, {
         challengeFormat: fmt,
         challengeTarget: activeChallenge.target,
         challengeLabel: challengeShortLabel(fmt, activeChallenge.target),
@@ -15825,7 +15859,7 @@ const GAME_TYPES = {
         // without hardcoding which formats use a filler score or a fixed visit cap.
         challengeUsesFillerScore: !!CHALLENGE_FORMAT_DEFS[fmt].usesFillerScore,
         challengeVisitCap: CHALLENGE_FORMAT_DEFS[fmt].visitCap || null,
-      };
+      });
     }
   },
   cricket: {
@@ -16101,7 +16135,8 @@ const GAME_TYPES = {
     personalBestsSpec: CHUCKIN_PB_SPEC,
     // The outcome of the most recent dart — /display reads this instead of the
     // X01/Cricket/Doubles-Practice-shaped fields liveSnapshot() sends generically.
-    liveModeState: game => ({ chuckinLastDart: game.chuckinLastDart || null }),
+    liveModeState: game => ({ chuckinLastDart: game.chuckinLastDart || null,
+      chuckinRecent: (game.chuckinRecent || []).slice() }),
     // false (not null) deliberately opts this mode out of the Home page toggle
     // entirely — unlike null ("use the built-in X01-shaped default"), this mode's
     // stats don't map onto that shape and no Home leaderboard was requested for it.
@@ -16281,7 +16316,8 @@ const GAME_TYPES = {
     statDefs: CHECKOUT_LADDER_STAT_DEFS,
     personalBestsSpec: CHECKOUT_LADDER_PB_SPEC,
     homeTabRenderer: renderHomeTabBodyCheckoutLadder,
-    liveModeState: game => ({ checkoutLadderTarget: game.checkoutLadderTarget || 121,
+    liveModeState: game => Object.assign(liveLaneState(game), {
+      checkoutLadderTarget: game.checkoutLadderTarget || 121,
       checkoutLadderVisits: game.checkoutLadderVisits || 0 }),
     soloOnly: true,
     resume: (ctx) => {
@@ -16379,8 +16415,9 @@ const GAME_TYPES = {
     completionPanel: deadManWalkingPanelSpec,
     // The round number itself rides on the generic legNo field; remaining
     // score rides inside players[] via playerSnapshot.
-    liveModeState: game => ({ dmwBudget: game.dmwBudget || 0,
-      dmwDartsUsed: game.dmwDartsUsedThisRound || 0, dmwWalkedOut: game.dmwWalkedOutCount || 0 }),
+    liveModeState: game => Object.assign(liveLaneState(game), { dmwBudget: game.dmwBudget || 0,
+      dmwDartsUsed: game.dmwDartsUsedThisRound || 0, dmwWalkedOut: game.dmwWalkedOutCount || 0,
+      dmwRoundResults: (game.dmwRoundResults || []).slice() }),
     resume: (ctx) => {
       const { config, players, state } = ctx;
       const rounds = (config && config.rounds) || [];
@@ -16449,10 +16486,19 @@ function resetPlayerForNextLegCricket(p, game, newSet){
   p.legRoundMarks = [];
 }
 function playerSnapshotCricket(p){
+  const rounds = p.legRoundMarks || [];
   return {
     name:p.name, marks:Object.assign({}, p.marks), points:p.points||0,
     legsWon:p.legsWon, setsWon:p.setsWon,
-    legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0
+    legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0,
+    // MPR is Cricket's three-dart average, so the live scoreboard leads with it
+    // exactly as X01's lane leads with its own — the same per-visit marks log
+    // the leg-complete panel's hero reads (see newMatchPlayerCricket()), meaning
+    // the TV and the results screen can't disagree about it.
+    mpr: rounds.length ? Number((rounds.reduce((a,m)=>a+m,0) / rounds.length).toFixed(2)) : null,
+    roundsThrown: rounds.length,
+    bestRound: rounds.length ? Math.max(...rounds) : 0,
+    nineMarkRounds: rounds.filter(m => m >= 9).length
   };
 }
 
@@ -18099,7 +18145,8 @@ function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
   // checkChuckinMilestones()'s own comment) it DOES get revoked on undo.
   pushTurnSnapshot({ sessionDarts:p.sessionDarts, sessionTrebles:p.sessionTrebles,
     sessionScore:p.sessionScore, dartBuffer:p.dartBuffer.slice(), heatmap:{...p.heatmap},
-    chuckinLastDart:game.chuckinLastDart, badgeReverts:[], voided:false });
+    chuckinLastDart:game.chuckinLastDart, chuckinRecent:(game.chuckinRecent||[]).slice(),
+    badgeReverts:[], voided:false });
 
   p.sessionDarts += 1;
   if(dart.isTreble) p.sessionTrebles += 1;
@@ -18130,6 +18177,12 @@ function throwDartChuckin(sector, zone, missZone, missDepth, bounced){
   recordSingleDartTurn({ player:p.name, set:game.setNo, leg:game.legNo,
     scored:0, bust:false, checkout:false, checkoutPoints:null, legWon:false }, dart, zone, missZone, missDepth, bounced);
   game.chuckinLastDart = { label:dart.label, isTreble:!!dart.isTreble };
+  // A rolling run of the last nine darts. Just Chuckin' It has no visit and no
+  // round, so this is the only "what just happened" the live scoreboard can
+  // show — it is what the throw strip's right-hand pane carries for this mode
+  // in place of the requirement every other mode has.
+  game.chuckinRecent = (game.chuckinRecent || []).concat([
+    { label:dart.label, isTreble:!!dart.isTreble, isMiss: dart.sector === 0 }]).slice(-9);
   announce(`${dart.label}. ${p.sessionDarts} dart${p.sessionDarts===1?'':'s'} this session.`);
   renderGameChuckin();
   checkChuckinMilestones(p);
@@ -18154,6 +18207,7 @@ function undoLastTurnChuckin(){
   p.heatmap = snap.heatmap;
   p.heatmapVersion++;
   game.chuckinLastDart = snap.chuckinLastDart;
+  game.chuckinRecent = (snap.chuckinRecent || []).slice();
 
   _finishUndo(snap, renderGameChuckin, { msg: 'Last dart undone.' });
 }
