@@ -1450,6 +1450,28 @@ const renderers = {
         sub, cells, big: p.mpr == null ? '—' : p.mpr, bigUnit: 'mpr', bigSmall: false,
       });
     },
+    /* The generic strip totals raw dart face value, which is meaningless in
+       Cricket — a T20 on a number nobody has open reads "THIS VISIT 60" while
+       scoring nothing at all. Marks are the unit here. */
+    strip(s, L){
+      const spec = defaultStripSpec(s);
+      const me = s.players[s.currentIndex];
+      const inPlay = me ? Object.keys(me.marks || {}).map(Number) : [];
+      const marks = (Array.isArray(s.darts) ? s.darts : []).reduce((sum, label) => {
+        const m = /^([TD]?)(\d+|Bull)$/.exec(String(label));
+        if(!m) return sum;
+        const sector = m[2] === 'Bull' ? 25 : Number(m[2]);
+        if(!inPlay.includes(sector)) return sum;
+        return sum + (m[1] === 'T' ? 3 : m[1] === 'D' ? 2 : 1);
+      }, 0);
+      spec.visit = { k: 'this visit', v: marks, unit: marks === 1 ? 'mark' : 'marks' };
+      const open = inPlay.filter(n => num((me && me.marks || {})[n]) < 3);
+      spec.need = open.length
+        ? { k: `${me ? me.name : ''} still needs`,
+            r: open.map(n => n === 25 ? 'Bull' : String(n)).join(' · '), small: open.length > 3 }
+        : { k: `${me ? me.name : ''} has shut everything`, r: `${num(me && me.points)} points` };
+      return spec;
+    },
     resultStats(p){
       return [{ v: p.points, k: 'points' }, { v: p.closed, k: 'numbers closed' }];
     },
@@ -1527,7 +1549,9 @@ const renderers = {
         const halved = !!(p.roundHalved||{})[k+1];
         return { label, glyph: (halved ? '½ ' : '') + num(v), state: halved ? 'no' : 'ok' };
       });
-      if(cells[round-1]) cells[round-1].state = 'now';
+      // `|| 'now'`, as every other mode's does: an unconditional assignment
+      // erased the halved marking on a round the player had already thrown.
+      if(cells[round-1]) cells[round-1].state = cells[round-1].state || 'now';
       return buildModeLane(p, i, s, L, {
         sub: `round ${round} of ${targets.length || round}${p.everHalved ? ' · halved' : ''}`,
         cells, big: num(p.total), bigUnit: 'total',
@@ -1562,6 +1586,29 @@ const renderers = {
         sub: `round ${round} · ${num(p.fullHits)} full · ${num(p.misses)} missed`,
         cells, big: num(p.totalCp), bigUnit: 'cp',
       });
+    },
+    /* The round's CARD — its target, its modifier and the No Warmup deadline —
+       lived on the old scorecard's banner. Deleting that renderer left it
+       nowhere, and `pressureChamberDeadline` became dead payload. The strip's
+       requirement pane is exactly where it belongs: it is what this player has
+       to do right now. */
+    strip(s, L){
+      const spec = defaultStripSpec(s);
+      const ms = s.modeState || {};
+      const cards = Array.isArray(ms.pressureChamberCards) ? ms.pressureChamberCards : [];
+      const round = num(ms.pressureChamberRound) || 1;
+      const card = cards[round - 1];
+      if(!card || !card.target) return spec;
+      const mod = card.modifier || {};
+      const deadline = num(ms.pressureChamberDeadline);
+      const left = deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : null;
+      spec.need = {
+        k: `round ${round} · ${mod.label || 'no modifier'}`,
+        r: String(card.target.label == null ? '' : card.target.label),
+        small: String(card.target.label || '').length > 14,
+        note: [mod.flavor || '', left != null ? `${left}s left` : ''].filter(Boolean).join(' · '),
+      };
+      return spec;
     },
     resultStats(p){
       return [{ v: p.totalCp, k: 'composure points' }, { v: p.rating, k: 'rating' }];
@@ -1631,7 +1678,12 @@ const renderers = {
         ? { k: `${me.name} is hunting`, r: 'any live number',
             note: 'a double on someone else\'s number takes a life' }
         : { k: `${me.name} needs`, r: 'D' + num(me.number), note: 'to become a killer' };
-      return singleDartStrip(null, need);
+      // Killer commits per dart, and s.darts holds the visit so far — the last
+      // entry is the dart that just landed. Passing null pinned the slot to its
+      // "first dart" placeholder for the whole game.
+      const labels = Array.isArray(s.darts) ? s.darts : [];
+      const last = labels.length ? { label: labels[labels.length - 1] } : null;
+      return singleDartStrip(last, need);
     },
     /* The player's NUMBER is the most important fact in Killer and used to be a
        footnote chip; it leads the lane. Lives sit in the big slot, since

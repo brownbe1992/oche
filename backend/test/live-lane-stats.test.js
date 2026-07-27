@@ -66,6 +66,38 @@ describe('turnsForPlayer — who threw what', () => {
   });
 });
 
+describe('a turn record whose darts are OBJECTS, not a count', () => {
+  // X01's record carries `darts: 3`; Checkout Ladder's and Dead Man Walking's
+  // carry `darts: game.darts.slice()` — the dart objects themselves. Summing
+  // those produced a "0[object Object]…" string in the live payload and a NaN
+  // first-9 the moment liveLaneState() was wired into those two modes.
+  const objTurn = (scored, n) => ({ scored, darts: new Array(n).fill({ sector: 20, mult: 1 }),
+    bust: false, trebleLess: false, checkout: false, checkoutPoints: null });
+
+  test('the dart count is the array length, not a concatenated string', () => {
+    const lane = liveLaneStats([objTurn(60, 3), objTurn(45, 2)], 'Ben');
+    assert.equal(lane.darts, 5);
+    assert.equal(typeof lane.darts, 'number');
+  });
+
+  test('the first-9 average is a real number, not NaN', () => {
+    const lane = liveLaneStats([objTurn(60, 3), objTurn(60, 3), objTurn(60, 3)], 'Ben');
+    assert.ok(Number.isFinite(lane.first9), `first9 was ${lane.first9}`);
+    assert.equal(lane.first9.toFixed(1), '60.0');
+  });
+
+  test('a mixed list (count-shaped and array-shaped) still totals correctly', () => {
+    const lane = liveLaneStats([turn(60), objTurn(45, 2)], 'Ben');
+    assert.equal(lane.darts, 5);
+  });
+
+  test('the caller\'s turn objects are never mutated', () => {
+    const t0 = objTurn(60, 3);
+    liveLaneStats([t0], 'Ben');
+    assert.ok(Array.isArray(t0.darts), 'the original record must keep its dart objects');
+  });
+});
+
 describe('liveLaneStats — the lane agrees with the leg-complete panel', () => {
   const legTurns = [
     turn(140, { player: 'Ben' }),
@@ -105,6 +137,13 @@ describe('liveLaneStats — the lane agrees with the leg-complete panel', () => 
     const lane = liveLaneStats(legTurns, 'Ben');
     assert.deepEqual(lane.recent.map(r => r.scored), [140, 0, 100, 41]);
     assert.deepEqual(lane.recent.map(r => r.bust), [false, true, false, false]);
+  });
+
+  test('a recentCount of 0 means NO recent list, not the whole list', () => {
+    // slice(-0) returns the whole array. liveLaneState() passes 0 for the
+    // session aggregate, where a recent list is neither wanted nor bounded.
+    const many = [10, 20, 30].map(v => turn(v, { player: 'Ben' }));
+    assert.deepEqual(liveLaneStats(many, 'Ben', 0).recent, []);
   });
 
   test('recent is capped at the requested tail length, keeping the LATEST visits', () => {

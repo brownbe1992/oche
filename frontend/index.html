@@ -15229,7 +15229,10 @@ function finishUnit(kind, winner, opts){
     const heading = opts.heading || (soloPractice ? 'SESSION COMPLETE' : 'GAME OVER');
     const subtext = opts.subtext
       || (soloPractice ? 'Stats saved.' : `${escapeHtml(winner)} takes the match. Stats saved.`);
-    game.doneHeading = opts.heading || null; // mirrored to /display via liveSnapshot()
+    // Mirrored to /display via liveSnapshot(). `heading` (not opts.heading) —
+    // the derived solo wording has to reach the TV too, or the second screen
+    // says GAME OVER for the moment the controller calls SESSION COMPLETE.
+    game.doneHeading = heading;
     resultHost.innerHTML=`<div style="text-align:center;padding:14px 4px">
       <div style="font-family:'Bebas Neue';font-size:30px;color:var(--cream);letter-spacing:.04em">${heading}</div>
       <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${subtext}</p>
@@ -15898,6 +15901,20 @@ const GAME_TYPES = {
         const rp = r.players[i];
         Object.assign(p, { marks:rp.marks, points:rp.points, legsWon:rp.legsWon, setsWon:rp.setsWon,
           legDarts:rp.legDarts, setDarts:rp.setDarts, gameDarts:rp.gameDarts });
+      });
+      // The per-visit marks log MPR is the mean of. rebuildCricketState() doesn't
+      // return it (nothing else needs it), so it's replayed here from the resumed
+      // turns of the CURRENT leg — without this a resumed game showed "—" for MPR
+      // on the live lane and on the completion panel for the rest of that leg.
+      const inPlay = (config && config.numbers) || CRICKET_STANDARD_NUMBERS;
+      // Resumed turns are keyed by playerIndex, not name — the same field
+      // rebuildCricketState() itself replays them by.
+      const legTurns = (state.turns || []).filter(t => t.legNo === r.legNo && t.setNo === r.setNo);
+      players.forEach((p, pi) => {
+        p.legRoundMarks = legTurns
+          .filter(t => t.playerIndex === pi)
+          .map(t => (t.darts || []).reduce((sum, d) =>
+            sum + (inPlay.includes(d.sector) ? d.mult : 0), 0));
       });
       return {
         overlay: { current: r.current, starter: r.starter, setNo: r.setNo, legNo: r.legNo },

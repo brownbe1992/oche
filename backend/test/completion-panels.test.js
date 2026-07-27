@@ -420,6 +420,58 @@ describe('the per-visit logs the panels read are undone with the visit', () => {
   });
 });
 
+describe('resuming a Cricket game restores the per-visit marks log', () => {
+  // Found by review: GAME_TYPES.cricket.resume rebuilt marks/points/darts but
+  // not legRoundMarks, so after resuming a saved game the live lane's MPR and
+  // the completion panel's MPR hero both read "—" and the round tallies read 0
+  // for the rest of that leg — silently, since nothing else uses the log.
+  const resumeSrc = (() => {
+    const i = src.indexOf("  cricket: {");
+    const j = src.indexOf("\n  baseball: {", i);
+    return src.slice(i, j);
+  })();
+
+  test('the resume path repopulates legRoundMarks', () => {
+    assert.match(resumeSrc, /p\.legRoundMarks\s*=/,
+      'cricket.resume() no longer restores legRoundMarks — a resumed game loses MPR');
+  });
+
+  test('it keys the replay by playerIndex, the field resumed turns actually carry', () => {
+    // rebuildCricketState() replays the same array by t.playerIndex; keying by
+    // name here would match nothing and leave every log empty — the same
+    // silent-empty failure the missing restore caused.
+    assert.match(resumeSrc, /t\.playerIndex === pi/,
+      'the marks replay must match resumed turns by playerIndex, not by name');
+    assert.ok(!/legRoundMarks[\s\S]{0,400}t\.player ===/.test(resumeSrc),
+      'resumed turns carry playerIndex, not player');
+  });
+
+  test('it counts only the in-play numbers, and counts a treble as three marks', () => {
+    // The same arithmetic enterTurnCricket() uses, replayed. Pinned as a pure
+    // reduction so a change to either side shows up as a disagreement.
+    const inPlay = [15, 16, 17, 18, 19, 20, 25];
+    const marksOf = darts => darts.reduce((sum, d) =>
+      sum + (inPlay.includes(d.sector) ? d.mult : 0), 0);
+    assert.equal(marksOf([{ sector: 20, mult: 3 }, { sector: 20, mult: 3 }, { sector: 19, mult: 3 }]), 9);
+    assert.equal(marksOf([{ sector: 20, mult: 3 }, { sector: 18, mult: 1 }, { sector: 18, mult: 1 }]), 5);
+    assert.equal(marksOf([{ sector: 7, mult: 3 }, { sector: 12, mult: 3 }, { sector: 3, mult: 1 }]), 0,
+      'darts on numbers that are not in play score no marks');
+    assert.equal(marksOf([{ sector: 25, mult: 2 }]), 2, 'the bull counts like any other in-play number');
+  });
+});
+
+describe('the solo completion heading reaches the second screen', () => {
+  // Found by review: finishUnit() derives "SESSION COMPLETE" for a solo drill
+  // but mirrored only opts.heading to /display, so the TV said "GAME OVER" for
+  // the same moment the controller called it a session.
+  test('doneHeading carries the DERIVED heading, not just an explicit one', () => {
+    assert.match(src, /game\.doneHeading = heading;/,
+      'doneHeading must mirror the derived heading or the two screens disagree');
+    assert.ok(!/game\.doneHeading = opts\.heading \|\| null;/.test(src),
+      'the old opts-only mirror leaves solo drills saying GAME OVER on the TV');
+  });
+});
+
 describe('every real game type either declares a panel or says why not', () => {
   // The registry is the whole point of this design: a new game type that quietly
   // shows no completion screen — the exact state Cricket shipped in — is a

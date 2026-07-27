@@ -187,9 +187,23 @@ function turnsForPlayer(turns, name){
 // `recent` is the tail of the visit list in THROWN order (oldest first), which
 // is how a chalked column reads; the panel's own lists sort descending because
 // they are rankings, and these are a sequence. Different rules on purpose.
+// pracAggregate() and pracFirst9Average() take `darts` as a COUNT, which is what
+// X01's own turn record carries. Checkout Ladder and Dead Man Walking push the
+// dart OBJECTS instead (`darts: game.darts.slice()`), and summing those produced
+// a "0[object Object]…" string in the broadcast payload and a NaN first-9. The
+// shapes are normalised here rather than changed at either source, because both
+// records have other readers and this is the only place that needs a count.
+function normaliseTurnDarts(turns){
+  return (turns || []).map(t => Array.isArray(t.darts)
+    ? Object.assign({}, t, { darts: t.darts.length })
+    : t);
+}
+
 function liveLaneStats(turns, name, recentCount){
-  const mine = turnsForPlayer(turns, name);
+  const mine = normaliseTurnDarts(turnsForPlayer(turns, name));
   const agg = pracAggregate(mine);
+  // slice(-0) returns the WHOLE array, not none of it — so an explicit 0 has to
+  // short-circuit rather than fall through to the slice.
   const n = recentCount == null ? 4 : recentCount;
   return {
     visits: agg.visits,
@@ -201,7 +215,8 @@ function liveLaneStats(turns, name, recentCount){
     treblelessPct: agg.treblelessPct,
     checkouts: agg.checkouts,
     first9: pracFirst9Average(mine),
-    recent: mine.slice(-n).map(t => ({ scored: t.scored, bust: !!t.bust, checkout: !!t.checkout })),
+    recent: n <= 0 ? []
+      : mine.slice(-n).map(t => ({ scored: t.scored, bust: !!t.bust, checkout: !!t.checkout })),
   };
 }
 
@@ -2454,7 +2469,7 @@ function aroundTheHornProgress(visitLogs){
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dartValue, dartLabel, makeDartCore,
-    pracAggregate, pracFirst9Average, turnsForPlayer, liveLaneStats,
+    pracAggregate, pracFirst9Average, turnsForPlayer, liveLaneStats, normaliseTurnDarts,
     BOARD_SCHEMES, BOARD_SCHEME_IDS, BOARD_SECTOR20_SCHEME_DEFAULT,
     normaliseSchemeId, hexToRgb, relativeLuminance, contrastRatio, boardLabelColor,
     resolveBoardColors, BOARD_LABEL_LIGHT, BOARD_LABEL_DARK,
