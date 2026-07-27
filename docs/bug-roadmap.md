@@ -2859,6 +2859,50 @@ assertions).
 | BUG-55 **(LOW)** | Doubles Practice's `sessionHits` had the identical defect, for the identical reason | As above |
 | BUG-56 **(LOW)** | Killer's `game.killerFirstBloodAwarded` was not restored on undo, so undoing the dart that drew first blood left the latch stuck and **whoever actually drew it next could never earn the badge**. Also: `awardOnceBadge()` still fired its overlay and moment card for a badge the same call had just revoked, when the turn was undone while the award POST was in flight | The latch lives on `game`, not on a player, and Killer's snapshot listed only player fields plus the visit counter. Reachable only with 3+ players — with two, an elimination wins the leg and clears the snapshots |
 
+### BUG-57 — the in-app scoreboard showed a Daily Challenge's filler starting score, while /display showed the real metric  **(MED, user-facing / a number that reads as a target and isn't one)**
+
+**Status.** ✅ Fixed (2026-07). Reported by the owner, against Ton Hunter.
+
+**The misbehavior.** A Daily Challenge attempt is plain X01 underneath —
+`game.gameType` stays `'x01'` the whole way — so neither scoreboard has a game
+type to branch on, and each needed its own carve-out. Only `/display` ever got
+one. Three visits into a Ton Hunter attempt the app's own scoreboard read
+**`893`**: the format's deliberately-too-high `1000` filler counting down, which
+looks like a theoretical maximum the player is chasing and is nothing of the
+kind. `/display`, on the same game at the same moment, correctly read
+**`1 ton · 2/6 visits`**. Both scoring inputs were affected — the keypad and the
+dartboard share one renderer, `renderGameX01()` — which is how it presents as
+"both scoring pages". Six of the nine formats use a filler score, so this was
+never Ton Hunter-specific.
+
+**Fix.** Extracted `challengeLiveState(game)` (`frontend/index.html`) as the one
+computation both scoreboards read: `GAME_TYPES.x01.liveModeState()` (which ships
+it to `/display`) and `renderGameX01()`. The hero swap is keyed on the format's
+own `usesFillerScore`, not on a hand-listed set of format names, so the three
+real-score formats (Checkout Sprint / Speed to Zero / The Long Game) keep their
+countdown and their checkout hints, and a future format inherits the right
+behaviour from its registry entry. During any challenge the leg/game average
+line becomes the metric plus `visit N of M` where the format is visit-capped —
+the same substitution `display.html` already made.
+
+**Verification.** New verify-ui check `challenge-scoreboards` (52 assertions):
+it plays a real attempt of **every** format in `CHALLENGE_FORMATS` — read at run
+time, not hardcoded, so a tenth format extends the check for free and one that
+forgets `usesFillerScore` shows up as the filler leaking onto the scoreboard —
+and asserts the in-app hero, the meta line, and agreement with `/api/live` for
+each. Each case first proves its fixture visit actually moved the X01 score, so
+"the hero is not the score" can't pass for the wrong reason. Reverting the hero
+swap fails 6 assertions, one per filler format.
+
+**Still open, found while fixing this and deliberately not changed here.** Ton
+Hunter's `1000` filler is only 80 points clear of the format's own theoretical
+maximum (six 180s = 1080), so a perfect attempt could drive the underlying X01
+score below 170 and start drawing checkout hints — or reach 0 and end the leg
+through the X01 engine rather than through `checkCompletion`. The other
+3-visit formats have far more headroom (max 540 against the same 1000). Not
+reachable by any realistic attempt, but the margin is thinner than the filler's
+"never naturally busts or wins" premise assumes.
+
 ## Standing practice
 
 When a functional bug is found: add it here with a repro and a fix outline before fixing,

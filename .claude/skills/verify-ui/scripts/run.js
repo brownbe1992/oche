@@ -28,6 +28,7 @@ const CHECKS = {
   'profile-a11y': './checks/profile-a11y',
   'route-recall': './checks/route-recall',
   'mode-state-hygiene': './checks/mode-state-hygiene',
+  'challenge-scoreboards': './checks/challenge-scoreboards',
   'live-scoreboard': './checks/live-scoreboard',
   'live-shell': './checks/live-shell',
   'home-settings': './checks/home-settings',

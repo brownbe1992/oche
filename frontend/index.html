@@ -3500,6 +3500,35 @@ const CHALLENGE_FORMAT_DEFS = {
     liveMetric: (game) => aroundTheHornProgress(game.legVisitLogs).dartsThrown,
   },
 };
+// The running state of the challenge attempt in progress, or null when there
+// isn't one. ONE computation, read by both scoreboards: GAME_TYPES.x01's
+// liveModeState() (which ships it to /display) and renderGameX01() (the in-app
+// scoreboard behind both the keypad and the dartboard). They used to disagree —
+// /display showed "1 ton · 2/6 visits" while the app itself showed the raw
+// filler countdown ticking down from 1000, which reads as a target the player is
+// supposed to be chasing and isn't one. A challenge is plain X01 underneath, so
+// there is no game type for either scoreboard to branch on; this is the branch.
+function challengeLiveState(game){
+  if(!activeChallenge || !game || !game.players[0] || activeChallenge.player !== game.players[0].name) return null;
+  const def = CHALLENGE_FORMAT_DEFS[activeChallenge.format];
+  const metric = def.liveMetric(game, game.players[0]);
+  return {
+    format: activeChallenge.format,
+    target: activeChallenge.target,
+    label: challengeShortLabel(activeChallenge.format, activeChallenge.target),
+    metric,
+    metricLabel: challengeMetricLabel(activeChallenge.format, metric),
+    visitsCompleted: (game.legVisitLogs || []).length,
+    visitCap: def.visitCap || null,
+    // The formats whose score is a deliberately-too-high filler so the X01
+    // engine never busts or wins mid-attempt. For those the countdown is noise
+    // and the metric is the hero; for the three real-score formats (Checkout
+    // Sprint / Speed to Zero / The Long Game) the score is the point, so both
+    // scoreboards keep showing it.
+    usesFillerScore: !!def.usesFillerScore,
+    trebleNumbers: def.extraResultData ? def.extraResultData(game) : null,
+  };
+}
 function challengeShortLabel(format, target){ return (CHALLENGE_FORMAT_DEFS[format] || CHALLENGE_FORMAT_DEFS.speed_to_zero).shortLabel(target); }
 function challengeMetricLabel(format, value){ return (CHALLENGE_FORMAT_DEFS[format] || CHALLENGE_FORMAT_DEFS.speed_to_zero).metricLabel(value); }
 // The async-patched portion of the Daily Challenge results screen
@@ -9967,6 +9996,15 @@ function renderGame(){ GAME_TYPES[game.gameType].render(); }
 function renderGameX01(){
   const sb = document.getElementById('scoreboard'); sb.innerHTML='';
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
+  // A Daily Challenge is plain X01 underneath, so without this the scoreboard
+  // behind BOTH scoring inputs (keypad and dartboard — they share this one
+  // renderer) showed the format's filler starting score counting down, e.g.
+  // "893" during a Ton Hunter attempt, which reads as a target to chase and is
+  // not one: the real progress is "1 ton, 2 of 6 visits gone". /display has
+  // shown the metric since the live scoreboard was built; this is the same
+  // computation, so the two can't drift.
+  const cs = challengeLiveState(game);
+  const heroSwap = !!(cs && cs.usesFillerScore);
   game.players.forEach((p,i)=>{
     const row=document.createElement('div');
     row.className='pscore'+(i===game.current?' active':'');
@@ -9984,11 +10022,13 @@ function renderGameX01(){
         ${i===game.current?'<div class="turnflag">▸ throwing</div>':''}
       </div>
       <div class="meta">
-        <div class="avgs">leg <b>${avgStr(p.legPoints,p.legAvgDarts)}</b> &nbsp;·&nbsp; game <b>${avgStr(p.gamePoints,p.gameAvgDarts)}</b></div>
+        <div class="avgs">${cs
+          ? `${escapeHtml(cs.metricLabel)}${cs.visitCap ? ` &nbsp;·&nbsp; visit <b>${Math.min(cs.visitsCompleted+1, cs.visitCap)}</b> of <b>${cs.visitCap}</b>` : ''}`
+          : `leg <b>${avgStr(p.legPoints,p.legAvgDarts)}</b> &nbsp;·&nbsp; game <b>${avgStr(p.gamePoints,p.gameAvgDarts)}</b>`}</div>
         ${showStanding?`<div class="standing">${standing}</div>`:''}
       </div>
       <div class="rem-wrap">
-        <div class="rem">${p.score}</div>
+        <div class="rem">${heroSwap ? cs.metric : p.score}</div>
         ${i===game.current?'<div class="co-inline" id="checkout-inline"></div>':''}
       </div>`;
     sb.appendChild(row);
@@ -16165,24 +16205,21 @@ const GAME_TYPES = {
       // being present, so an ordinary X01 game returning lanes-only is inert
       // there — same as the null this used to return.
       const base = liveLaneState(game);
-      if(!activeChallenge || !game.players[0] || activeChallenge.player !== game.players[0].name) return base;
-      const p = game.players[0];
-      const fmt = activeChallenge.format;
-      const visitLogs = game.legVisitLogs || [];
-      const metric = CHALLENGE_FORMAT_DEFS[fmt].liveMetric(game, p);
+      const cs = challengeLiveState(game);
+      if(!cs) return base;
       return Object.assign(base, {
-        challengeFormat: fmt,
-        challengeTarget: activeChallenge.target,
-        challengeLabel: challengeShortLabel(fmt, activeChallenge.target),
-        challengeMetric: metric,
-        challengeMetricLabel: challengeMetricLabel(fmt, metric),
-        challengeVisitsCompleted: visitLogs.length,
-        challengeTrebleNumbers: CHALLENGE_FORMAT_DEFS[fmt].extraResultData ? CHALLENGE_FORMAT_DEFS[fmt].extraResultData(game) : null,
+        challengeFormat: cs.format,
+        challengeTarget: cs.target,
+        challengeLabel: cs.label,
+        challengeMetric: cs.metric,
+        challengeMetricLabel: cs.metricLabel,
+        challengeVisitsCompleted: cs.visitsCompleted,
+        challengeTrebleNumbers: cs.trebleNumbers,
         // Generic (not per-format-name) so display.html — a standalone file with
         // no access to this registry — can decide the hero-swap/pip-row treatment
         // without hardcoding which formats use a filler score or a fixed visit cap.
-        challengeUsesFillerScore: !!CHALLENGE_FORMAT_DEFS[fmt].usesFillerScore,
-        challengeVisitCap: CHALLENGE_FORMAT_DEFS[fmt].visitCap || null,
+        challengeUsesFillerScore: cs.usesFillerScore,
+        challengeVisitCap: cs.visitCap,
       });
     }
   },

@@ -2959,13 +2959,44 @@ registry at runtime) — `startChallengeAttempt()` rejects with `400` if the
 linked game's `game_type` doesn't match the format's expected type, guarding
 against a stale or buggy client starting the wrong kind of game for a format.
 
-### Live Scoreboard
+### Both scoreboards — `challengeLiveState()`
 
 A Daily Challenge attempt is plain X01 underneath (`game.gameType` stays
-`'x01'` the whole attempt), so without extra plumbing `/display` would show
-the raw rigged starting score as if it were a real category — literally
-"1000" for the three filler-start formats. `GAME_TYPES.x01.liveModeState`
-(`frontend/index.html`) is the fix. It returns the lane figures alone for an
+`'x01'` the whole attempt), so neither scoreboard has a game type to branch
+on: without extra plumbing both show the raw rigged starting score as if it
+were a real category — literally "1000" counting down, for the six filler-start
+formats.
+
+**`challengeLiveState(game)` (`frontend/index.html`) is the one computation
+both scoreboards read.** It returns `null` unless a challenge attempt is in
+progress for `game.players[0]`, and otherwise
+`{ format, target, label, metric, metricLabel, visitsCompleted, visitCap,
+usesFillerScore, trebleNumbers }`. Two consumers:
+
+| Consumer | Surface |
+|---|---|
+| `GAME_TYPES.x01.liveModeState()` | ships it to `/display` as the `challenge*` keys below |
+| `renderGameX01()` | the in-app scoreboard, shared by **both** scoring inputs (keypad and dartboard use one renderer) |
+
+The two used to disagree, and only `/display` was right: mid-attempt the app
+itself showed `893` during a Ton Hunter run — a number that reads as a target
+to chase and isn't one — while `/display` showed `1 ton · 2/6 visits`. Both
+now key off the same `usesFillerScore` rule:
+
+- **`usesFillerScore`** (Bullseye Gauntlet, Treble Run, Steady Hand, Doubles
+  Gauntlet, Ton Hunter, Around the Horn): the hero number is `metric`, not
+  `p.score`. The filler exists only so the X01 engine never busts or wins
+  mid-attempt; it is not a score anyone is playing toward.
+- **The three real-score formats** (Checkout Sprint, Speed to Zero, The Long
+  Game): the hero stays `p.score`, which genuinely means something, and
+  checkout hints keep working.
+
+In `renderGameX01()` the leg/game average line is replaced during **any**
+challenge (filler or not) by `metricLabel`, plus `visit N of visitCap` when the
+format is visit-capped — the same substitution `display.html` makes, so the two
+scoreboards read the same during an attempt.
+
+`GAME_TYPES.x01.liveModeState` returns the lane figures alone for an
 ordinary X01 game (`activeChallenge` is only ever non-null during a real
 attempt — it used to return `null`; `display.html` keys the challenge treatment
 off `challengeFormat` being present, so an ordinary game is unaffected), and
