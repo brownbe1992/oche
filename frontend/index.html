@@ -11887,6 +11887,10 @@ function liveSnapshot(message){
     setNo:game.setNo, legNo:game.legNo, currentIndex:game.current,
     players: game.players.map(p=>GAME_TYPES[game.gameType].playerSnapshot(p)),
     darts: game.darts.map(d=>d.label),
+    // What the darts in hand are worth so far. The labels above can't be summed
+    // (a label is 'T20', not 60), and the redesigned live scoreboard's throw
+    // strip states the visit total beside them.
+    visitScored: game.darts.reduce((sum,d)=> sum + (d.value||0), 0),
     checkout,
     status: (game.gameType === 'doubles_practice' || game.gameType === 'around_the_clock') ? (game.roundOver ? 'bust' : 'live') : game.won ? 'won' : (game.busted ? 'bust' : 'live'),
     message: message || '',

@@ -528,7 +528,12 @@ const MAX_BACKUP_UPLOAD_BYTES = 500 * 1024 * 1024;
 // liveModeState member, and display.html's reader), never here.
 const ALLOWED_LIVE_KEYS = new Set([
   'active', 'gameType', 'category', 'legsPerSet', 'setsPerGame', 'setNo', 'legNo',
-  'currentIndex', 'players', 'darts', 'checkout', 'status', 'message', 'achievement',
+  // `visitScored` is what the darts in hand are worth so far — `darts` carries
+  // labels ('T20'), which can't be summed, and the redesigned live scoreboard's
+  // throw strip states the visit total beside them. A top-level key, so unlike
+  // anything nested under modeState it DOES need an entry here (BUG-28's sync
+  // point, and the reason modeState exists to avoid it for per-mode fields).
+  'currentIndex', 'players', 'darts', 'visitScored', 'checkout', 'status', 'message', 'achievement',
   'gameOneEighties', 'gameBigFish', 'gameBusts', 'legSummary', 'practice', 'done',
   'doneHeading', 'lastTurnEvent', 'matchResult', 'legStart', 'checkoutTarget', 'turnSeq', 'ts',
   'modeState',

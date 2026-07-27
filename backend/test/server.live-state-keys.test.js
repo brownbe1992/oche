@@ -97,6 +97,12 @@ test('sanitizeLiveState preserves the opaque modeState container (item 42, BUG-2
       players: [{ name: 'Ann', totalCp: 40 }],
       currentIndex: 0,
       modeState,
+      darts: ['T20', 'T20'],
+      // The redesigned live scoreboard's throw strip states the visit total
+      // beside the darts. It is a TOP-LEVEL key, so unlike everything nested in
+      // modeState it needs its own allowlist entry — the exact BUG-28 shape,
+      // which is why it is pinned here rather than trusted.
+      visitScored: 120,
       // Control: an unknown top-level key that must be stripped.
       totallyBogusKey: 'should not survive',
     };
@@ -111,6 +117,10 @@ test('sanitizeLiveState preserves the opaque modeState container (item 42, BUG-2
     // The whole modeState container round-trips intact, whatever shape it holds —
     // no per-field allowlist entry to forget for a future mode.
     assert.deepEqual(state.modeState, modeState);
+
+    // Top-level keys the scoreboard genuinely needs survive.
+    assert.equal(state.visitScored, 120, 'the throw strip would show 0 for every visit');
+    assert.deepEqual(state.darts, ['T20', 'T20']);
 
     // The allowlist still drops unknown top-level keys.
     assert.equal(state.totallyBogusKey, undefined);

@@ -271,6 +271,138 @@
   .mb-stat .v{font-family:'Bebas Neue';font-size:2.8vmin;color:var(--cream);letter-spacing:.02em;line-height:1}
   .mb-stat .l{font-size:1.15vmin;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:600;margin-top:.2vmin}
 
+
+  /* ================= LOWER THIRD =================================
+     The live-scoreboard redesign (/frontend-design direction A, chosen by the
+     owner 2026-07). Three claims, all of them answers to what the old card
+     grid got wrong on a real 1920x1080 screen:
+
+       1. The THROW is the subject, not the score. A darts broadcast keeps a
+          permanent band for the live visit; .strip is that band. The old board
+          put the remaining score — which changes once every three darts — at
+          17vmin and the checkout, the average and the darts just thrown at
+          1.7vmin along the bottom.
+       2. Players are LANES, not cards. Their stats run across the width, which
+          is the resource a 16:9 screen has most of and which the card grid
+          spent none of: ~45% of every card was a hole.
+       3. The mode decides its own lane. renderers.<type>.lane() replaces
+          card(); a mode whose shape isn't a lane at all declares stage()
+          instead and takes the whole area (Around the Clock and Around the
+          World do — the owner picked direction C, "The Ring", for those two).
+     =============================================================== */
+
+  /* whose match it is — absorbed into the top bar from the old .matchbar, which
+     repeated every name already printed in the cards directly below it */
+  .standing{display:flex;align-items:center;gap:.9vmin;font-size:1.9vmin;color:var(--muted);flex:none}
+  .standing.hidden{display:none!important}
+  .standing b{font-weight:600;color:var(--ink)}
+  .standing .chip{font-family:'Bebas Neue';font-size:3vmin;line-height:1.2;color:var(--gold);
+    border:.18vmin solid rgba(217,180,106,.45);border-radius:.9vmin;padding:0 1.2vmin}
+
+  .lanes{flex:1;display:flex;flex-direction:column;min-height:0}
+  .lane{flex:1;display:flex;align-items:center;gap:3.1vmin;padding:0 4.3vmin;position:relative;
+    border-bottom:1px solid rgba(51,65,58,.55);min-height:0;overflow:hidden}
+  .lane:last-child{border-bottom:0}
+  .lane.on{background:linear-gradient(90deg,rgba(217,180,106,.10) 0%,rgba(217,180,106,0) 62%)}
+  /* A solid gold edge, not only a tint — readable across a room, and the arrow
+     says the same thing in a second channel so it never rests on colour alone. */
+  .lane.on::before{content:"";position:absolute;left:0;top:0;bottom:0;width:.85vmin;background:var(--gold)}
+  /* The session lane on a solo practice board: the same object one step quieter,
+     because it is context rather than the thing happening. */
+  .lane.session{background:rgba(0,0,0,.16)}
+  .lane.out{opacity:.5}
+  .lane-arrow{width:2.4vmin;font-size:2.8vmin;color:var(--gold);flex:none;text-align:center}
+  .lane:not(.on) .lane-arrow{opacity:0}
+  .lane-who{width:34vmin;flex:none;min-width:0}
+  .lane-name{font-weight:600;font-size:4.3vmin;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lane.on .lane-name{color:#fff}
+  .lane.session .lane-name{font-size:3.1vmin;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.02em}
+  .lane-sub{font-size:1.8vmin;color:var(--muted);margin-top:.4vmin;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* The leg's own run of visits, chalked — what a real board would have written
+     down the wall, and the reason anyone glances at a scoreboard mid-leg. */
+  .lane-recent{display:flex;align-items:baseline;gap:1.5vmin;margin-top:1.5vmin}
+  .lane-recent .k{font-size:1.2vmin;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700;flex:none}
+  .lane-recent .v{font-family:'Kalam',cursive;font-size:2.8vmin;color:#cfd6d0;letter-spacing:.04em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lane-recent .v em{font-style:normal;color:var(--gold)}
+  .lane-recent .v s{color:var(--bust);text-decoration:line-through}
+  .lane-stats{display:flex;gap:4vmin;flex:1;align-items:baseline;min-width:0;overflow:hidden}
+  .lst{display:flex;flex-direction:column;gap:.3vmin;flex:none}
+  .lst .v{font-family:'Bebas Neue';font-size:4vmin;line-height:.9;color:var(--cream)}
+  .lst .k{font-size:1.3vmin;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  .lst.dim .v{color:#5d6b64}
+  .lane.session .lst .v{font-size:3.6vmin;color:#cfd6d0}
+  .lane-big{margin-left:auto;font-family:'Bebas Neue';font-size:13.9vmin;line-height:.72;flex:none;
+    display:inline-block;transform:rotate(-.5deg)}
+  .lane:nth-child(even) .lane-big{transform:rotate(.4deg)}
+  .lane.on .lane-big{color:#fff}
+  .lane:not(.on) .lane-big{color:#cfd6d0}
+  .lane.session .lane-big{font-size:10.4vmin}
+  .lane-big .u{font-size:4.3vmin;color:var(--muted);margin-left:.9vmin}
+  .lane-big.small{font-size:8vmin}
+  /* A row of per-round cells inside a lane — Cricket's seven numbers, Baseball's
+     nine innings, Halve-It's card. One shape, because they are one idea. */
+  .lane-cells{display:flex;gap:1vmin;flex:1;min-width:0;overflow:hidden}
+  .lcell{flex:1;min-width:0;max-width:9vmin;text-align:center}
+  .lcell .n{font-family:'Bebas Neue';font-size:2.6vmin;color:var(--muted);line-height:1;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lcell .g{height:4vmin;display:flex;align-items:center;justify-content:center;font-size:2.6vmin;line-height:1;
+    border:1px solid var(--wire);border-radius:.9vmin;margin-top:.4vmin;color:var(--cream);background:rgba(0,0,0,.18)}
+  .lcell.ok .g{background:#122318;border-color:#1f4d2c;color:#7fd79a}
+  .lcell.ok .n{color:#7fd79a}
+  .lcell.no .g{background:#241618;border-color:#4a2328;color:var(--bust)}
+  .lcell.now .g{border-color:var(--gold);box-shadow:inset 0 0 0 .2vmin var(--gold)}
+  body.colorblind .lcell.ok .g{background:#12202e;border-color:#2f8fd9;color:#9cd2ff}
+  body.colorblind .lcell.ok .n{color:#9cd2ff}
+  body.colorblind .lcell.no .g{background:#2a1c10;border-color:#e2711d;color:#ffb570}
+
+  /* ---- the throw strip: the signature ---- */
+  .strip{flex:none;height:24.8vmin;display:flex;align-items:stretch;
+    border-top:.2vmin solid var(--gold);
+    background:linear-gradient(180deg,rgba(217,180,106,.09) 0%,rgba(217,180,106,.02) 100%)}
+  .strip.hidden{display:none!important}
+  .strip-darts{display:flex;align-items:center;gap:1.9vmin;padding:0 3.7vmin 0 4.3vmin;flex:none}
+  .sdart{width:20vmin;height:15.6vmin;border:.2vmin solid var(--wire);border-radius:1.7vmin;
+    display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.26);
+    font-family:'Bebas Neue';font-size:8.1vmin;line-height:.85;color:var(--cream)}
+  .sdart.t{border-color:var(--green);color:#7fe0a0}
+  .sdart.d{border-color:var(--red);color:#ff8a93}
+  body.colorblind .sdart.t{color:#9cd2ff}
+  body.colorblind .sdart.d{color:#ffb570}
+  .sdart.pending{border-style:dashed;border-color:#2b3831;color:#3b4741;
+    font-family:'Inter',system-ui,sans-serif;font-size:1.9vmin;font-weight:600}
+  .sdart.solo{width:27.8vmin}
+  .strip-visit{display:flex;flex-direction:column;justify-content:center;padding:0 3.9vmin;flex:none;
+    border-left:1px solid rgba(217,180,106,.28);border-right:1px solid rgba(217,180,106,.28)}
+  .strip-visit.hidden{display:none!important}
+  .strip-visit .k{font-size:1.4vmin;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:.7vmin}
+  .strip-visit .v{font-family:'Bebas Neue';font-size:9.6vmin;line-height:.8;color:var(--cream)}
+  .strip-visit .v small{font-size:3.4vmin;color:var(--muted)}
+  .strip-need{flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 4.3vmin;min-width:0}
+  .strip-need .k{font-size:1.4vmin;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:.9vmin}
+  .strip-need .r{font-family:'Bebas Neue';font-size:8.9vmin;line-height:.85;color:#fff;letter-spacing:.02em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .strip-need .r.sm{font-size:5.6vmin}
+  .strip-need .note{font-size:1.85vmin;color:var(--muted);margin-top:.7vmin;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* Just Chuckin' It has no requirement to state, so its pane carries the run of
+     recent darts instead — the closest thing that mode has to a visit. */
+  .strip-run{display:flex;gap:1.1vmin;flex-wrap:wrap}
+  .strip-run .c{font-family:'Bebas Neue';font-size:4.2vmin;line-height:1;padding:.5vmin 1.6vmin;border-radius:1.1vmin;
+    border:1px solid var(--wire);background:rgba(0,0,0,.24);color:#cfd6d0}
+  .strip-run .c.t{border-color:var(--green);color:#7fe0a0}
+  .strip-run .c.m{color:#5d6b64}
+  body.colorblind .strip-run .c.t{color:#9cd2ff}
+
+  /* Portrait is narrow and tall: the lanes' horizontal stat run has nowhere to
+     go, so it wraps under the name and the strip loses its third pane. */
+  body.orientation-portrait .lane{flex-wrap:wrap;gap:1.6vmin;padding:1.6vmin 3vmin}
+  body.orientation-portrait .lane-who{width:100%}
+  body.orientation-portrait .lane-stats{gap:3vmin;flex-wrap:wrap}
+  body.orientation-portrait .lane-big{font-size:11vmin}
+  body.orientation-portrait .strip{height:auto;flex-wrap:wrap;padding:2vmin 0}
+  body.orientation-portrait .strip-need{padding-top:1.6vmin}
+
   /* leg summary cards (shown between legs) */
   .sum-card{position:relative;background:var(--surface);border:1px solid var(--wire);border-radius:2vmin;
     padding:3vmin 3.2vmin;display:flex;flex-direction:column;gap:2.4vmin;justify-content:center;overflow:hidden}
@@ -306,6 +438,7 @@
   <div class="top">
     <div class="brand">OCHE</div>
     <div class="fmt" id="fmt"></div>
+    <div class="standing hidden" id="standing"></div>
     <div class="game-stats hidden" id="game-stats">
       <span class="gs-item">🎯 <span class="gs-val" id="stat-180s">0</span></span>
       <span class="gs-item">🐟 <span class="gs-val" id="stat-bf">0</span></span>
@@ -314,15 +447,15 @@
     <div class="live"><span class="dot" id="dot"></span><span id="livetext">live</span></div>
   </div>
 
-  <div class="matchbar hidden" id="matchbar"></div>
-
-  <div class="co-strip hidden" id="co-strip">
-    <span class="co-strip-label">Checkout</span>
-    <span class="co-strip-route" id="co-strip-route"></span>
-    <span class="co-strip-who" id="co-strip-who"></span>
-  </div>
-
   <div class="grid" id="grid"></div>
+
+  <div class="strip hidden" id="strip">
+    <div class="strip-darts" id="strip-darts"></div>
+    <div class="strip-visit hidden" id="strip-visit">
+      <span class="k" id="strip-visit-k"></span><span class="v" id="strip-visit-v"></span>
+    </div>
+    <div class="strip-need" id="strip-need"></div>
+  </div>
 
   <div class="idle" id="idle">
     <div class="mk">SCOREBOARD READY</div>
@@ -359,11 +492,14 @@ const stat180s   = document.getElementById('stat-180s');
 const statBF     = document.getElementById('stat-bf');
 const statBusts  = document.getElementById('stat-busts');
 
-const coStrip    = document.getElementById('co-strip');
-const coRoute    = document.getElementById('co-strip-route');
-const coWho      = document.getElementById('co-strip-who');
 
-const matchbar   = document.getElementById('matchbar');
+const standing   = document.getElementById('standing');
+const strip      = document.getElementById('strip');
+const stripDarts = document.getElementById('strip-darts');
+const stripVisit = document.getElementById('strip-visit');
+const stripVisitK= document.getElementById('strip-visit-k');
+const stripVisitV= document.getElementById('strip-visit-v');
+const stripNeed  = document.getElementById('strip-need');
 
 let bannerKey = '';
 let lastAchTs = 0;
@@ -373,8 +509,8 @@ let lastAchTs = 0;
 // lastAchTs so that second push can patch just the count text in place instead
 // of being ignored by the ts-dedup, or restarting the whole reveal animation.
 let lastAchCountText = '';
-let lastCoKey = '';   // track checkout route to flash only on change
-let lastMatchbarKey = ''; // track sets/legs/whose-turn to skip an unchanged rebuild
+let lastStandingKey = '';  // sets/legs/whose-turn — skip an unchanged rebuild
+let lastStripKey = '';     // the throw strip's whole contents, same reason
 let bannerTimer = null;
 let achTimer = null;
 
@@ -699,9 +835,9 @@ const PRESSURE_STREAK_MILESTONE_LADDERS = [
    match bar always show — they're small and are the whole point of a
    "resource for checkouts" screen — only the denser stat rows are gated. */
 const LAYOUTS = {
-  full:    { showTag:true,  showDartCounts:true,  showMeta:true, showAverages:true,  showGameStats:true  },
-  compact: { showTag:false, showDartCounts:false, showMeta:true, showAverages:false, showGameStats:false },
-  minimal: { showTag:false, showDartCounts:false, showMeta:false,showAverages:false, showGameStats:false },
+  full:    { showTag:true,  showDartCounts:true,  showMeta:true, showAverages:true,  showGameStats:true,  showStrip:true,  showRecent:true  },
+  compact: { showTag:false, showDartCounts:false, showMeta:true, showAverages:false, showGameStats:false, showStrip:true,  showRecent:false },
+  minimal: { showTag:false, showDartCounts:false, showMeta:false,showAverages:false, showGameStats:false, showStrip:false, showRecent:false },
 };
 const layoutParam = new URLSearchParams(location.search).get('layout');
 let layout = LAYOUTS[layoutParam] ? layoutParam : 'full';
@@ -1311,6 +1447,73 @@ const renderers = {
         ${throwbox}
       </div>`;
     },
+    /* ---- LOWER THIRD lane (2026-07) ----
+       Replaces the old .pcard, whose remaining score was 17vmin while the
+       average, the checkout and the darts just thrown sat at 1.7vmin along the
+       bottom of a card that was ~45% empty. The score keeps the big slot on the
+       right, but the run of statistics now spans the width beside it, and the
+       leg's own visits are chalked under the name. */
+    lane(p, i, s, L){
+      const active = i === s.currentIndex;
+      const ms = s.modeState || {};
+      const cm = ms.challengeFormat ? ms : null;
+      const lane = (ms.lanes && ms.lanes[i]) || null;
+      // A Daily Challenge format whose real score is a deliberately-too-high
+      // filler shows the challenge metric instead of a meaningless countdown.
+      const big = (cm && cm.challengeUsesFillerScore) ? cm.challengeMetric : num(p.score);
+
+      const stats = [];
+      if(cm){
+        stats.push({ v: cm.challengeMetricLabel, k: 'this attempt' });
+        if(cm.challengeVisitCap) stats.push({ v: `${num(cm.challengeVisitsCompleted)}/${num(cm.challengeVisitCap)}`, k: 'visits' });
+      } else {
+        if(L.showAverages) stats.push({ v: p.legAvg != null ? p.legAvg : '—', k: s.practice ? 'leg average' : 'leg avg' });
+        if(L.showAverages) stats.push({ v: p.gameAvg != null ? p.gameAvg : '—', k: s.practice ? 'session avg' : 'match avg' });
+        if(lane && lane.first9 != null) stats.push({ v: lane.first9.toFixed(1), k: 'first 9' });
+        stats.push({ v: num(p.legDarts), k: 'darts' });
+        if(lane) stats.push({ v: num(lane.bestVisit), k: 'best visit' });
+        if(lane) stats.push({ v: num(lane.busts), k: 'busts', dim: !lane.busts });
+      }
+
+      const dartsLeft = 3 - (Array.isArray(s.darts) ? s.darts.length : 0);
+      const subParts = [];
+      if(!s.practice && num(s.legsPerSet) > 1) subParts.push(`${num(p.legsWon)} leg${num(p.legsWon)===1?'':'s'}`);
+      if(L.showTag) subParts.push(p.out === 'double' ? 'double out' : 'single out');
+      if(p.startScore != null && String(p.startScore) !== String(s.category)) subParts.push(`started ${num(p.startScore)}`);
+      if(active && dartsLeft < 3) subParts.push(`${dartsLeft} dart${dartsLeft===1?'':'s'} in hand`);
+
+      return laneHtml({
+        active, name: p.name, sub: subParts.join(' · '),
+        recent: (L.showRecent && lane) ? laneRecentHtml(lane.recent) : '',
+        recentLabel: 'visits', stats, big, bigSmall: String(big).length > 4,
+      });
+    },
+    /* The session lane a SOLO PRACTICE board shows where an opponent would be.
+       In practice your opponent is your own session — the same dual-scope
+       framing the leg-complete panel already uses. Rendered by the shell rather
+       than by lane(), since it is not a player. */
+    extraLanes(s, L){
+      const ses = (s.modeState || {}).session;
+      if(!ses || !L.showRecent) return '';
+      const p = s.players[0] || {};
+      const legs = num(ses.legs);
+      return laneHtml({
+        session: true, name: 'This session',
+        sub: `${legs} leg${legs===1?'':'s'}`,
+        recent: (ses.checkouts || []).length
+          ? (ses.checkouts).map((c,i)=> i===0 ? `<em>${num(c)}</em>` : String(num(c))).join(' · ')
+          : 'no finishes yet',
+        recentLabel: 'checkouts',
+        stats: [
+          { v: ses.dartsPerLeg == null ? '—' : ses.dartsPerLeg, k: 'darts per leg' },
+          { v: num(ses.bestVisit), k: 'best visit' },
+          { v: num(ses.darts), k: 'darts' },
+          { v: num(ses.busts), k: 'busts', dim: !ses.busts },
+          { v: ses.treblelessPct == null ? '—' : ses.treblelessPct + '%', k: 'trebleless' },
+        ],
+        big: p.gameAvg != null ? p.gameAvg : '—', bigUnit: 'avg',
+      });
+    },
     summary(p){
       return buildSummaryCard(p, [
         { value: p.avg!=null?esc(p.avg):'—', label:'Average' },
@@ -1896,6 +2099,108 @@ function cricketMarkGlyph(n, numberLabel){
   return `<span class="cs-mark cs-mark-3" aria-hidden="true">✕</span>${sr}`;
 }
 
+
+/* ================= LOWER THIRD helpers =================================
+   Shared by every mode's lane(), so a lane states only what is genuinely its
+   own — its headline number, its cells — and inherits the rest.
+   ======================================================================= */
+
+// One lane. `o` is { active, session, out, name, sub, recent, stats, cells,
+// big, bigUnit, bigSmall, lead } — every field optional except name.
+function laneHtml(o){
+  const cls = 'lane' + (o.active ? ' on' : '') + (o.session ? ' session' : '') + (o.out ? ' out' : '');
+  const who = `<div class="lane-who">
+      <div class="lane-name">${esc(o.name)}</div>
+      ${o.sub ? `<div class="lane-sub">${esc(o.sub)}</div>` : ''}
+      ${o.recent ? `<div class="lane-recent"><span class="k">${esc(o.recentLabel || 'this leg')}</span>` +
+        `<span class="v">${o.recent}</span></div>` : ''}
+    </div>`;
+  const middle = o.cells != null ? `<div class="lane-cells">${o.cells}</div>`
+    : `<div class="lane-stats">${(o.stats || []).map(st =>
+        `<div class="lst${st.dim ? ' dim' : ''}"><span class="v">${esc(st.v)}</span>` +
+        `<span class="k">${esc(st.k)}</span></div>`).join('')}</div>`;
+  const big = o.big == null ? '' :
+    `<div class="lane-big${o.bigSmall ? ' small' : ''}">${esc(o.big)}` +
+    `${o.bigUnit ? `<span class="u">${esc(o.bigUnit)}</span>` : ''}</div>`;
+  return `<div class="${cls}"><span class="lane-arrow">▸</span>${o.lead || ''}${who}${middle}${big}</div>`;
+}
+
+// The chalked run of recent visits. A bust is struck through and a checkout is
+// gold — the two things worth picking out of a column of numbers at a glance.
+function laneRecentHtml(recent){
+  if(!Array.isArray(recent) || !recent.length) return '';
+  return recent.map(r => r.bust ? `<s>${num(r.scored)}</s>`
+    : r.checkout ? `<em>${num(r.scored)}</em>` : String(num(r.scored))).join(' · ');
+}
+
+// A row of per-round cells inside a lane. `state` is 'ok' | 'no' | 'now' | null
+// and is always paired with the cell's own glyph, never left to colour alone.
+function laneCellsHtml(cells){
+  return cells.map(c =>
+    `<div class="lcell${c.state ? ' ' + c.state : ''}">` +
+    `<div class="n">${esc(c.label)}</div><div class="g">${esc(c.glyph == null ? '' : c.glyph)}</div></div>`
+  ).join('');
+}
+
+/* The throw strip — the permanent band the whole direction is built around.
+
+   Generic by default: the darts in hand, what they are worth, and (for the
+   modes that have one) the checkout route. A mode overrides any pane by
+   declaring strip(s, L), which returns { darts, visit, need } — see the
+   Chuckin renderer, whose mode has no requirement to state and fills the need
+   pane with its own recent run instead. */
+function renderStrip(renderer, s, L){
+  if(s.legSummary || s.done || !L.showStrip){
+    strip.classList.add('hidden'); lastStripKey = ''; return;
+  }
+  const spec = typeof renderer.strip === 'function' ? renderer.strip(s, L) : defaultStripSpec(s);
+  if(!spec){ strip.classList.add('hidden'); lastStripKey = ''; return; }
+
+  const key = JSON.stringify(spec);
+  if(key !== lastStripKey){
+    lastStripKey = key;
+    const slots = spec.darts || [];
+    stripDarts.innerHTML = slots.map(d => d.pending
+      ? `<span class="sdart pending">${esc(d.label)}</span>`
+      : `<span class="sdart ${esc(d.cls || '')}${spec.solo ? ' solo' : ''}">${esc(d.label)}</span>`).join('');
+    if(spec.visit){
+      stripVisitK.textContent = spec.visit.k;
+      stripVisitV.innerHTML = esc(spec.visit.v) + (spec.visit.unit ? `<small> ${esc(spec.visit.unit)}</small>` : '');
+      stripVisit.classList.remove('hidden');
+    } else {
+      stripVisit.classList.add('hidden');
+    }
+    const need = spec.need;
+    stripNeed.innerHTML = !need ? '' :
+      `<span class="k">${esc(need.k)}</span>` +
+      (need.runHtml
+        ? `<div class="strip-run">${need.runHtml}</div>`
+        : `<span class="r${need.small ? ' sm' : ''}">${esc(need.r)}</span>`) +
+      (need.note ? `<span class="note">${esc(need.note)}</span>` : '');
+  }
+  strip.classList.remove('hidden');
+}
+
+// The X01-shaped default: three dart slots, the visit total, the checkout route.
+function defaultStripSpec(s){
+  const thrower = s.players[s.currentIndex];
+  const labels = Array.isArray(s.darts) ? s.darts : [];
+  const darts = [0,1,2].map(i => labels[i] != null
+    ? { label: labels[i], cls: dartClass(labels[i]) }
+    : { label: `dart ${i+1}`, pending: true });
+  const left = 3 - labels.length;
+  const route = s.checkout ? formatCheckoutRoute(s.checkout) : '';
+  return {
+    darts,
+    visit: { k: 'this visit', v: num(s.visitScored) },
+    need: route ? {
+      k: `${thrower ? thrower.name : ''} needs · ${left} dart${left===1?'':'s'}`,
+      r: route,
+      small: route.length > 14,
+    } : null,
+  };
+}
+
 /* ---- voice announcements ----
    Spoken call-outs using the browser's built-in speechSynthesis (SpeechSynthesisUtterance)
    plus a procedurally-synthesized splash effect (Web Audio API) for Big Fish — zero
@@ -2057,8 +2362,8 @@ function render(s){
     grid.classList.add('hidden'); idle.classList.remove('hidden');
     fmtEl.innerHTML=''; banner.classList.remove('show'); bannerKey='';
     gameStats.classList.add('hidden');
-    coStrip.classList.add('hidden'); lastCoKey='';
-    matchbar.classList.add('hidden');
+    strip.classList.add('hidden'); lastStripKey='';
+    standing.classList.add('hidden'); lastStandingKey='';
     return;
   }
 
@@ -2079,73 +2384,43 @@ function render(s){
     gameStats.classList.add('hidden');
   }
 
-  // checkout strip — show when player is on a finish
-  // s.checkout is already '' when bust/won/no-finish, so no status check needed
   const thrower = s.players[s.currentIndex];
-  const hasCheckout = !!s.checkout && !s.legSummary;
-  if(hasCheckout){
-    // Keyed on the route AND the thrower's name — a route-only key would miss
-    // the case where the turn passes to a different player left on the exact
-    // same checkout (a plausible symmetric H2H scoreline), silently leaving
-    // the old thrower's name displayed against the new thrower's checkout.
-    const route = formatCheckoutRoute(s.checkout);
-    const coKey = route + '|' + (thrower ? thrower.name : '');
-    if(coKey !== lastCoKey){
-      lastCoKey = coKey;
-      coRoute.textContent = route;
-      coWho.textContent   = thrower ? thrower.name + ' at the oche' : '';
-      coStrip.classList.remove('flashpulse'); void coStrip.offsetWidth; coStrip.classList.add('flashpulse');
-    }
-    coStrip.classList.remove('hidden');
-  } else {
-    coStrip.classList.add('hidden');
-    lastCoKey = '';
-  }
 
-  // match bar — sets/legs standings, hidden in practice mode or solo play
-  const showMatchbar = !s.practice && s.players && s.players.length > 1;
-  if(showMatchbar){
-    matchbar.classList.remove('hidden');
+  // Standing, in the top bar. The old .matchbar sat below it as its own strip
+  // and repeated every player's name a second time, directly above the cards
+  // that already printed them — so it says the score of the match and nothing
+  // else now, and whose turn it is has moved onto the lane where it belongs.
+  const showStanding = !s.practice && s.players.length > 1;
+  if(showStanding){
     const showSets = num(s.setsPerGame) > 1;
     const showLegs = showSets || num(s.legsPerSet) > 1;
-    // Most live pushes are dart-level updates that never touch sets/legs/whose-turn —
-    // skip the innerHTML rebuild entirely when none of that changed, same guard
-    // pattern the checkout strip uses via lastCoKey above.
-    const matchbarKey = s.currentIndex+'|'+showSets+'|'+showLegs+'|'+s.players.map(p=>p.setsWon+'.'+p.legsWon).join(',');
-    if(matchbarKey !== lastMatchbarKey){
-      lastMatchbarKey = matchbarKey;
-      matchbar.innerHTML = s.players.map((p,i)=>{
-        const active = i===s.currentIndex;
-        const chips = [
-          showSets ? `<div class="mb-stat"><span class="v">${num(p.setsWon)}</span><span class="l">Sets</span></div>` : '',
-          showLegs ? `<div class="mb-stat"><span class="v">${num(p.legsWon)}${showSets?'':'/'+num(s.legsPerSet)}</span><span class="l">Legs</span></div>` : '',
-        ].join('');
-        return `<div class="mb-row ${active?'active':''}">
-          <span class="mb-turn">${active?'▸':''}</span>
-          <span class="mb-name">${escapeHtml(p.name)}</span>
-          <div class="mb-stats">${chips}</div>
-        </div>`;
-      }).join('');
+    const key = showSets+'|'+showLegs+'|'+s.players.map(p=>p.setsWon+'.'+p.legsWon).join(',');
+    if(key !== lastStandingKey){
+      lastStandingKey = key;
+      const unit = showSets ? 'sets' : 'legs';
+      const val  = p => showSets ? num(p.setsWon) : num(p.legsWon);
+      standing.innerHTML = (showLegs || showSets)
+        ? s.players.map(p=>`<b>${escapeHtml(p.name)}</b> <span class="chip">${val(p)}</span>`).join(' — ')
+          + `<span>${escapeHtml(unit)}</span>`
+        : s.players.map(p=>`<b>${escapeHtml(p.name)}</b>`).join(' v ');
     }
+    standing.classList.remove('hidden');
   } else {
-    matchbar.classList.add('hidden');
-    lastMatchbarKey = '';
+    standing.classList.add('hidden');
+    lastStandingKey = '';
   }
 
   const n = s.players.length;
-  // Portrait is narrow and tall — stacking cards single-column gives each one full
-  // width (readable at a glance) instead of the side-by-side columns that make sense
-  // in landscape's wide-and-short shape but cram score text into narrow cells here.
-  // The cricket/baseball scorecards are always a single table spanning the whole
-  // grid, not per-player columns, regardless of orientation. Derived from
-  // whether the resolved renderer actually declares a scorecard() method,
-  // instead of a hand-maintained list of game-type names kept separately in
-  // sync with the `renderers` table above.
-  const isScorecardLayout = typeof renderer.scorecard === 'function' && !s.legSummary;
-  const cols = isScorecardLayout ? 1 : (isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3));
-  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  const hasStage = typeof renderer.stage === 'function' && !s.legSummary;
+  const hasLane  = typeof renderer.lane  === 'function' && !s.legSummary;
+  // A scorecard table is now only for the modes that have not been converted to
+  // a lane yet — lane()/stage() win where a mode declares one.
+  const isScorecardLayout = !hasStage && !hasLane
+    && typeof renderer.scorecard === 'function' && !s.legSummary;
 
   if(s.legSummary){
+    grid.className = 'grid';
+    grid.style.gridTemplateColumns = `repeat(${isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3)}, 1fr)`;
     // doubles_practice/chuckin/around_the_clock/around_the_world declare no
     // summary() (they never broadcast a legSummary in normal play) — fall
     // back to the X01-shaped default rather than throwing on an undefined
@@ -2153,19 +2428,40 @@ function render(s){
     // own legSummaryX01() already establishes for this exact data.
     const summaryFn = typeof renderer.summary === 'function' ? renderer.summary : renderers.x01.summary;
     grid.innerHTML = s.legSummary.map(p=>summaryFn(p, L)).join('');
+  } else if(hasStage){
+    // The mode takes the whole area rather than a row per player — Around the
+    // Clock and Around the World, whose board-shaped dial the owner chose over
+    // a lane (/frontend-design direction C) because for those two the drill IS
+    // a picture of the board.
+    grid.className = 'stage';
+    grid.style.gridTemplateColumns = '';
+    grid.innerHTML = renderer.stage(s, L);
+  } else if(hasLane){
+    grid.className = 'lanes';
+    grid.style.gridTemplateColumns = '';
+    // extraLanes() is for a lane that is not a player — the session lane a solo
+    // practice board shows where the opponent would be.
+    const extra = typeof renderer.extraLanes === 'function' ? renderer.extraLanes(s, L) : '';
+    grid.innerHTML = s.players.map((p,i)=>renderer.lane(p, i, s, L)).join('') + extra;
   } else if(isScorecardLayout){
+    grid.className = 'grid';
+    grid.style.gridTemplateColumns = '1fr';
     grid.innerHTML = renderer.scorecard(s, L);
   } else {
+    grid.className = 'grid';
+    grid.style.gridTemplateColumns = `repeat(${isPortrait ? 1 : (n<=1 ? 1 : n<=4 ? 2 : 3)}, 1fr)`;
     grid.innerHTML = s.players.map((p,i)=>renderer.card(p, i, s, L)).join('');
   }
-  // Scorecard-layout game types (cricket/baseball/shanghai/halve_it/
-  // pressure_chamber/bobs_27) never render .score elements at all — skip the
+
+  renderStrip(renderer, s, L);
+
+  // Scorecard/lane/stage layouts render no .score elements at all — skip the
   // query/effects pass entirely instead of running it to find nothing every
   // tick. NOT skipped for a legSummary render (any game type can show one
   // transiently between legs): triggerChalkEffects()'s own truncation of
   // lastScoreTexts to the current (zero) element count is what keeps a later
   // return to per-player cards from comparing against stale leg data.
-  if(!isScorecardLayout) triggerChalkEffects();
+  if(!isScorecardLayout && !hasStage && !hasLane) triggerChalkEffects();
 
   // achievement flashes (180, Big Fish, nine-darter)
   if(s.achievement && s.achievement.ts){
