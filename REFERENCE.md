@@ -275,7 +275,9 @@ oche/
   (`JSON.parse`) — is caught and returned as a `400`, never allowed to fall
   through as a generic `500` (`docs/security-audit-roadmap.md` SEC-17); otherwise
   an unauthenticated caller could emit 500s at will and flush the whole 500-row
-  window. `logServerError()` prunes to the most recent 500 rows on
+  window. The cookie half of that guard is pinned directly by
+  `backend/test/auth.cookies.test.js`, which lives with the function rather than
+  with the route because the bug was in `parseCookies()`, not in its caller. `logServerError()` prunes to the most recent 500 rows on
   every insert (a rolling diagnostic tail, not a full audit log), so a
   crash-loop can't grow the table unbounded. `GET /api/errors` (admin-only,
   `?limit=`, capped at 500) feeds Settings → Admin & Danger Zone → **Server
@@ -9917,9 +9919,11 @@ version of this step:
   `test:coverage` script). Including them reported "all files 99.54%", which is
   almost entirely 110 test files scoring 100% on themselves — a headline that
   moves only when tests are added and cannot fall when source goes unmeasured.
-  Excluding them gives 98.84% line / 89.84% branch over real source. Fixed at the
+  Excluding them gives 99.08% line / 89.93% branch over real source. Fixed at the
   source rather than by filtering the printed table, so `npm run test:coverage`
-  says the same thing locally as it does in CI.
+  says the same thing locally as it does in CI. It earned its keep immediately: the
+  first honest run put `auth.js` at 63% line, worst in the repo, which is how the
+  untested cookie helpers were found (`backend/test/auth.cookies.test.js`).
 - **`server.js` does not appear at all**, and that is not an oversight. The server
   tests `spawn()` it as a child process so they exercise the real HTTP surface;
   coverage only instruments code loaded in the test process itself. The summary
