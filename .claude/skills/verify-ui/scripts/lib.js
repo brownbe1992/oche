@@ -132,6 +132,25 @@ function chromium() {
   }
 }
 
+// The ONE place a browser is launched. Every check must come through here rather than
+// calling `chromium().launch()` itself.
+//
+// executablePath ONLY when that browser actually exists. This image ships one at a fixed
+// path (see CHROMIUM above); a GitHub Actions runner does not — there,
+// `npx playwright install chromium` puts it under ~/.cache/ms-playwright and Playwright
+// finds its own. Passing a path that isn't there fails with a confusing "executable
+// doesn't exist" that reads like a suite bug rather than a missing install, so the
+// environment that has one says so and every other environment is left to Playwright's
+// own resolution.
+//
+// This exists as a shared helper because it did not, once. `withPage()` was made
+// portable for CI while live-scoreboard.js and live-shell.js kept their own copies of
+// the launch line — so CI passed 385 assertions and those two checks threw before
+// running any of their 72. Three copies of one decision meant two of them were wrong.
+async function launchBrowser() {
+  return chromium().launch(fs.existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {});
+}
+
 // Runs `fn(page)` against a fresh context at the given viewport.
 //
 // Two non-obvious choices:
@@ -142,14 +161,7 @@ function chromium() {
 //    the markup exists before the inline <script> has finished defining the
 //    functions the checks drive.
 async function withPage(viewport, fn) {
-  // executablePath ONLY when that browser actually exists. This image ships one at
-  // a fixed path (see CHROMIUM above); a GitHub Actions runner does not — there,
-  // `npx playwright install chromium` puts it under ~/.cache/ms-playwright and
-  // Playwright finds its own. Passing a path that isn't there fails with a confusing
-  // "browser not found" that reads like a suite bug rather than a missing install,
-  // so the environment that has one says so and every other environment is left to
-  // Playwright's own resolution.
-  const browser = await chromium().launch(fs.existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {});
+  const browser = await launchBrowser();
   const ctx = await browser.newContext({ viewport });
   const page = await ctx.newPage();
   const pageErrors = [];
@@ -318,7 +330,7 @@ function makeReporter(checkName) {
 module.exports = {
   BASE, PORT, DB_PATH,
   startServer, stopServer, waitForServer, sleep,
-  withPage, chromium,
+  withPage, launchBrowser,
   PORTRAIT, LANDSCAPE, PORTRAIT_SHORT, LANDSCAPE_SHORT,
   startX01, winLeg, uniqueName,
   makeReporter, repoRoot,

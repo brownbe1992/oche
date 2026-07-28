@@ -25,10 +25,11 @@
  */
 const L = require('../lib');
 
-const CHROMIUM = process.env.VERIFY_UI_CHROMIUM || '/opt/pw-browsers/chromium';
-
 async function withBothScreens(fn) {
-  const browser = await L.chromium().launch({ executablePath: CHROMIUM });
+  // L.launchBrowser(), never chromium().launch() directly — it is the one place that
+  // decides where the browser lives, and this check having its own copy is exactly what
+  // broke it in CI while every check using the helper passed.
+  const browser = await L.launchBrowser();
   // The board is built for a TV. Checking it at a laptop viewport would test a
   // shape nobody runs it at.
   const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });

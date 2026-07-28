@@ -15,7 +15,8 @@
 const L = require('../lib');
 
 async function withBothScreens(fn) {
-  const browser = await L.chromium().launch({ executablePath: process.env.VERIFY_UI_CHROMIUM || '/opt/pw-browsers/chromium' });
+  // L.launchBrowser(), never chromium().launch() directly — see the note in lib.js.
+  const browser = await L.launchBrowser();
   const ctx = await browser.newContext({ viewport: L.LANDSCAPE });
   const errors = [];
   try {
