@@ -11,12 +11,11 @@
 // that is the only light surface in a dark app.
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
 
 const S = require('../../frontend/scoring.js');
-const INDEX = path.join(__dirname, '..', '..', 'frontend', 'index.html');
-const src = () => fs.readFileSync(INDEX, 'utf8');
+// Markup + stylesheet, since the assertions below span both — see
+// frontend-source.js for why they are read together.
+const { pageSource: src } = require('./frontend-source.js');
 
 // Relative luminance / WCAG contrast, so the paper palette is checked rather than
 // eyeballed — docs/accessibility-roadmap.md holds this app to 4.5:1 for text.

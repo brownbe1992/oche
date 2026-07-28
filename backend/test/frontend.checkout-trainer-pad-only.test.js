@@ -20,12 +20,11 @@
 // report look like a grading fault, and the structural change that prevents it.
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
 
 const S = require('../../frontend/scoring.js');
-const INDEX = path.join(__dirname, '..', '..', 'frontend', 'index.html');
-const src = () => fs.readFileSync(INDEX, 'utf8');
+// Markup + stylesheet, since the assertions below span both — see
+// frontend-source.js for why they are read together.
+const { pageSource: src } = require('./frontend-source.js');
 
 const dart = (sector, mult) => S.makeDartCore(sector, mult);
 

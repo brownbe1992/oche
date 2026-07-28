@@ -27,11 +27,10 @@
 // verify-ui browser suite.
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
 
-const INDEX = path.join(__dirname, '..', '..', 'frontend', 'index.html');
-const src = () => fs.readFileSync(INDEX, 'utf8');
+// Markup + stylesheet, since the assertions below span both — see
+// frontend-source.js for why they are read together.
+const { pageSource: src } = require('./frontend-source.js');
 
 // The landscape block, isolated. Everything scoped to tablets must live INSIDE
 // this; anything that leaks out of it lands on portrait too.
