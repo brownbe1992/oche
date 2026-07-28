@@ -68,7 +68,14 @@ describe('the GAME_TYPES turn-loop contract', () => {
     }
   });
 
-  for (const name of ['render', 'throwDart', 'undoLastTurn', 'enterTurn', 'resetLegState', 'buildConfig']) {
+  // `restoreSetup` is buildConfig's inverse, for Play Again. It is in this list for
+  // exactly the reason the others are: it was a hand-written six-branch chain inside
+  // playAgain(), and because nothing required it, two modes with real options
+  // (Doubles Practice, Checkout Trainer) had simply never been added — Play Again
+  // silently rebuilt them from whatever `setup` happened to hold. buildConfig has
+  // been enforced since item 70; its opposite direction now is too.
+  for (const name of ['render', 'throwDart', 'undoLastTurn', 'enterTurn', 'resetLegState',
+                      'buildConfig', 'restoreSetup']) {
     test(`every type declares ${name}() — there is no implicit X01 default any more`, () => {
       const missing = [...ENTRIES].filter(([, body]) => !hasMember(body, name)).map(([k]) => k);
       assert.deepEqual(missing, [], `${name} missing on: ${missing.join(', ')}`);

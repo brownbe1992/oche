@@ -12666,6 +12666,17 @@ function resetLegStateNone(){}
 // resetLegStateNone and enterTurnPerDart are: "this mode is configured by
 // nothing" should read as a declaration, not as an absence somebody forgot.
 function buildConfigNone(){ return {}; }
+// The inverse of buildConfig, for Play Again: a finished game's config back into
+// `setup`, so the rematch is the game you just played rather than the defaults.
+//
+// WHY IT IS A REGISTRY MEMBER. buildConfig goes setup -> config and every one of the
+// 16 types declares it; a type that forgets throws on its first frame, so it cannot be
+// forgotten quietly. Coming back the other way used to be a six-branch
+// `if(finished.gameType === …)` chain inside playAgain(), which nothing enforced — a
+// new mode with options that skipped it lost them on Play Again with no error at all,
+// just a rematch quietly using defaults. Same information, one direction guarded and
+// the other not. Now both are members, and both are required.
+function restoreSetupNone(){}
 function resetLegStateBaseball(game){ game.baseballInning = 1; }
 function resetLegStateShanghai(game){ game.shanghaiRound = 1; }
 function resetLegStateHalveIt(game){ game.halveItRound = 1; }
@@ -13518,26 +13529,13 @@ function playAgain(){
   opt.apply();
   setup.legsPerSet = finished.legsPerSet;
   setup.setsPerGame = finished.setsPerGame;
-  const cfg = finished.config || {};
-  if(finished.gameType === 'x01'){
-    setup.start = String(finished.category);
-  } else if(finished.gameType === 'cricket'){
-    setup.cricketPreset = 'custom'; // always the custom path — reproduces the exact 7 numbers either way, classic set included
-    setup.cricketCustomNumbers = (cfg.numbers || CRICKET_STANDARD_NUMBERS).slice();
-    setup.cricketVariant = cfg.variant === 'cutthroat' ? 'cutthroat' : 'standard';
-  } else if(finished.gameType === 'shanghai'){
-    setup.shanghaiRounds = cfg.rounds || 7;
-  } else if(finished.gameType === 'halve_it'){
-    setup.halveItPreset = cfg.targets ? 'custom' : 'classic';
-    setup.halveItCustomTargets = cfg.targets ? cfg.targets.slice() : [];
-  } else if(finished.gameType === 'killer'){
-    setup.killerLives = cfg.lives || KILLER_DEFAULT_LIVES;
-  } else if(finished.gameType === 'dead_man_walking'){
-    // Play Again keeps the difficulty you just played. The 15 TARGETS are
-    // re-drawn server-side from your current weakest checkouts, deliberately —
-    // this mode is about your live weak spots, not a fixed set to memorise.
-    setup.dmwDifficulty = normaliseDeadManWalkingDifficulty(cfg.difficulty) || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY;
-  }
+  // Each type restores its own options — the exact inverse of the buildConfig it
+  // declares a few lines above it in the registry. This used to be a six-branch chain
+  // written out here, which meant the two directions could drift: buildConfig is
+  // required of every type and throws when absent, while a missing branch here cost
+  // nothing and said nothing. Doubles Practice and Checkout Trainer were both already
+  // missing from it.
+  GAME_TYPES[finished.gameType].restoreSetup(finished.config || {}, finished);
   startGame();
 }
 function renderGameShell(){
@@ -14028,6 +14026,10 @@ const GAME_TYPES = {
     // games.config is where every other "what kind of X01 is this" fact already
     // lives. Omitted rather than written as false on ordinary games so no
     // existing row's config changes shape.
+    // Reads the finished game's category, not its config: X01's starting score lives
+    // in games.category (the '501' label), which is what buildConfig's startScore came
+    // from in the first place.
+    restoreSetup: (config, finished) => { setup.start = String(finished.category); },
     buildConfig: (setup, startScore) => (setup.mode === 'ghost'
       ? { startingScore: startScore, ghost: true }
       : { startingScore: startScore }),
@@ -14125,6 +14127,13 @@ const GAME_TYPES = {
     // from startGame(): the "exactly 7 targets" VALIDATION stays there (it has
     // to be able to abort the start), and this is a pure resolve of the same
     // selection.
+    // Always the custom path — it reproduces the exact seven numbers either way, the
+    // classic set included, so there is no branch to get wrong.
+    restoreSetup: (config) => {
+      setup.cricketPreset = 'custom';
+      setup.cricketCustomNumbers = (config.numbers || CRICKET_STANDARD_NUMBERS).slice();
+      setup.cricketVariant = config.variant === 'cutthroat' ? 'cutthroat' : 'standard';
+    },
     buildConfig: (setup) => ({ numbers: resolveCricketNumbers(),
       variant: setup.cricketVariant === 'cutthroat' ? 'cutthroat' : 'standard' }),
     playerSnapshot: playerSnapshotCricket,
@@ -14202,6 +14211,7 @@ const GAME_TYPES = {
     resetLegState: resetLegStateBaseball,
     // Innings fixed at 9 (docs/game-modes-roadmap.md "Baseball") — not a New
     // Game choice, same "one-tap, no further input" precedent as Classic Cricket.
+    restoreSetup: restoreSetupNone,   // innings are fixed at 9; nothing was chosen
     buildConfig: () => ({ innings: 9 }),
     playerSnapshot: playerSnapshotBaseball,
     // Stats pass (game-modes-roadmap.md "Baseball"): statDefs populated, so
@@ -14253,6 +14263,7 @@ const GAME_TYPES = {
     resetLegState: resetLegStateShanghai,
     // Rounds (docs/archive/shanghai-roadmap.md) — default 1-7 (the common pub
     // format), with a 1-20 long-form option chosen on the setup screen.
+    restoreSetup: (config) => { setup.shanghaiRounds = config.rounds || 7; },
     buildConfig: (setup) => ({ rounds: setup.shanghaiRounds || 7 }),
     playerSnapshot: playerSnapshotShanghai,
     statDefs: SHANGHAI_STAT_DEFS,
@@ -14305,6 +14316,10 @@ const GAME_TYPES = {
     // editor. resolveHalveItTargets() returns null for the classic preset, in
     // which case targets is omitted entirely and createGame() falls back to
     // HALVE_IT_DEFAULT_TARGETS server-side.
+    restoreSetup: (config) => {
+      setup.halveItPreset = config.targets ? 'custom' : 'classic';
+      setup.halveItCustomTargets = config.targets ? config.targets.slice() : [];
+    },
     buildConfig: () => { const t = resolveHalveItTargets(); return t ? { targets: t } : {}; },
     playerSnapshot: playerSnapshotHalveIt,
     statDefs: HALVE_IT_STAT_DEFS,
@@ -14363,6 +14378,7 @@ const GAME_TYPES = {
     // matching PRESSURE_ROUNDS. createGame() (backend/db.js) overrides it
     // server-side unconditionally regardless of what's sent, the same way it
     // overrides Killer's number assignment.
+    restoreSetup: restoreSetupNone,   // 15 rounds, fixed; nothing was chosen
     buildConfig: () => ({ rounds: PRESSURE_ROUNDS }),
     playerSnapshot: playerSnapshotPressureChamber,
     statDefs: PRESSURE_CHAMBER_STAT_DEFS,
@@ -14423,6 +14439,12 @@ const GAME_TYPES = {
     evaluateVisit: () => { throw new Error('doubles_practice has no per-visit evaluateVisit — see throwDartDoublesPractice()'); },
     resetForNextLeg: resetPlayerForNextLegDoublesPractice,
     resetLegState: resetLegStateNone,
+    // Was MISSING from playAgain()'s old chain. It survived only because setup still
+    // held the same targets from the wizard a moment earlier — restore it from the
+    // game that was actually played, so it no longer depends on that.
+    restoreSetup: (config) => {
+      if(Array.isArray(config.doubles) && config.doubles.length) setup.doublesTargets = config.doubles.slice();
+    },
     buildConfig: (setup) => ({ doubles: setup.doublesTargets.slice() }),
     playerSnapshot: playerSnapshotDoublesPractice,
     statDefs: DOUBLES_PRACTICE_STAT_DEFS,
@@ -14463,6 +14485,7 @@ const GAME_TYPES = {
     evaluateVisit: () => { throw new Error("chuckin has no per-visit evaluateVisit — see throwDartChuckin()"); },
     resetForNextLeg: resetPlayerForNextLegChuckin,
     resetLegState: resetLegStateNone,
+    restoreSetup: restoreSetupNone,
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotChuckin,
     statDefs: CHUCKIN_STAT_DEFS,
@@ -14540,6 +14563,19 @@ const GAME_TYPES = {
     // toggle state too. durationSec is stored even though only 60 exists today,
     // the same "store it even though it is single-valued for now" precedent
     // tournament_rounds and legs_per_set already set.
+    // Also missing from the old chain, and this is the mode with the most to lose:
+    // sub-mode, difficulty, trick questions, the pinned target and Route Recall's
+    // ceiling are five separate choices. Note the round-trip is deliberately not
+    // exact for one of them — buildConfig REWRITES 'blitz' to 'freeform' when a
+    // target is pinned, so what comes back is the mode actually played, which is the
+    // correct thing for a rematch to reproduce.
+    restoreSetup: (config) => {
+      setup.checkoutTrainerMode = config.mode || 'freeform';
+      setup.checkoutTrainerDifficulty = config.difficulty || 'full';
+      setup.checkoutTrainerTricks = !!config.trickQuestions;
+      setup.checkoutTrainerPin = config.pinnedTarget || null;
+      if(config.routeCeiling) setup.routeRecallCeiling = config.routeCeiling;
+    },
     buildConfig: (setup) => ({
       // A pin forces Freeform for Blitz's sake (grinding one known number against
       // a clock is not a speed test) but NOT for Route Recall: "drill everything I
@@ -14580,6 +14616,7 @@ const GAME_TYPES = {
     evaluateVisit: () => { throw new Error('around_the_clock has no per-visit evaluateVisit — see throwDartAroundTheClock()'); },
     resetForNextLeg: resetPlayerForNextLegAroundTheClock,
     resetLegState: resetLegStateAroundTheClock,
+    restoreSetup: restoreSetupNone,
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotAroundTheClock,
     statDefs: AROUND_THE_CLOCK_STAT_DEFS,
@@ -14650,6 +14687,7 @@ const GAME_TYPES = {
     evaluateVisit: () => { throw new Error('around_the_world has no per-visit evaluateVisit — see throwDartAroundTheWorld()'); },
     resetForNextLeg: resetPlayerForNextLegAroundTheWorld,
     resetLegState: resetLegStateNone,
+    restoreSetup: restoreSetupNone,
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotAroundTheWorld,
     statDefs: AROUND_THE_WORLD_STAT_DEFS,
@@ -14692,6 +14730,7 @@ const GAME_TYPES = {
     evaluateVisit: evaluateVisitBobs27,
     resetForNextLeg: resetPlayerForNextLegBobs27,
     resetLegState: resetLegStateNone,
+    restoreSetup: restoreSetupNone,
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotBobs27,
     statDefs: BOBS_27_STAT_DEFS,
@@ -14736,6 +14775,7 @@ const GAME_TYPES = {
     evaluateVisit,
     resetForNextLeg: resetPlayerForNextLegCheckoutLadder,
     resetLegState: resetLegStateCheckoutLadder,
+    restoreSetup: restoreSetupNone,
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotCheckoutLadder,
     statDefs: CHECKOUT_LADDER_STAT_DEFS,
@@ -14778,6 +14818,7 @@ const GAME_TYPES = {
     evaluateVisit: () => { throw new Error('gauntlet has no per-visit evaluateVisit — see enterTurnGauntlet()'); },
     resetForNextLeg: resetPlayerForNextLegGauntlet,
     resetLegState: resetLegStateNone,
+    restoreSetup: restoreSetupNone,
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotGauntlet,
     completionPanel: gauntletPanelSpec,
@@ -14829,6 +14870,7 @@ const GAME_TYPES = {
     // lives (docs/game-modes-roadmap.md "Killer"): the only setup choice this
     // mode has — player numbers are randomly assigned server-side
     // (createGame()'s killerConfig), never chosen or sent from here.
+    restoreSetup: (config) => { setup.killerLives = config.lives || KILLER_DEFAULT_LIVES; },
     buildConfig: (setup) => ({ lives: setup.killerLives || KILLER_DEFAULT_LIVES }),
     playerSnapshot: playerSnapshotKiller,
     statDefs: KILLER_STAT_DEFS,
@@ -14869,6 +14911,12 @@ const GAME_TYPES = {
     // server-side from a live snapshot of this player's own weakest checkouts
     // and are never sent from here; createGame() validates the difficulty id
     // against its fixed four-value list.
+    // Play Again keeps the difficulty you just played. The 15 TARGETS are re-drawn
+    // server-side from your current weakest checkouts, deliberately — this mode is
+    // about your live weak spots, not a fixed set to memorise.
+    restoreSetup: (config) => {
+      setup.dmwDifficulty = normaliseDeadManWalkingDifficulty(config.difficulty) || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY;
+    },
     buildConfig: (setup) => ({ difficulty: setup.dmwDifficulty || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY }),
     playerSnapshot: playerSnapshotDeadManWalking,
     statDefs: DEAD_MAN_WALKING_STAT_DEFS,

@@ -215,6 +215,23 @@ oche/
   nothing declare `buildConfigNone`. Cricket's implementation re-reads
   `resolveCricketNumbers()`: the "exactly 7 targets" **validation** stays in
   `startGame()`, where it can still abort the start.
+- **`restoreSetup(config, finished)` is `buildConfig`'s inverse** (2026-07) — a
+  finished game's config back into `setup`, so **Play Again** reproduces the game
+  just played rather than the defaults. It is a required member for the same
+  reason its opposite is: it used to be a six-branch
+  `if(finished.gameType === …)` chain inside `playAgain()`, and because nothing
+  enforced it, a mode with options that had never been added to the chain lost
+  them silently — no error, no crash, just a rematch on defaults. **Doubles
+  Practice and Checkout Trainer had both been missed exactly that way**, the
+  first losing its chosen double targets and the second all five of its choices;
+  neither produced any symptom beyond the wrong game starting. The eight types
+  configured by nothing declare `restoreSetupNone`.
+  `backend/test/frontend.play-again-roundtrip.test.js` drives
+  setup → `buildConfig` → `restoreSetup` → setup for every type and requires the
+  original choices back, with each fixture using deliberately non-default values
+  so a member that does nothing cannot pass. One deliberate asymmetry is pinned
+  there: a pinned Blitz is stored as `freeform` by `buildConfig`, so the restore
+  correctly returns the mode that was **played**, not the one selected.
 - **Player Profile/Home page game-type toggle**: each `GAME_TYPES` entry also
   carries 3 UI-facing fields (game-modes-roadmap.md "Toggle mechanism
   generalized") — `label` (option text), `bubbleKeyMap` (patched on right after
