@@ -23,8 +23,12 @@
  *      keyboard at all. Making the board itself keyboard-driven is a feature (roving
  *      focus over 120 segments with a sensible order), not a fix, so what is asserted
  *      here is that the ESCAPE HATCH genuinely works: the Pad toggle is reachable by
- *      keyboard, and Pad mode really is fully operable. If that ever stops being true,
- *      the app has no keyboard scoring path at all and this check fails.
+ *      keyboard, and some input mode really is fully operable. If that ever stops being
+ *      true, the app has no keyboard scoring path at all and this check fails.
+ *
+ *      Note that the assertion names no MODE. Today the pad is the keyboard path and the
+ *      board is not, but that is the current state of a known gap, not a rule — pinning
+ *      it would mean this check fails on the day someone closes the gap.
  *
  * Every assertion drives real `page.keyboard.press()` — `:focus-visible` deliberately
  * does not match a programmatic `.focus()` call, so a check that used `el.focus()`
@@ -86,20 +90,25 @@ module.exports = async function run() {
         return { interactive: inter.length, scoring: scoring.length };
       })()`);
     }
-    rep.ok('keyboard: Pad mode exposes the scoring buttons', modes.pad.scoring >= 20,
-      `${modes.pad.scoring} scoring buttons`);
-    // This assertion pins a LIMITATION, not a fix, so its failure means the opposite of
-    // every other one here: if it fails because the board grew focusable segments, that
-    // is the feature landing (defect 4 above) and the right response is to delete this
-    // assertion and write real board-keyboard coverage — not to "restore" anything. The
-    // message has to say so, because a bare "0 expected, got 20" reads as a regression
-    // and the obvious reaction to a regression is to undo the change that caused it.
-    rep.ok('keyboard: the board is still the pointer-only input, as documented',
-      modes.board.scoring === 0,
-      modes.board.scoring === 0 ? '' :
-        `${modes.board.scoring} focusable scoring controls found in board mode. If the ` +
-        'dartboard has been made keyboard-operable, that is the fix for defect 4 in this ' +
-        "file's header — retire this assertion and assert the new behaviour instead.");
+    // ONE assertion, and it is mode-agnostic on purpose: *somewhere* in the app, a
+    // player can score a dart from a keyboard.
+    //
+    // The first version of this asserted two separate things — that Pad mode exposes the
+    // buttons, and that board mode exposes none. The second of those pins a LIMITATION
+    // rather than a behaviour, which makes it the one assertion in this suite that goes
+    // red when the app gets BETTER: make the dartboard keyboard-operable (defect 4 in the
+    // header, a genuine feature) and it fails with "20 scoring buttons in board mode",
+    // which is indistinguishable from a regression. The instinctive response to a
+    // regression is to undo whatever caused it.
+    //
+    // Softening the failure message was the first attempt and it was the wrong fix: it
+    // left the trap in place and papered a warning over it. Asserting the invariant
+    // instead removes the trap — this passes whether the keyboard path is the pad, the
+    // board, or both, and fails only if the app has no keyboard scoring path at all,
+    // which is the thing actually worth guarding.
+    const bestPath = Math.max(modes.pad.scoring, modes.board.scoring);
+    rep.ok('keyboard: some input mode offers a full keyboard-operable scoring path',
+      bestPath >= 20, `pad=${modes.pad.scoring} board=${modes.board.scoring} scoring controls`);
     const toggle = await page.evaluate(`(() => {
       const p = document.getElementById('imt-pad'), b = document.getElementById('imt-board');
       return { padReachable: !!p && p.offsetParent !== null && p.tabIndex >= 0,

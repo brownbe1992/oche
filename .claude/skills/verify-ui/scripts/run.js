@@ -49,7 +49,7 @@ const CHECKS = {
   'route-recall':          { path: './checks/route-recall',          assertions: 16 },
   'mode-state-hygiene':    { path: './checks/mode-state-hygiene',    assertions: 16 },
   'challenge-scoreboards': { path: './checks/challenge-scoreboards', assertions: 52 },
-  'keyboard':              { path: './checks/keyboard',              assertions: 15 },
+  'keyboard':              { path: './checks/keyboard',              assertions: 14 },
   'live-scoreboard':       { path: './checks/live-scoreboard',       assertions: 11 },
   'live-shell':            { path: './checks/live-shell',            assertions: 66 },
   'home-settings':         { path: './checks/home-settings',         assertions: 15 },

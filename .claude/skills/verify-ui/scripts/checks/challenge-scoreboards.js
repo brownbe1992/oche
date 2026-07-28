@@ -30,6 +30,17 @@ module.exports = async function run() {
   await L.withPage(L.PORTRAIT, async (page, pageErrors) => {
     const results = await page.evaluate(async () => {
       const out = [];
+      // The rotation picks the format from the date, so each case has to pretend it is a
+      // date whose rotation lands on the format under test. Overriding the app's own
+      // localDateStr() drives the REAL path — startGame() resolves the challenge exactly
+      // as it would on that day — which is why this is a patch and not a fixture object.
+      //
+      // Restored in the finally below. It was originally left patched, on the reasoning
+      // that the page closes seconds later and nothing else reads it. True today, and a
+      // trap for whoever adds the next assertion after this loop: it would silently run
+      // on the last format's date rather than the real one, and it would look fine.
+      const realLocalDateStr = window.localDateStr;
+      try {
       for (const want of CHALLENGE_FORMATS) {
         try {
           let d = null;
@@ -69,6 +80,7 @@ module.exports = async function run() {
           await new Promise(r => setTimeout(r, 160));
         } catch (e) { out.push({ want, error: String(e && e.message || e) }); }
       }
+      } finally { window.localDateStr = realLocalDateStr; }
       return out;
     });
 

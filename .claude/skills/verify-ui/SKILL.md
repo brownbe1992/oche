@@ -5,7 +5,7 @@ description: Run Oche's browser-driven UI regression checks against a real runni
 
 # Verifying Oche's UI
 
-`backend/test/` (1625 tests, `cd backend && npm test`) covers the maths: stat
+`backend/test/` (1,709 tests, `cd backend && npm test`) covers the maths: stat
 formulas, achievement triggers, DB queries, replay logic. It never loads a
 browser, so it cannot see whether a screen still *works* — and several real
 regressions have lived precisely in that blind spot:
@@ -40,7 +40,7 @@ series, on purpose (see Rate limiting below).
 
 ## What it covers
 
-462 assertions across eighteen checks.
+461 assertions across eighteen checks.
 
 **Each check's assertion count is recorded in `scripts/run.js`'s `CHECKS` table, and
 running fewer than that fails the suite.** That is the check on the checks: a suite
@@ -69,7 +69,7 @@ commit; the suite tells you which way it disagrees and by how much.
 | `route-recall` | Checkout Trainer's Route Recall sub-mode, played through the real screen. Pins the things its unit tests cannot see: that a hunt HOLDS its target across submissions (if it moved on, the mode would silently be Freeform and every unit test would still pass), that the found-so-far list is rendered at all, that a duplicate does not take the bust styling every other wrong answer uses, and that the 1-2 dart tiers reveal the total while the 3-dart tier shows no denominator — that split being the whole reason the mode has tiers. |
 | `mode-state-hygiene` | Leaving a mode leaves nothing of it behind — per-mode state that survives into the next game shows up as a scoreboard describing a game nobody is playing. |
 | `challenge-scoreboards` | Every Daily Challenge format says the same true thing on both scoreboards (the in-app one and `/display`), which previously disagreed — `/display` showing "1 ton · 2/6 visits" while the app showed a filler countdown from 1000 that reads as a target the player is meant to be chasing. |
-| `keyboard` | The app is operable without a pointer: focus is visible, modals trap focus and restore it on close, and controls reachable by tab activate by keyboard. |
+| `keyboard` | The app is operable without a pointer: focus is visible and light enough to see on the dark board (asserted by relative luminance, not a string match), modals move focus in, trap Tab both ways, close on Escape and restore focus to whatever opened them, and SOME input mode offers a full keyboard scoring path. That last one names no mode on purpose — the pad is the path today and the board is not, but that is a known gap, not a rule, and an assertion pinning it would fail on the day someone closes it. |
 | `live-scoreboard` | The `/display` second screen picks up players, updates on a scored visit, renders an end-of-leg card, and switches renderer for Cricket. The end-of-leg assertions read the **card**, not its heading: a leg is announced in two pushes (the controller's own "X wins the leg" wording, then later pushes with `message:''` that fall through to "X takes the leg"), so any check pinning one heading string is pinning a race — this one did, matching only the transient first state and failing on the settled one. What it asserts instead is the payload the contract actually carries: both players lane'd, the winner marked, and the winner's darts and average — which come straight from the `legSummary` winner row, the field mapping that has silently broken before. |
 | `home-settings` | Home ticker hides with no activity and shows with some; a Settings tile summary tracks a script-driven change. |
 
