@@ -1,8 +1,31 @@
 # Frontend module split — feasibility, and the shape it should take
 
-> **Status: steps 1 and 2 done (2026-07). Step 3 recommended and still open; step 4
-> is a deliberate decision NOT to split — see "Reassessment after the db.js split"
-> below, which revisited both after `backend/db.js` was split the same month.** This document
+> **Status: steps 1, 2 and 3 done (2026-07). Step 4 is a deliberate decision NOT to
+> split — see "Reassessment after the db.js split" below. With step 3 shipped this
+> document has no open work left; it stays in `docs/` only until step 4's decision is
+> reconfirmed or acted on.**
+>
+> **Step 3 shipped** — one file per game type, 164 functions in 14 files (plus Bob's 27
+> first, as the proof), `index.html` 17,529 → 14,112 lines. Every function moved is one
+> its `GAME_TYPES` entry names; the registry entry itself stays in `index.html`, so
+> there is still one place to see every mode at once. Cut per declaration, verbatim,
+> and **verified rather than trusted**: all 164 are byte-identical to their pre-split
+> text and the counts reconcile exactly (554 before → 390 left + 164 moved, nothing
+> lost, nothing declared twice).
+>
+> Two safety nets came out of doing it, both from real mistakes made along the way.
+> `check.js` gained **`orphan-script`**: extracting into a file with no `<script src>`
+> left ten functions dead and *every existing check passed*, because `missing-handler`
+> cannot see functions called from the registry by identifier rather than from an
+> `on*=` attribute. And `backend/test/frontend-source.js` now returns the whole page
+> scope — markup, `app.css`, and every script `index.html` loads, with the list read
+> from the page's own tags. Tests that brace-match per-mode functions did not *fail*
+> when those functions moved; their dynamically generated cases **stopped existing**,
+> and a suite that silently shrinks still prints green. The remaining at-risk tests
+> were found by matching all 187 per-mode function names against every test that reads
+> `index.html`, rather than waiting for each batch to break one.
+>
+> This document
 > exists because the measurement changed the plan: the item was filed as "split
 > `index.html`'s JS into ES modules", and measuring the file says **ES modules are the
 > wrong target**. The owner chose the classic-script split described below.
@@ -164,9 +187,12 @@ the next step to be worth doing.
    banner marks where a topic starts, not where it ends. Three of the six extractions
    found unrelated declarations inside the banner's region. Cut per declaration, and
    assert the boundaries in the script that does the cutting.
-3. **Extract the per-mode game logic**, one file per game type, driven by the
-   `GAME_TYPES` registry that already isolates them behind a common interface.
-   **Still recommended — see the reassessment below.**
+3. ✅ **Done.** **Extract the per-mode game logic**, one file per game type, driven by
+   the `GAME_TYPES` registry that already isolates them behind a common interface.
+   The per-declaration discipline from step 2 held: classification came from the
+   registry's own keys, and the extractor asserted that every requested name resolved
+   to exactly one top-level declaration and that no two spans overlapped, so a shared
+   comment block could not be claimed twice.
 4. **What is left is the core**: `game`/`setup`/`stats` and the turn loop. Leave it as
    one file. It is the part with genuine 356-way coupling, and splitting it is where the
    risk lives with the least to gain.

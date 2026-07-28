@@ -1981,8 +1981,9 @@ oche/
 │   ├── index.html    Markup and the core app (turn loop, game state, screens)
 │   ├── app.css       Every style in the app
 │   ├── scoring.js    Pure scoring maths, shared with the backend's test suite
-│   ├── js/          Six feature areas split out of index.html — daily-challenge,
-│   │                dart-builder, tournaments, moments, leagues, session-recap
+│   ├── js/          Twenty-one files split out of index.html: six feature areas
+│   │                (daily-challenge, dart-builder, tournaments, moments, leagues,
+│   │                session-recap) plus one per game type (cricket.js, killer.js, …)
 │   └── display.html  Read-only live scoreboard for a second screen
 ├── docker-compose.yml
 ├── docker-compose.dev.yml         Dev instance on port 8056

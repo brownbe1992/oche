@@ -86,13 +86,21 @@ oche/
 │   ├── scoring.js    Pure scoring logic (evaluateVisit/evaluateVisitCricket/
 │   │                 evaluateVisitBaseball/checkout math), extracted from
 │   │                 index.html so it's unit-testable
-│   ├── js/           Six leaf feature areas, split out of index.html
+│   ├── js/           Twenty-one files split out of index.html — six leaf feature
+│   │                 areas, plus one per game type
 │   │   ├── daily-challenge.js  format registry, attempt state, every DC surface
 │   │   ├── dart-builder.js     loadouts and the component editor
 │   │   ├── tournaments.js      bracket setup, seeding, match progression
 │   │   ├── moments.js          shareable cards + badge awarding
 │   │   ├── leagues.js          list, setup, standings, fixtures
-│   │   └── session-recap.js    the end-of-night digest
+│   │   ├── session-recap.js    the end-of-night digest
+│   │   └── <game type>.js      cricket, baseball, shanghai, halve-it,
+│   │                           pressure-chamber, doubles-practice, chuckin,
+│   │                           checkout-trainer, around-the-clock,
+│   │                           around-the-world, bobs-27, checkout-ladder,
+│   │                           gauntlet, killer, dead-man-walking — each holding
+│   │                           what its GAME_TYPES entry names. The registry
+│   │                           entry itself stays in index.html
 │   └── display.html  Read-only live scoreboard for a second screen
 ```
 
@@ -119,9 +127,9 @@ oche/
   a console error, and renders every screen unstyled while every behavioural test
   still passes.
 
-  The JavaScript is spread over `index.html`'s inline `<script>` plus eight
-  `<script src>` files (`scoring.js` and the six in `js/`), and **all of them share
-  one global scope**. That is the whole reason they are classic scripts rather than
+  The JavaScript is spread over `index.html`'s inline `<script>` plus twenty-two
+  `<script src>` files (`scoring.js` and the twenty-one in `js/`), and **all of them
+  share one global scope**. That is the whole reason they are classic scripts rather than
   ES modules: an inline `on*=` handler resolves its names against `window` at click
   time, and a module's exports are not on `window` — moving those functions into
   modules would break all ~335 handler attributes at once, silently, with nothing
