@@ -7108,47 +7108,7 @@ async function startGame(){
   // (whatever "Starting score" happened to be hidden at, per setMode('ghost')) —
   // otherwise the two "players" wouldn't actually be racing the same leg.
   const startScore = challengeStart != null ? challengeStart : ghostScript ? Number(ghostScript.category) : setup.start;
-  const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
-  // docs/bug-roadmap.md BUG-22: a practice Baseball "leg" is a complete, standalone
-  // 9-inning game (evaluateVisitBaseball() decides its outcome unconditionally,
-  // unlike X01/Cricket's open-ended countdown legs) — so, like every drill mode
-  // above, it's forced to exactly 1 leg/1 set here. Unlike drillModes, this can't
-  // just be added to that list: H2H Baseball legitimately supports a real Bo3/Bo5
-  // multi-leg match (setup.mode stays 'h2h' either way), so this only forces the
-  // practice case. The h2h-options legs/sets stepper is already hidden for
-  // practice regardless of game type (setMode()), so this doesn't remove any
-  // control the player could see.
-  const isPracticeBaseball = setup.gameType === 'baseball' && setup.mode !== 'h2h';
-  // Same BUG-22 reasoning as isPracticeBaseball above: a practice Shanghai
-  // "leg" is a complete, standalone game (evaluateVisitShanghai() decides its
-  // outcome unconditionally — an instant Shanghai, or the last round's totals),
-  // so it's forced to exactly 1 leg/1 set here too. H2H Shanghai legitimately
-  // supports a real Bo3/Bo5 multi-leg match, so this only forces the practice case.
-  const isPracticeShanghai = setup.gameType === 'shanghai' && setup.mode !== 'h2h';
-  // Same BUG-22 reasoning again: a practice Halve-It "leg" is a complete,
-  // standalone game (evaluateVisitHalveIt() only ever completes once the
-  // final round settles, per docs/archive/halve-it-roadmap.md), forced to
-  // exactly 1 leg/1 set here; H2H Halve-It keeps a real Bo3/Bo5 multi-leg match.
-  const isPracticeHalveIt = setup.gameType === 'halve_it' && setup.mode !== 'h2h';
-  // Dead Man Walking (docs/archive/dead-man-walking-roadmap.md "Session structure"):
-  // NOT added to drillModes above (which forces 1/1) — each of the 15 rounds
-  // is its OWN leg inside ONE game (leg_no increments per round), so the
-  // "match" here is the whole 15-round session and what ends it is reaching
-  // round 15, never the usual legsPerSet/setsPerGame machinery every other
-  // drill mode's forced-1/1 shape leans on. Solo-only, so this is always
-  // exactly 15/1 regardless of whatever the (hidden, for this mode)
-  // legs/sets stepper last held.
-  const isDeadManWalking = gameType === 'dead_man_walking';
-  // Same BUG-22 reasoning again: a practice Pressure Chamber "run" is a
-  // complete, standalone 15-round game (evaluateVisitPressureChamber() only
-  // ever completes once round 15 settles, per docs/archive/pressure-chamber-roadmap.md),
-  // forced to exactly 1 leg/1 set here; H2H Pressure Chamber keeps a real
-  // Bo3/Bo5 multi-leg match (each leg its own fresh 15-round run).
-  const isPracticePressureChamber = setup.gameType === 'pressure_chamber' && setup.mode !== 'h2h';
-  const legsPerSet = isDeadManWalking ? 15
-    : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt || isPracticePressureChamber) ? 1 : setup.legsPerSet;
-  const setsPerGame = isDeadManWalking ? 1
-    : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt || isPracticePressureChamber) ? 1 : setup.setsPerGame;
+  const { legsPerSet, setsPerGame } = resolveMatchUnits(setup, gameType);
   // Registry member (item 70, docs/code-quality-roadmap.md) — the 14-branch
   // ternary this replaces is gone, and every real GAME_TYPES entry (x01
   // included) declares its own buildConfig(setup, startScore). Same reasoning
@@ -12665,6 +12625,45 @@ function resetLegStateNone(){}
 // all (item 70). Named rather than an inline `() => ({})` for the same reason
 // resetLegStateNone and enterTurnPerDart are: "this mode is configured by
 // nothing" should read as a declaration, not as an absence somebody forgot.
+/* How many legs and sets a match is, which is NOT always what the player picked.
+ *
+ * For X01 and Cricket a leg is an open-ended countdown and "best of 5" means what it
+ * says. For a mode whose leg is a COMPLETE, self-contained game — Baseball's 9 innings,
+ * Shanghai's or Halve-It's fixed round sequence, the Pressure Chamber's 15 cards —
+ * "best of 5" would mean playing five whole games and calling it one, which is the
+ * defect docs/bug-roadmap.md BUG-22 records. Those are forced to exactly 1/1 when
+ * played solo, and keep a real Bo3/Bo5 in head-to-head, where a multi-game match is
+ * exactly what people want.
+ *
+ * WHY THIS IS A REGISTRY MEMBER. Each of those modes used to state the rule for itself
+ * inside startGame(), in four near-identical `const isPracticeX = setup.gameType === 'x'
+ * && setup.mode !== 'h2h'` lines whose comments read "Same BUG-22 reasoning as
+ * isPracticeBaseball above", then "Same BUG-22 reasoning again", twice more. Four copies
+ * of one rule, and a fifth mode of that shape needed a fifth copy — with the cost of
+ * forgetting being a silent one: a solo drill quietly structured as a best-of-3, its
+ * results recorded that way, and nothing visibly wrong on screen. The registry now
+ * carries each type's own answer, so a new mode declares it or fails the contract test.
+ *
+ * The two axes really are separate, and this keeps them separate rather than fusing
+ * them as the old code did. `practiceUnit` is a fact about a GAME TYPE. Daily Challenge
+ * and Ghost races are facts about a MODE — both are plain X01 underneath, so the answer
+ * cannot live on x01's entry (an ordinary practice X01 must keep the legs the player
+ * chose), and they are named here instead.
+ *
+ * @param {any} setup
+ * @param {string} gameType  the resolved type, which for a challenge is per-format
+ * @returns {{legsPerSet: number, setsPerGame: number}}
+ */
+const SINGLE_UNIT_MODES = ['challenge', 'ghost'];
+function resolveMatchUnits(setup, gameType){
+  const forced = SINGLE_UNIT_MODES.includes(setup.mode)
+    ? { legsPerSet: 1, setsPerGame: 1 }
+    : (setup.mode !== 'h2h' ? (GAME_TYPES[gameType] || {}).practiceUnit : null);
+  return forced
+    ? { legsPerSet: forced.legsPerSet, setsPerGame: forced.setsPerGame }
+    : { legsPerSet: setup.legsPerSet, setsPerGame: setup.setsPerGame };
+}
+
 function buildConfigNone(){ return {}; }
 // The inverse of buildConfig, for Play Again: a finished game's config back into
 // `setup`, so the rematch is the game you just played rather than the defaults.
@@ -14030,6 +14029,7 @@ const GAME_TYPES = {
     // in games.category (the '501' label), which is what buildConfig's startScore came
     // from in the first place.
     restoreSetup: (config, finished) => { setup.start = String(finished.category); },
+    practiceUnit: null,   // a leg is an open-ended countdown; "best of 5" means it
     buildConfig: (setup, startScore) => (setup.mode === 'ghost'
       ? { startingScore: startScore, ghost: true }
       : { startingScore: startScore }),
@@ -14134,6 +14134,7 @@ const GAME_TYPES = {
       setup.cricketCustomNumbers = (config.numbers || CRICKET_STANDARD_NUMBERS).slice();
       setup.cricketVariant = config.variant === 'cutthroat' ? 'cutthroat' : 'standard';
     },
+    practiceUnit: null,   // same as X01 — a leg runs until someone closes out
     buildConfig: (setup) => ({ numbers: resolveCricketNumbers(),
       variant: setup.cricketVariant === 'cutthroat' ? 'cutthroat' : 'standard' }),
     playerSnapshot: playerSnapshotCricket,
@@ -14212,6 +14213,9 @@ const GAME_TYPES = {
     // Innings fixed at 9 (docs/game-modes-roadmap.md "Baseball") — not a New
     // Game choice, same "one-tap, no further input" precedent as Classic Cricket.
     restoreSetup: restoreSetupNone,   // innings are fixed at 9; nothing was chosen
+    // BUG-22: a Baseball leg is a COMPLETE 9-inning game, so a solo "best of 5" would
+    // be five whole games called one. H2H keeps a real Bo3/Bo5.
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
     buildConfig: () => ({ innings: 9 }),
     playerSnapshot: playerSnapshotBaseball,
     // Stats pass (game-modes-roadmap.md "Baseball"): statDefs populated, so
@@ -14264,6 +14268,7 @@ const GAME_TYPES = {
     // Rounds (docs/archive/shanghai-roadmap.md) — default 1-7 (the common pub
     // format), with a 1-20 long-form option chosen on the setup screen.
     restoreSetup: (config) => { setup.shanghaiRounds = config.rounds || 7; },
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },   // BUG-22, as Baseball
     buildConfig: (setup) => ({ rounds: setup.shanghaiRounds || 7 }),
     playerSnapshot: playerSnapshotShanghai,
     statDefs: SHANGHAI_STAT_DEFS,
@@ -14320,6 +14325,7 @@ const GAME_TYPES = {
       setup.halveItPreset = config.targets ? 'custom' : 'classic';
       setup.halveItCustomTargets = config.targets ? config.targets.slice() : [];
     },
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },   // BUG-22, as Baseball
     buildConfig: () => { const t = resolveHalveItTargets(); return t ? { targets: t } : {}; },
     playerSnapshot: playerSnapshotHalveIt,
     statDefs: HALVE_IT_STAT_DEFS,
@@ -14379,6 +14385,7 @@ const GAME_TYPES = {
     // server-side unconditionally regardless of what's sent, the same way it
     // overrides Killer's number assignment.
     restoreSetup: restoreSetupNone,   // 15 rounds, fixed; nothing was chosen
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },   // BUG-22 — a run is 15 fixed rounds
     buildConfig: () => ({ rounds: PRESSURE_ROUNDS }),
     playerSnapshot: playerSnapshotPressureChamber,
     statDefs: PRESSURE_CHAMBER_STAT_DEFS,
@@ -14445,6 +14452,7 @@ const GAME_TYPES = {
     restoreSetup: (config) => {
       if(Array.isArray(config.doubles) && config.doubles.length) setup.doublesTargets = config.doubles.slice();
     },
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
     buildConfig: (setup) => ({ doubles: setup.doublesTargets.slice() }),
     playerSnapshot: playerSnapshotDoublesPractice,
     statDefs: DOUBLES_PRACTICE_STAT_DEFS,
@@ -14486,6 +14494,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegChuckin,
     resetLegState: resetLegStateNone,
     restoreSetup: restoreSetupNone,
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotChuckin,
     statDefs: CHUCKIN_STAT_DEFS,
@@ -14576,6 +14585,7 @@ const GAME_TYPES = {
       setup.checkoutTrainerPin = config.pinnedTarget || null;
       if(config.routeCeiling) setup.routeRecallCeiling = config.routeCeiling;
     },
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
     buildConfig: (setup) => ({
       // A pin forces Freeform for Blitz's sake (grinding one known number against
       // a clock is not a speed test) but NOT for Route Recall: "drill everything I
@@ -14617,6 +14627,9 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegAroundTheClock,
     resetLegState: resetLegStateAroundTheClock,
     restoreSetup: restoreSetupNone,
+    // NOT forced, unlike the other drills: since the race variant shipped this is a
+    // dual type, and an H2H race is a real multi-leg match like X01's.
+    practiceUnit: null,
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotAroundTheClock,
     statDefs: AROUND_THE_CLOCK_STAT_DEFS,
@@ -14688,6 +14701,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegAroundTheWorld,
     resetLegState: resetLegStateNone,
     restoreSetup: restoreSetupNone,
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotAroundTheWorld,
     statDefs: AROUND_THE_WORLD_STAT_DEFS,
@@ -14731,6 +14745,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegBobs27,
     resetLegState: resetLegStateNone,
     restoreSetup: restoreSetupNone,
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotBobs27,
     statDefs: BOBS_27_STAT_DEFS,
@@ -14776,6 +14791,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegCheckoutLadder,
     resetLegState: resetLegStateCheckoutLadder,
     restoreSetup: restoreSetupNone,
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotCheckoutLadder,
     statDefs: CHECKOUT_LADDER_STAT_DEFS,
@@ -14819,6 +14835,7 @@ const GAME_TYPES = {
     resetForNextLeg: resetPlayerForNextLegGauntlet,
     resetLegState: resetLegStateNone,
     restoreSetup: restoreSetupNone,
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
     buildConfig: buildConfigNone,
     playerSnapshot: playerSnapshotGauntlet,
     completionPanel: gauntletPanelSpec,
@@ -14871,6 +14888,7 @@ const GAME_TYPES = {
     // mode has — player numbers are randomly assigned server-side
     // (createGame()'s killerConfig), never chosen or sent from here.
     restoreSetup: (config) => { setup.killerLives = config.lives || KILLER_DEFAULT_LIVES; },
+    practiceUnit: null,   // h2hOnly — a Killer match is a real multi-leg match
     buildConfig: (setup) => ({ lives: setup.killerLives || KILLER_DEFAULT_LIVES }),
     playerSnapshot: playerSnapshotKiller,
     statDefs: KILLER_STAT_DEFS,
@@ -14917,6 +14935,11 @@ const GAME_TYPES = {
     restoreSetup: (config) => {
       setup.dmwDifficulty = normaliseDeadManWalkingDifficulty(config.difficulty) || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY;
     },
+    // The one mode that is not 1/1: each of its 15 rounds is its OWN leg inside ONE
+    // game (leg_no increments per round), so the match IS the 15-round session and what
+    // ends it is reaching round 15, not the legs/sets machinery every other drill leans
+    // on. Solo-only, so this always applies.
+    practiceUnit: { legsPerSet: 15, setsPerGame: 1 },
     buildConfig: (setup) => ({ difficulty: setup.dmwDifficulty || DEAD_MAN_WALKING_DEFAULT_DIFFICULTY }),
     playerSnapshot: playerSnapshotDeadManWalking,
     statDefs: DEAD_MAN_WALKING_STAT_DEFS,

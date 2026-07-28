@@ -1523,6 +1523,16 @@ suite green.
 **Status: ✅ Fixed (2026-07).** Two changes, mirroring BUG-18's exact precedent
 for the same class of bug (a `!game.practice` gate wrongly blocking a match
 completion the scoring engine had already decided):
+> **Mechanism superseded (2026-07), behaviour unchanged.** The `drillModes` list and
+> the four `isPracticeX` flags described below no longer exist: three more modes
+> needed the identical rule after this fix (Shanghai, Halve-It, The Pressure
+> Chamber), each added as another near-identical copy, so it now lives on the
+> registry as `GAME_TYPES.<type>.practiceUnit` — see `REFERENCE.md` §1. The move was
+> verified by keeping this expression verbatim as a reference implementation and
+> proving the registry agrees with it on every reachable case, so what is described
+> below is still exactly what the app does. Left as written because it records what
+> was done at the time and why.
+
 1. `startGame()`'s `drillModes`-derived `legsPerSet`/`setsPerGame` computation now
    also forces `1`/`1` when `setup.gameType === 'baseball' && setup.mode !== 'h2h'`
    (`isPracticeBaseball`) — a practice Baseball leg is a complete, standalone

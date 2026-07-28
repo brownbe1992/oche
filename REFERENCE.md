@@ -215,6 +215,39 @@ oche/
   nothing declare `buildConfigNone`. Cricket's implementation re-reads
   `resolveCricketNumbers()`: the "exactly 7 targets" **validation** stays in
   `startGame()`, where it can still abort the start.
+- **`practiceUnit` decides how many legs and sets a match is** (2026-07), when that
+  is not simply what the player picked. For X01, Cricket, Around the Clock and
+  Killer a leg is open-ended and "best of 5" means it, so they declare `null`. For
+  a mode whose leg is a COMPLETE, self-contained game — Baseball's 9 innings,
+  Shanghai's and Halve-It's fixed round sequences, the Pressure Chamber's 15 cards
+  — a solo "best of 5" would mean playing five whole games and calling the result
+  one match, which is `docs/bug-roadmap.md` BUG-22; those declare
+  `{legsPerSet: 1, setsPerGame: 1}`, applied only when `setup.mode !== 'h2h'` so a
+  head-to-head Bo3/Bo5 still works. **Dead Man Walking is the one exception to the
+  exception** — `{legsPerSet: 15, setsPerGame: 1}`, because each of its rounds *is*
+  a leg inside one session.
+
+  It replaced five separate statements of the rule inside `startGame()`, four of
+  them near-identical `isPracticeX` flags whose comments read "Same BUG-22
+  reasoning as isPracticeBaseball above", then "Same BUG-22 reasoning again",
+  twice more. A sixth mode of that shape needed a sixth copy, and forgetting it is
+  **silent**: a solo drill quietly structured as a best-of-3 and recorded that way,
+  with nothing visibly wrong on screen.
+
+  Daily Challenge and Ghost are deliberately **not** expressed this way. Both are
+  plain X01 underneath, so the answer cannot live on x01's entry — an ordinary
+  practice X01 must keep the legs the player chose — and they stay a short
+  mode-level list (`SINGLE_UNIT_MODES`) in `resolveMatchUnits()`. The two axes are
+  genuinely different and the old code fused them.
+
+  `backend/test/frontend.match-units.test.js` checks the refactor by
+  **equivalence**: the original five-flag expression is kept verbatim as a
+  reference implementation and compared against the registry across every
+  reachable combination of type, mode and chosen legs/sets. Hand-written
+  expectations would only have proved the new code matched what someone believed
+  the old code did. The sweep skips `(mode:'practice', gameType:<a drill>)` because
+  `selectSetupGame()` makes that pair unreachable, and asserts that guard still
+  exists rather than assuming it.
 - **`restoreSetup(config, finished)` is `buildConfig`'s inverse** (2026-07) — a
   finished game's config back into `setup`, so **Play Again** reproduces the game
   just played rather than the defaults. It is a required member for the same
