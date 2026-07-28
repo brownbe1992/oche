@@ -1,6 +1,8 @@
 # Frontend module split — feasibility, and the shape it should take
 
-> **Status: steps 1 and 2 done (2026-07). Steps 3 and 4 remain.** This document
+> **Status: steps 1 and 2 done (2026-07). Step 3 recommended and still open; step 4
+> is a deliberate decision NOT to split — see "Reassessment after the db.js split"
+> below, which revisited both after `backend/db.js` was split the same month.** This document
 > exists because the measurement changed the plan: the item was filed as "split
 > `index.html`'s JS into ES modules", and measuring the file says **ES modules are the
 > wrong target**. The owner chose the classic-script split described below.
@@ -164,9 +166,50 @@ the next step to be worth doing.
    assert the boundaries in the script that does the cutting.
 3. **Extract the per-mode game logic**, one file per game type, driven by the
    `GAME_TYPES` registry that already isolates them behind a common interface.
+   **Still recommended — see the reassessment below.**
 4. **What is left is the core**: `game`/`setup`/`stats` and the turn loop. Leave it as
    one file. It is the part with genuine 356-way coupling, and splitting it is where the
    risk lives with the least to gain.
+
+## Reassessment after the db.js split (2026-07)
+
+`backend/db.js` was split the same month, four leaf modules out of 10,100 lines
+(`tournaments.js`, `leagues.js`, `marathon.js`, `coaching.js`). That is the closest
+comparable exercise this codebase has, and it sharpens the case here in both
+directions. The conclusion is unchanged — **do step 3, do not do step 4** — but the
+reasons are now better evidenced than when they were first written.
+
+**What transfers: measure the boundary, never trust the banner.** The db.js split
+picked its four sections by building a call graph in both directions *with comments
+stripped*, and only cutting sections with zero inbound calls. The naive scan
+disagreed badly — nearly every apparent inbound edge was a section's name appearing
+in a comment. That is the same lesson step 2 here learned the hard way three times
+("a banner marks where a topic starts, not where it ends"), arrived at independently.
+Step 3 should do the same thing: measure each mode's inbound edges from the turn loop
+before cutting, not read the banners.
+
+**What does NOT transfer, and it is the important half.** The db.js modules are real
+Node modules, so the split produced something a file split here structurally cannot:
+an **enforceable dependency contract**. Each leaf is a factory taking exactly what it
+needs, and `check.js`'s new `leaf-missing-dep` rule fails the build when a leaf names
+something it was never given. The equivalent rule cannot be written for
+`frontend/js/` — those are classic scripts sharing one global scope, so there is no
+"missing dependency" to detect. Every name is still in scope for every file, forever.
+
+So the honest framing for step 3 is narrower than it was for db.js: it buys
+navigability ("where does Cricket's scoring live?" gets one answer), reviewable
+diffs, and per-file `node --check`. It buys **no** encapsulation and no enforced
+contract. That was already stated above; the db.js comparison is what makes the size
+of the difference concrete, and it is worth knowing before anyone starts, so the
+result is not mistaken for architecture it does not have.
+
+**Current sizes** (after the CSS moved to `frontend/app.css`): `index.html` is 17,697
+lines, of which ~16,578 are JavaScript — 576 top-level functions, 69 mutable
+top-level `let`s, 284 inline handler attributes. The per-mode turn-commit and
+leg/set-progression blocks step 3 targets are roughly 900-1,400 of those lines. Even
+done perfectly, the core stays around 15,000 lines, which is the point of step 4:
+that part is not a filing problem, and moving it would trade a real risk for a small
+gain.
 
 ## Verification
 
