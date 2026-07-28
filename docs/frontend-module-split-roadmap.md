@@ -1,10 +1,42 @@
 # Frontend module split — feasibility, and the shape it should take
 
-> **Status: prep done (2026-07), not started.** This document exists because the
-> measurement changed the plan. The item was filed as "split `index.html`'s 18,623
-> lines of JS into ES modules"; measuring the file says **ES modules are the wrong
-> target**, and a different split gets most of the benefit at a fraction of the risk.
-> Nothing has been moved yet.
+> **Status: in progress (2026-07). Step 1 done, step 2 partly done.** This document
+> exists because the measurement changed the plan: the item was filed as "split
+> `index.html`'s JS into ES modules", and measuring the file says **ES modules are the
+> wrong target**. The owner chose the classic-script split described below.
+>
+> **Shipped so far** — four leaf areas extracted, ~1,360 lines, `index.html` 21,172 →
+> 19,812:
+>
+> | File | Lines | |
+> |---|---|---|
+> | `frontend/js/tournaments.js` | 453 | bracket setup, seeding, match progression |
+> | `frontend/js/dart-builder.js` | 535 | loadouts and the component editor |
+> | `frontend/js/moments.js` | 287 | shareable cards + badge awarding |
+> | `frontend/js/leagues.js` | 264 | list, setup, standings, fixtures |
+>
+> **What went wrong, and what it cost.** One line — `const LEAGUE_X01_CATEGORIES =
+> X01_CATEGORIES;` in the extracted league code — is a *top-level initialiser*, so it
+> runs the moment its file loads. Split files load before the main script that declares
+> `X01_CATEGORIES`, so it threw `ReferenceError` and **aborted the entire file, taking
+> all 15 league functions with it.** The suite went from 457/457 to failures in all 18
+> checks, every message reading `X01_CATEGORIES is not defined`.
+>
+> Two things worth keeping from that. First, it was caught in seconds and diagnosed
+> from a single distinct error string — the "verify after every step" rule did exactly
+> its job, and this is why steps stay small. Second, the class of bug is now a
+> **checker rule** (`load-order` in `backend/check.js`), so the next extraction cannot
+> repeat it: it flags any top-level initialiser in a split file that reads a name the
+> main script declares. Reading the same name from *inside a function* is fine — by
+> then everything has loaded — and the check only looks at top-level initialisers for
+> that reason.
+>
+> A second, quieter problem the same step caused: `check.js` scanned only `.html` for
+> inline handlers and `getElementById` ids, so moving markup-emitting template literals
+> into `.js` files silently dropped **58 handlers and 23 id lookups** from those checks.
+> Coverage lost with nothing failing to announce it. Both checks now run over the page's
+> whole scope — markup plus every classic script it loads — rather than over one file
+> extension.
 
 ## Why the file is worth splitting
 

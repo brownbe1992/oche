@@ -9692,7 +9692,14 @@ play is spread across more than one day, and that both write guards hold.
 
 ## 36. Static Checks (`backend/check.js`)
 
-`npm run check`, in `backend/`. The project's linter. Also run by the
+`npm run check`, in `backend/`. The project's linter.
+
+**Scope, not file extension.** Every check treats a page as its markup *plus every
+classic script it loads* (`<script src>`, deduped, non-`http`). That is the correct
+model — split-out sections share one global scope with the inline script — and it is
+also load-bearing: when the first sections moved into `frontend/js/`, scanning only the
+`.html` silently dropped 58 inline handlers and 23 `getElementById` lookups from the
+checks, coverage lost with nothing failing to say so. Also run by the
 SessionStart hook (`.claude/hooks/session-start.sh` step 4b), where it warns
 rather than blocks, and asserted by `backend/test/check-script.test.js`, where a
 finding against the committed tree is a **failing test**.
@@ -9714,7 +9721,7 @@ and wherever a judgement call would be needed the check stays silent rather than
 guessing. It does not parse JavaScript; `node --check` (hook step 4) covers
 syntax, and this covers the five things `node --check` cannot see.
 
-### The five checks
+### The checks
 
 | Check | What it catches | Why nothing else does |
 |---|---|---|
@@ -9722,6 +9729,8 @@ syntax, and this covers the five things `node --check` cannot see.
 | `unused-function` | A top-level function nothing references | Counted across all frontend scripts, the backend, the whole test suite, **and the raw HTML** (an inline handler is markup, so it is invisible in the extracted script text) |
 | `missing-handler` | An inline `on*=` handler naming a function that does not exist | These resolve against the global object at **click time**, so a broken one throws nothing at load. Invisible to `node --check`, to the backend suite, and to any test that doesn't happen to click that control |
 | `missing-id` | `getElementById('x')` where `x` appears nowhere else in the file | A missing element returns `null` and usually fails silently inside a render path |
+| `missing-script` | a `<script src>` pointing at a file that isn't there | A whole section of the app silently not loading; the browser reports it only in its console |
+| `load-order` | a top-level initialiser in a split file reading a name the main script declares | It runs when that file loads — before the main script — so it throws `ReferenceError` and **aborts the entire file**, losing every function in it. One such line killed all 15 league functions |
 | `scoring-exports` | A name in `scoring.js`'s CommonJS export list that isn't defined | The file is dual browser/CommonJS: the browser gets every top-level name free via `<script src>`, Node gets only what the hand-maintained literal names — so a drifted name is missing in exactly one environment, the tests |
 
 ### What it deliberately declines to do

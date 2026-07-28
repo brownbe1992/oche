@@ -57,11 +57,49 @@ const note = (s) => { if (!QUIET) console.log(s); };
 const scriptsOf = (html) =>
   [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]).join('\n');
 
+// The <script src="..."> files a page loads, in load order, resolved to repo paths.
+// Split-out sections (docs/frontend-module-split-roadmap.md) are CLASSIC scripts sharing
+// one global scope with the page's inline script, so for every check in this file they
+// are part of the SAME scope — a function moved into frontend/js/ is still the same
+// function to an inline on*= handler. Reading them separately is what would be wrong:
+// the first extraction immediately produced a `missing-handler` report for a perfectly
+// live function, which is how this got written.
+// Deduped by resolved path, which is load-bearing rather than tidiness: the pattern
+// `<script src="...">` also appears inside a COMMENT in index.html's own JavaScript
+// (explaining how scoring.js is loaded), and matching that pulled scoring.js in twice —
+// making every one of its 121 functions look like a duplicate declaration. Distinguishing
+// a real tag from one quoted in a comment needs a parser; deduping does not.
+function loadedScripts(html, dir) {
+  const seen = new Set();
+  for (const m of html.matchAll(/<script[^>]*\bsrc="([^"]+)"[^>]*>/g)) {
+    if (/^https?:/.test(m[1])) continue;
+    seen.add(path.join(ROOT, dir, m[1]));
+  }
+  return [...seen];
+}
+function scopeOf(html, dir) {
+  const files = loadedScripts(html, dir);
+  const missing = files.filter(f => !fs.existsSync(f));
+  const src = files.filter(f => fs.existsSync(f)).map(f => fs.readFileSync(f, 'utf8'));
+  return { js: [scriptsOf(html), ...src].join('\n'), text: [html, ...src].join('\n'), files, missing };
+}
+
 const INDEX_HTML = rd('frontend/index.html');
 const DISPLAY_HTML = rd('frontend/display.html');
 const SCORING = rd('frontend/scoring.js');
-const INDEX_JS = scriptsOf(INDEX_HTML);
-const DISPLAY_JS = scriptsOf(DISPLAY_HTML);
+const INDEX_SCOPE = scopeOf(INDEX_HTML, 'frontend');
+const DISPLAY_SCOPE = scopeOf(DISPLAY_HTML, 'frontend');
+const INDEX_JS = INDEX_SCOPE.js;
+const DISPLAY_JS = DISPLAY_SCOPE.js;
+
+// A <script src> naming a file that isn't there is a whole section of the app silently
+// not loading — the exact failure mode a staged split can introduce, and one the browser
+// reports only in its console.
+for (const [file, scope] of [['frontend/index.html', INDEX_SCOPE], ['frontend/display.html', DISPLAY_SCOPE]]) {
+  for (const m of scope.missing) {
+    report('missing-script', file, `<script src> points at ${path.relative(ROOT, m)}, which does not exist`);
+  }
+}
 
 const testDir = path.join(ROOT, 'backend/test');
 const TESTS = fs.existsSync(testDir)
@@ -69,10 +107,12 @@ const TESTS = fs.existsSync(testDir)
 const BACKEND_FILES = ['backend/db.js', 'backend/server.js', 'backend/auth.js', 'backend/seed-dev-db.js']
   .filter(p => fs.existsSync(path.join(ROOT, p)));
 
+const SPLIT_FILES = INDEX_SCOPE.files.filter(f => fs.existsSync(f) && /[\\/]js[\\/]/.test(f));
 const SOURCES = [
   ['frontend/index.html', INDEX_JS],
   ['frontend/display.html', DISPLAY_JS],
   ['frontend/scoring.js', SCORING],
+  ...SPLIT_FILES.map(f => [path.relative(ROOT, f), fs.readFileSync(f, 'utf8')]),
   ...BACKEND_FILES.map(p => [p, rd(p)]),
 ];
 
@@ -123,7 +163,8 @@ for (const [file, js] of SOURCES) {
 // live functions as dead. Over-counting can only ever hide a finding; the
 // tokenizer could invent them.
 // ---------------------------------------------------------------------------
-const HAYSTACK = [INDEX_HTML, DISPLAY_HTML, SCORING, TESTS, ...BACKEND_FILES.map(rd)].join('\n');
+const HAYSTACK = [INDEX_HTML, DISPLAY_HTML, SCORING, TESTS, ...BACKEND_FILES.map(rd),
+  ...SPLIT_FILES.map(f => fs.readFileSync(f, 'utf8'))].join('\n');
 const refCount = (name) =>
   (HAYSTACK.match(new RegExp('\\b' + name.replace(/\$/g, '\\$') + '\\b', 'g')) || []).length;
 
@@ -145,9 +186,14 @@ const BROWSER_GLOBALS = new Set(['event', 'window', 'document', 'console', 'Math
   'parseInt', 'parseFloat', 'isNaN', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
   'fetch', 'alert', 'confirm', 'prompt', 'encodeURIComponent', 'decodeURIComponent', 'Number']);
 
+// `html` here is the page's markup PLUS every classic script it loads. Splitting a
+// section out moved its markup-emitting template literals into a .js file, and scanning
+// only the .html silently dropped 58 handlers and 23 id lookups from these two checks —
+// coverage lost with no failure to notice it by. The scope is what matters, not the
+// file extension.
 for (const [file, html, js] of [
-  ['frontend/index.html', INDEX_HTML, INDEX_JS],
-  ['frontend/display.html', DISPLAY_HTML, DISPLAY_JS],
+  ['frontend/index.html', INDEX_SCOPE.text, INDEX_JS],
+  ['frontend/display.html', DISPLAY_SCOPE.text, DISPLAY_JS],
 ]) {
   const defined = new Set(declaredFunctions(js).keys());
   // scoring.js loads via <script src> into the same global scope.
@@ -202,7 +248,7 @@ for (const [file, html, js] of [
 // added: three live element ids, which is exactly the kind of noise that gets a
 // checker switched off.
 // ---------------------------------------------------------------------------
-for (const [file, html] of [['frontend/index.html', INDEX_HTML], ['frontend/display.html', DISPLAY_HTML]]) {
+for (const [file, html] of [['frontend/index.html', INDEX_SCOPE.text], ['frontend/display.html', DISPLAY_SCOPE.text]]) {
   const prefixes = [
     ...[...html.matchAll(/\bid="([A-Za-z0-9_-]*?)\$\{/g)].map(m => m[1]),        // id="row-${i}"
     ...[...html.matchAll(/['"]([A-Za-z0-9_-]+-)['"]\s*\+/g)].map(m => m[1]),     // 'db-slot-' + type
@@ -221,6 +267,50 @@ for (const [file, html] of [['frontend/index.html', INDEX_HTML], ['frontend/disp
     }
   }
   note(`  ${file}: ${looked.size} distinct getElementById ids, ${new Set(prefixes).size} constructed-id prefixes`);
+}
+
+// ---------------------------------------------------------------------------
+// 6 — a split file reading, at LOAD time, a name declared in a later script
+//
+// The one hazard the staged split actually hit. Classic scripts share a global scope,
+// but they still RUN in order: a top-level `const A = B` in a split file executes the
+// moment that file loads, and if B is declared in a script that loads later, it throws
+// ReferenceError — which aborts the whole file, taking every function in it with it.
+// One such line (`const LEAGUE_X01_CATEGORIES = X01_CATEGORIES`) silently killed all 15
+// league functions and produced 20 failing checks whose messages all said the same
+// thing. Reading the same name from INSIDE a function is fine, because by then
+// everything has loaded — so this only looks at top-level initialisers.
+//
+// Only bare identifiers and simple member/call expressions are examined; anything more
+// involved is left alone rather than guessed at, per this file's no-false-positives rule.
+// ---------------------------------------------------------------------------
+{
+  const declaredBefore = new Set(declaredFunctions(SCORING).keys());
+  for (const m of SCORING.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm)) declaredBefore.add(m[1]);
+  const inlineNames = new Set(declaredFunctions(scriptsOf(INDEX_HTML)).keys());
+  for (const m of scriptsOf(INDEX_HTML).matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm)) inlineNames.add(m[1]);
+
+  for (const f of SPLIT_FILES) {
+    const rel = path.relative(ROOT, f);
+    const src = fs.readFileSync(f, 'utf8');
+    src.split('\n').forEach((line, i) => {
+      const d = /^(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*(.+)$/.exec(line);
+      if (!d) return;
+      const rhs = d[1].trim();
+      const id = /^([A-Za-z_$][\w$]*)\s*(?:[.;([]|$)/.exec(rhs);
+      if (!id) return;
+      const name = id[1];
+      if (declaredBefore.has(name)) return;              // scoring.js loads first
+      if (!inlineNames.has(name)) return;                // not a main-script name
+      report('load-order', rel,
+        `line ${i + 1}: top-level initialiser reads ${name}, which the MAIN script declares — ` +
+        `this file loads first, so it throws ReferenceError and aborts, losing every function in it`);
+    });
+    // A split file's own earlier declarations are fine for the ones after it.
+    for (const m of src.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm)) declaredBefore.add(m[1]);
+    for (const k of declaredFunctions(src).keys()) declaredBefore.add(k);
+  }
+  note(`  split files: ${SPLIT_FILES.length} checked for load-order hazards`);
 }
 
 // ---------------------------------------------------------------------------
