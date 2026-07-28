@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* =============================================================================
    Oche server.
@@ -433,6 +434,9 @@ function readJson(req, maxBytes = MAX_JSON_BODY_BYTES) {
     // (POST /api/login, /api/setup, /api/players/verify-pin all readJson pre-auth).
     req.on('end', () => {
       if (tooLarge) {
+        // The status ride-along the top-level catch reads to decide 4xx vs 5xx. Not a
+        // property of Error, hence the annotation rather than a plain `new Error`.
+        /** @type {Error & {status?: number}} */
         const err = new Error('Request body too large');
         err.status = 413;
         reject(err);
@@ -481,6 +485,16 @@ function serveStatic(req, res) {
    changes. Any scoreboard screens listening on /api/live/stream receive it
    immediately. State is kept only in memory — it's a live view, not a record. */
 const liveClients = new Set();
+/**
+ * The live scoreboard payload is a BAG, not a fixed shape: the controller decides what
+ * to send and ALLOWED_LIVE_KEYS (below) decides what survives. Typing it as the object
+ * it happens to be initialised with would be a lie — it would say `active` and `ts` are
+ * the only keys, when in practice a live game carries twenty-odd. The allow-list is the
+ * real contract, and it is enforced at runtime where it belongs.
+ * @typedef {Record<string, any>} LiveState
+ */
+
+/** @type {LiveState} */
 let liveState = { active: false, ts: Date.now() };
 function liveBroadcast() {
   const line = `data: ${JSON.stringify(liveState)}\n\n`;
@@ -543,8 +557,13 @@ const ALLOWED_LIVE_KEYS = new Set([
 ]);
 const MAX_LIVE_BYTES = 65536;
 // Returns the sanitized state, or null if it's over the size cap (caller sends 413).
+/**
+ * @param {any} b  the POSTed body, entirely untrusted
+ * @returns {LiveState|null} null when the payload exceeds MAX_LIVE_BYTES
+ */
 function sanitizeLiveState(b) {
   if (!b || typeof b !== 'object' || Array.isArray(b)) return { active: false, ts: Date.now() };
+  /** @type {LiveState} */
   const out = {};
   for (const k of Object.keys(b)) if (ALLOWED_LIVE_KEYS.has(k)) out[k] = b[k];
   if (out.ts == null) out.ts = Date.now();

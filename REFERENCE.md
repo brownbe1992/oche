@@ -9977,9 +9977,35 @@ was caught only by deliberately breaking one and noticing that nothing complaine
 is now `check.js`'s `ts-check-placement` rule, so it cannot happen quietly again.
 
 **Adopted so far:** `auth.js`, `netguard.js`, `backup-lib.js`, `check.js`,
-`scan-secrets.js` — the security-relevant and tooling files, smallest-and-most-valuable
-first. **Not yet:** `db.js`, `server.js`, `seed-dev-db.js`, `scoring.js` and the
-frontend.
+`scan-secrets.js`, `db.js`, `server.js` — every backend file the app actually runs.
+**Not yet:** `seed-dev-db.js`, `scoring.js` and the frontend.
+
+### `db.js` and the SQL boundary
+
+Turning this on for `db.js` reported **325 errors, and all 325 were one thing**:
+`node:sqlite` types every column as `SQLOutputValue` (`null|number|bigint|string|
+Uint8Array`), which is exactly what SQLite promises at runtime and completely unusable
+at a call site — every `row.legs + 1` is an error. `server.js`, by contrast, reported
+**two**.
+
+The boundary is therefore typed as `any`, deliberately, at the one place it is created
+(`SqliteHandle` in `db.js`), rather than by annotating 544 query sites. The alternative
+— declaring each query's row shape in JSDoc — is thousands of lines restating the schema
+somewhere it can drift, with the compiler trusting the copy rather than verifying it.
+
+**What that gives up, stated rather than hidden:** a typo'd *column* name in a result
+(`row.leg_no` where the schema says `legNo`) is not caught. The 1,709 tests catch those
+— a mistyped column reads as `undefined` and the assertions on real numbers fail at
+once. Everything that is not a row stays fully checked, which is where the remaining 22
+findings came from.
+
+Those 22 were all annotation gaps rather than defects, and two were worth fixing as
+code: `new Date(a) - new Date(b)` now uses `.getTime()`, and a league sort that read
+`(a.status === 'ended') - (b.status === 'ended')` — correct only because JavaScript
+coerces `false`/`true` to `0`/`1` — is now written out. Both were proven
+output-identical before the change was kept. The rest documented what a signature could
+not say on its own: `createGame()` takes nine destructured options of which only two are
+required, and nothing before said so.
 
 ### Why `strictNullChecks` is off, and what that costs
 

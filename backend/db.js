@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* =============================================================================
    Database layer for the darts scorer.
@@ -51,6 +52,42 @@ if (backupLib.applyPendingRestoreIfAny()) {
   console.log(`[oche] Applied a pending database restore from ${backupLib.RESTORE_PENDING_PATH}`);
 }
 
+/* THE SQL BOUNDARY, AND WHY IT IS DELIBERATELY UNTYPED.
+ *
+ * `node:sqlite` types every column it returns as `SQLOutputValue` — the union
+ * null|number|bigint|string|Uint8Array — because that is genuinely all SQLite promises
+ * about a column at runtime. Correct, and unusable here: every `row.legs + 1` and every
+ * `String(row.name)` becomes an error. Turning `// @ts-check` on for this file reported
+ * **325 errors, and all 325 were that one union**, not 325 defects.
+ *
+ * There are two honest ways to remove it, and the third — leaving the file unchecked —
+ * is what this replaces:
+ *
+ *   1. Declare each query's row shape in JSDoc. That is thousands of lines restating the
+ *      schema in a second place, which then has to be kept in step with the first. The
+ *      compiler would not be verifying those shapes against the database; it would be
+ *      trusting a hand-written copy of them. Cost is very high, and what it buys is
+ *      mostly the appearance of type safety over SQL.
+ *   2. Say plainly that a row's columns are not statically knowable, and type the
+ *      boundary as `any`. Everything that is NOT a row — every function signature, every
+ *      object literal, every call into scoring.js or auth.js — stays fully checked.
+ *
+ * This is (2). What it gives up is stated rather than hidden: a typo'd COLUMN name in a
+ * result (`row.leg_no` where the schema says `legNo`) is not caught here. Those are
+ * caught by the 1,709 tests instead — a mistyped column reads as `undefined` and the
+ * assertions that check real numbers fail immediately, which is the same tool that has
+ * always covered them.
+ *
+ */
+
+/**
+ * @typedef {{ all: (...params: any[]) => any[], get: (...params: any[]) => any, run: (...params: any[]) => any, iterate: (...params: any[]) => any }} Stmt
+ */
+/**
+ * @typedef {{ prepare: (sql: string) => Stmt, exec: (sql: string) => void, close: () => void }} SqliteHandle
+ */
+
+/** @type {SqliteHandle} */
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
@@ -957,6 +994,18 @@ function _uniquePlayerNames(players) {
   return [...new Set((players || []).map(e => e.name).filter(Boolean))];
 }
 
+/**
+ * Creates a game row and its player rows. The only supported way to start a game —
+ * every caller, including the tournament and marathon paths, routes through here.
+ *
+ * Only `players` and `category` are really required; everything else has a default,
+ * which the signature alone could not tell you. gameType/config default to X01.
+ * @param {{
+ *   category: any, players: any,
+ *   legsPerSet?: any, setsPerGame?: any, practice?: any,
+ *   gameType?: any, config?: any, leagueId?: any, leagueFixtureId?: any
+ * }} opts
+ */
 function createGame({ category, legsPerSet, setsPerGame, players, practice, gameType, config, leagueId, leagueFixtureId }) {
   // gameType/config default to X01 for every caller today (no New Game UI sends
   // anything else yet) — see docs/game-modes-roadmap.md. Accepting them as params
@@ -2477,7 +2526,10 @@ function getChallengeHistory(playerName, todayDate) {
   for (const row of allDates) {
     if (!row.completed) { run = 0; prevDate = null; continue; }
     if (prevDate) {
-      const dayGap = Math.round((new Date(row.challenge_date + 'T00:00:00Z') - new Date(prevDate + 'T00:00:00Z')) / 86400000);
+      // .getTime() rather than subtracting the Date objects directly: JavaScript
+      // coerces them for you, but only the explicit form says the units are ms.
+      const dayGap = Math.round((new Date(row.challenge_date + 'T00:00:00Z').getTime()
+        - new Date(prevDate + 'T00:00:00Z').getTime()) / 86400000);
       run = dayGap === 1 ? run + 1 : 1;
     } else {
       run = 1;
@@ -6296,6 +6348,10 @@ function _mf(mode) {
 // dispatch-only 'marathon' routing key, so adding a game type to the registry
 // automatically registers it here (and in SAVABLE_GAME_TYPES) with no separate edit.
 const KNOWN_GAME_TYPES = Object.keys(GAME_TYPE_REGISTRY).filter(k => !GAME_TYPE_REGISTRY[k].dispatchOnly);
+/**
+ * Builds the SQL scope clause shared by every stat query.
+ * @param {{mode?: string, gameType?: string}} [opts]
+ */
 function _scope({ mode, gameType } = {}) {
   let sql = _mf(mode);
   if (gameType) {
@@ -9263,7 +9319,13 @@ function getPlayerLeagueSummary(playerName) {
       rank: idx >= 0 ? idx + 1 : null, totalPlayers: standings.length,
       played: row.played, won: row.won, lost: row.lost, points: row.points,
     };
-  }).sort((a, b) => (a.status === 'ended') - (b.status === 'ended') || b.leagueId - a.leagueId);
+  // Ended leagues sink to the bottom, then newest first. Written out rather than as
+  // `(a.status==='ended') - (b.status==='ended')`, which works only because JavaScript
+  // coerces false/true to 0/1 — correct, and a genuine puzzle to read.
+  }).sort((a, b) => {
+    const ended = (/** @type {{status: string}} */ r) => r.status === 'ended' ? 1 : 0;
+    return ended(a) - ended(b) || b.leagueId - a.leagueId;
+  });
 }
 
 // Hook: whenever a new game is created, check whether it should be tagged into a
@@ -9347,6 +9409,10 @@ function getDartComponentOptions() {
   };
 }
 
+/**
+ * @param {string} type  one of COMPONENT_TYPES
+ * @param {{name?: any, lengthMm?: any, weightG?: any, material?: any, shape?: any, grip?: any, notes?: any}} [fields]
+ */
 function validateComponentFields(type, { name, lengthMm, weightG, material, shape, grip, notes } = {}) {
   if (!COMPONENT_TYPES.includes(type)) throw httpError(400, `type must be one of ${COMPONENT_TYPES.join(', ')}`);
   name = String(name || '').trim();
@@ -9478,6 +9544,10 @@ function _resolveSlotComponent(playerId, componentId, expectedType) {
   return row.id;
 }
 
+/**
+ * @param {any} playerId
+ * @param {{name?: any, barrelId?: any, shaftId?: any, flightId?: any, tipTexture?: any, dartCount?: any}} [fields]
+ */
 function validateLoadoutFields(playerId, { name, barrelId, shaftId, flightId, tipTexture, dartCount } = {}) {
   name = String(name || '').trim();
   if (!name) throw httpError(400, 'Loadout name is required');
@@ -9799,8 +9869,16 @@ function getMarathonLeaderboard() {
 }
 
 /* ---------- helpers ---------- */
+/**
+ * An Error carrying the HTTP status the route layer should send. The status is a
+ * ride-along, not a property of Error, hence the annotation.
+ * @param {number} status
+ * @param {string} message
+ * @returns {Error & {status: number}}
+ */
 function httpError(status, message) {
-  const e = new Error(message); e.status = status; return e;
+  const e = /** @type {Error & {status: number}} */ (new Error(message));
+  e.status = status; return e;
 }
 
 // Self-heal on boot: older versions of deletePlayer() left a `games` row

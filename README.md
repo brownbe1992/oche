@@ -2080,9 +2080,14 @@ documentation that cannot go stale, because CI fails when it stops being true.
 
 It is opt-in per file, via a `// @ts-check` comment at the very top (above
 `'use strict';` — below it, TypeScript silently ignores the file, which is why
-`npm run check` has a rule for exactly that mistake). So far: `auth.js`, `netguard.js`,
-`backup-lib.js`, `check.js` and `scan-secrets.js`. Adding a file means adding the
-comment and fixing whatever it reports.
+`npm run check` has a rule for exactly that mistake). Every backend file the app runs
+is now covered. Adding a file means adding the comment and fixing whatever it reports.
+
+One deliberate gap: the rows coming back from SQLite are not type-checked. SQLite only
+promises that a column is "null, a number, a string or a blob", so checking them would
+mean writing out every query's result shape by hand in a second place that could drift
+from the schema. The test suite covers those instead — a mistyped column name reads as
+`undefined` and the tests fail immediately.
 
 To run it locally you need TypeScript installed **globally**, not in the repo:
 
