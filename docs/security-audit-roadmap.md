@@ -56,7 +56,25 @@
 > unescaped released state. BUG-1 through BUG-31 are all fixed. The ninth pass's four findings
 > (SEC-27, SEC-28, BUG-30, BUG-31) were opened as a scan and **fixed in the following
 > change, v0.20.1**, each with a committed regression test proven to fail against the
-> pre-fix source. Nothing open on either tracker.
+> pre-fix source.
+>
+> A **tenth-pass audit** (2026-07) asked a third kind of question again — not "what is
+> newest" (Parts 4-10) nor "what does the suite measure least" (Part 11) but **"where does
+> a second path reach the same table without going through the validated one?"**, the shape
+> the game-mode audits earlier in that same session kept turning up. It opened **SEC-29**
+> (`POST /api/players/import` inserts games/turns/darts with none of `createGame()`'s or
+> `recordTurn()`'s validation — an unknown `game_type`, `legs_per_set` of a billion, and a
+> dart on sector 999 with multiplier 47 all stored verbatim, the last of them reaching the
+> heatmap renderer) and **SEC-30** (a finished game stays writable: four write paths refuse
+> one via `_requireLiveGame()`, but `recordTurn()` and `deleteLastTurn()` do not, so a
+> completed match can be left still marked won by a named winner with every one of its turns
+> deleted) — **both open** — see "Part 12". Both were reproduced against a scratch database
+> with the live path's refusal captured in the same run, so each entry states not "this looks
+> unvalidated" but "this exact value is refused here and accepted there". Its functional
+> counterpart is `docs/bug-roadmap.md` **BUG-58**.
+>
+> **Open right now: SEC-29 and SEC-30 (Part 12), plus `docs/bug-roadmap.md` BUG-58.**
+> Everything else on both trackers is fixed.
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -1999,3 +2017,179 @@ committed regression test in the shape of
 `renderHandicapOptions()`'s template into a `vm` context, render with a quote-bearing
 name, and assert the output contains no `onmouseover` attribute — plus the grep check
 from step 2 as its own assertion.
+
+## Part 12 — Tenth-pass audit (2026-07, aimed at the write paths that bypass the validated entry points)
+
+Parts 4–10 were weighted toward whatever shipped most recently; Part 11 was aimed by
+test coverage. This pass asked a third question, suggested by what the *game-mode*
+audits earlier in the same session kept finding: **"where does a second path reach the
+same table without going through the validated one?"** Those audits produced eight
+findings whose shape was identical — savability enforced by `game_type` while two modes
+had none of their own, league eligibility enforced by `_findEligibleLeagues()` while the
+fixture path wrote `games.league_id` directly. The same question, asked of the database
+write paths rather than the game modes, is what found everything below.
+
+The starting point was the codebase's own stated trust boundary: `recordTurn()` is
+described as "the validated-by-construction public write entry ... there is no flag to
+omit," and `createGame()` validates `game_type`, clamps `legs_per_set`/`sets_per_game`
+(BUG-5) and rejects malformed configs. So the useful question was simply: **what else
+writes to `games`, `turns` and `darts`?** Two things do.
+
+Both findings below were **reproduced** against a scratch database rather than inferred
+from reading, with the live write path's refusal captured in the same run as the
+control — so each entry states not "this looks unvalidated" but "this exact value is
+refused here and accepted there."
+
+Re-checked and still safe, so that a future pass doesn't re-tread them: **every write
+route is gated** (a sweep of all 60 `POST`/`PUT`/`DELETE` route handlers found exactly
+three without `requireAdmin`/`requireWrite` — `/api/setup`, `/api/login`, `/api/logout`,
+all three necessarily pre-auth); **`PUT /api/settings`** allowlists its keys and
+range-checks every numeric one, including the four that tune the PIN and admin lockouts;
+**`backupPath()`**'s `/^darts-[0-9TZ.-]+\.db$/` still admits no path separator, so the
+download/delete/restore routes cannot traverse; **`fireHaWebhook()`** connects to the
+pre-resolved IP with `http.request`, which does not follow redirects, so the
+resolve-once egress guard cannot be walked past with a 302; **admin passwords** are
+length-checked on both the create and change paths; and **`display.html`'s escaping
+invariant holds** — of 293 interpolations not wrapped in `esc()`, the ones carrying a
+player name (`spec.need.k`, `me.name`) are escaped at their render site
+(`esc(need.k)`), and `mr.winner` feeds `queueSpeech()`, which is the Speech API and not
+the DOM.
+
+Functional-defect counterpart from this same pass: `docs/bug-roadmap.md` **BUG-58**.
+
+### SEC-29 — `POST /api/players/import` inserts games, turns and darts with none of the validation `createGame()`/`recordTurn()` enforce, so one file can write records the app itself would refuse to create  **(MED, data integrity / stat poisoning)**
+
+**Status: Open.**
+
+**What actually goes wrong, in plain terms.** Oche has one careful front door for
+writing a game and one for writing a turn. `createGame()` refuses a game type it
+doesn't recognise, and forces "first to N legs" to be a whole number no bigger than 99.
+`recordTurn()` refuses a dart that isn't a real board segment — sector 0 (a miss), 1–20,
+or 25 for the bull, with a multiplier of 1, 2 or 3 — and cross-checks that a visit's
+`scored` total actually matches the darts recorded with it.
+
+The import feature has its own back door that skips all of it. It exists for a good
+reason (it re-inserts history from another Oche server, where those rows were already
+validated when they were first played) but it trusts the *file* to have been produced
+by a well-behaved server, and nothing checks. An admin importing a file they were sent —
+or an attacker who reaches the endpoint under the documented `OCHE_REQUIRE_AUTH=false`
+LAN-trust mode — can write rows into the database that the app has no way to produce
+and no way to display correctly.
+
+**Reproduced.** Same values, both paths, one run:
+
+```
+live write paths refuse:  gameType: 'Unknown gameType "totally_made_up"'
+                          dart:     'Invalid dart sector or multiplier'
+import accepts:           gamesImported 1, turnsImported 1, dartsImported 1
+stored games row:         game_type 'totally_made_up', legs_per_set 1000000000, sets_per_game 2.5
+stored darts row:         sector 999, multiplier 47
+```
+
+Everything unvalidated, in one list: `game_type` (no `KNOWN_GAME_TYPES` check),
+`legs_per_set` / `sets_per_game` (no `clampMatchFormat()` — a float and a billion both
+stored verbatim), `category`, `practice`, `player_count`, every turn's `scored` /
+`bust` / `checkout` / `leg_won` (no SEC-22 consistency cross-check), and every dart's
+`sector` / `multiplier` / `zone` / `miss_zone` / `bounced` (no board-geometry check, no
+"no treble bull", no "a miss must have multiplier 1").
+
+**What it costs, measured — and what it does NOT cost.** Worth stating precisely,
+because the obvious guess is wrong. Every stats function was run against the poisoned
+database and **none of them crash**: `computeStats`, `getSummary`, `getSessionRecap`,
+`getPlayerStatBubbles`, `getDartHeatmap`, `getHomeExtra`, `getSavedGames` all returned
+normally, because each is scoped by game type and an unknown one is simply never
+selected. This is **not** a denial of service. What it is, is silent corruption:
+`getDartHeatmap()` returns the bogus dart to the client —
+
+```
+heatmap contains: { sector: 999, multiplier: 47, hits: 1 }
+```
+
+— and `frontend/index.html`'s `buildDartHeatmap()` draws by sector, so a sector with no
+position on a dartboard reaches a renderer that has nowhere to put it. The unknown
+`game_type` row sits permanently in `games`, counted by anything that aggregates without
+a type filter and invisible to everything that filters by one.
+
+**Fix.** Validate at the import boundary, reusing the checks that already exist rather
+than writing second copies of them:
+1. Reject a game whose `game_type` is not in `KNOWN_GAME_TYPES`, the same list
+   `createGame()` checks (name the offending source game id in the message, as the
+   existing malformed-config rejection already does).
+2. Run `legs_per_set` / `sets_per_game` through `clampMatchFormat()`.
+3. Extract `addTurn()`'s per-dart validation block into a shared
+   `validateDart({sector, multiplier, zone, missZone, missDepth, bounced})` and call it
+   for every imported dart. **Extract rather than duplicate** — a second copy is exactly
+   how SEC-25 happened (SEC-22's guard was written for one game type and never re-run
+   against Baseball).
+4. Apply the same scored-vs-darts cross-check `recordTurn()` uses, for each imported
+   turn that carries darts.
+5. Decide explicitly whether a failing row aborts the whole import or is skipped and
+   counted in the returned report. **Aborting is the right default** — a partially
+   imported history is harder to reason about than a rejected file — and the function
+   already throws on malformed `config` JSON, so that is the established precedent.
+
+**Verify.** A `node:test` case asserting each of the five values above is refused by
+`importPlayerExport()`, with the matching `createGame()`/`recordTurn()` refusal asserted
+in the same test so the two paths are pinned as agreeing. Confirm each assertion fails
+when its own guard is reverted.
+
+### SEC-30 — a finished game is still writable: `recordTurn()` and `deleteLastTurn()` never call `_requireLiveGame()`, so completed match history can be silently rewritten  **(MED, data integrity)**
+
+**Status: Open.**
+
+**What actually goes wrong, in plain terms.** When a match ends, the game row is stamped
+`completed_at` and a winner. Four write paths correctly refuse to touch a game in that
+state — completing it again, abandoning it, forfeiting a player out of it, or saving it
+for later all check `_requireLiveGame()` and return 409 "This game has already ended".
+
+Two do not. Turns can still be added to a finished game, and turns can still be deleted
+from one. The result is a match that is still recorded as won, by a named winner, with
+no record of the darts that won it — or with extra darts that were never thrown.
+
+**Reproduced.** A real 2-player 501 leg, checked out for 100 and completed:
+
+```
+guard completeGame again:  refused: This game has already ended
+guard abandonGame:         refused: This game has already ended
+guard forfeitPlayer:       refused: This game has already ended
+guard saveGame:            refused: This game has already ended and cannot be saved
+recordTurn into finished:  ACCEPTED — a 180 added after the match ended
+deleteLastTurn on finished: ACCEPTED
+deleteLastTurn again:      ACCEPTED — the winning checkout is now gone
+
+result: turnsBefore 1, turnsAfter 0, stillMarkedComplete true, stillHasWinner true
+FinA top finishes: []      (the 100 checkout that won the match is gone)
+```
+
+**Who can do this.** Both endpoints are behind `requireWrite()`, so under the default
+`require_admin_auth` this needs an admin session. Under the **documented
+`OCHE_REQUIRE_AUTH=false` LAN-trust mode it needs nothing at all** — any device that can
+reach the server can rewrite any finished match in the household's history, and the
+change is invisible: the game still says who won, the leaderboards simply quietly
+disagree with the scorecard. That asymmetry is the reason to fix it rather than treat it
+as an admin's own business: the four guarded paths are guarded *precisely* because "the
+match is over" is a state the server, not the client, is responsible for enforcing.
+
+**Note on `deleteLastTurn()`'s existing guard.** It already takes an optional `turnId`
+(BUG-13) and returns 409 if that is no longer the newest turn — good optimistic
+concurrency for the two-devices-scoring case, but it is **optional** and it says nothing
+about whether the game is finished. A caller that omits it deletes whatever is newest,
+in any game, in any state.
+
+**Fix.**
+1. Call `_requireLiveGame(gameId)` at the top of `addTurn()`. Put it in `addTurn()`
+   rather than `recordTurn()` so the raw primitive is guarded too — but note that ~14
+   test files seed turns via `addTurn()` directly, so this needs the same
+   `opts`-gated shape `enforceConsistency` already uses (e.g. `opts.allowFinished`, set
+   by those seeders), or the guard belongs in `recordTurn()` alone. **Prefer the
+   `opts` form**: the trust boundary should not depend on a future route remembering to
+   call the wrapper, which is the reasoning `recordTurn()`'s own comment already gives.
+2. Call `_requireLiveGame(gameId)` at the top of `deleteLastTurn()`.
+3. Consider making `turnId` mandatory on the undo route while you are there — the
+   frontend always sends it, so the only callers relying on "delete whatever is newest"
+   are ones with no idea what they are deleting.
+
+**Verify.** A `node:test` case that completes a game, then asserts both `recordTurn()`
+and `deleteLastTurn()` throw 409 against it — with the four already-guarded paths
+asserted in the same test, so the six agree and a future path added without the guard
+stands out.

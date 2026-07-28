@@ -20,6 +20,10 @@
 > the `node:test` suite under `backend/test/` (all green as of this writing). This doc
 > tracks the correctness gaps that suite doesn't yet assert.
 >
+> **BUG-58 is the one open item on this tracker** (opened by the 2026-07 tenth-pass
+> audit — see `docs/security-audit-roadmap.md` Part 12, whose SEC-29/SEC-30 came from the
+> same pass). Everything below it is fixed.
+>
 > **BUG-1 … BUG-8 fixed.** BUG-1/BUG-2/BUG-3 (second pass); BUG-4/BUG-5/BUG-6/BUG-7
 > (fixed 2026-07 alongside `security-audit-roadmap.md` SEC-15/SEC-16), each with a
 > committed regression test and the full backend suite green. BUG-8 (fixed 2026-07,
@@ -2902,6 +2906,59 @@ through the X01 engine rather than through `checkCompletion`. The other
 3-visit formats have far more headroom (max 540 against the same 1000). Not
 reachable by any realistic attempt, but the margin is thinner than the filler's
 "never naturally busts or wins" premise assumes.
+
+### BUG-58 — an import file whose `playerBadges` is not an array crashes the import with an unhandled `TypeError`, returning a 500 instead of "this file is malformed"  **(LOW, unhandled error / diagnostic-log noise)**
+
+**Status: Open.** Opened by the tenth-pass audit — see
+`docs/security-audit-roadmap.md` Part 12, whose **SEC-29** is the same function's
+larger validation gap.
+
+**What actually goes wrong, in plain terms.** `importPlayerExport()` starts by checking
+the shape of the file it was handed: it confirms `games`, `gamePlayers`, `turns`,
+`darts` and `opponents` are all arrays, and rejects the file with a clear 400 "Malformed
+import file" if any of them isn't. `playerBadges` was left out of that list. Further
+down, the badge loop does `for (const b of (playerBadges || []))`.
+
+`|| []` covers `playerBadges` being absent or null — which is the case it was written
+for, since older exports predate the field. It does **not** cover it being present and
+the wrong shape. A JSON object, a number, or `true` all pass the `||`, then `for...of`
+throws `TypeError: (playerBadges || []) is not iterable`, which is not an `httpError`,
+so it carries no status. The top-level handler treats an untagged throw as a server
+fault: the admin sees a generic 500 instead of being told their file is malformed, and
+because the handler only persists status >= 500, the failure is also written into the
+`server_errors` diagnostic table — the same "a client's bad input becomes a logged
+server fault" shape as SEC-17, just behind an admin session here rather than
+unauthenticated.
+
+**Reproduced.**
+
+```
+playerBadges: { not: 'an array' }
+  -> THREW: (playerBadges || []) is not iterable      (500, logged to server_errors)
+```
+
+versus the correct behaviour the same function already has for its five sibling fields:
+
+```
+games: { not: 'an array' }
+  -> 400 Malformed import file — expected the shape produced by GET /api/players/export
+```
+
+**Fix.** Add `playerBadges` to the existing shape check, allowing absent/null (so old
+exports stay importable) but rejecting a present-but-wrong-shape value:
+
+```js
+if (playerBadges != null && !Array.isArray(playerBadges)) {
+  throw httpError(400, 'Malformed import file — playerBadges must be an array');
+}
+```
+
+Keep the `|| []` at the loop, so the absent case still works without a second branch.
+
+**Verify.** A `node:test` case asserting `importPlayerExport()` throws a 400 (not a
+500, and not a `TypeError`) for `playerBadges` given as an object, a string and a
+number, and still succeeds when it is absent or null. Assert the status code, not just
+that it throws — the whole point of this fix is which status comes back.
 
 ## Standing practice
 
