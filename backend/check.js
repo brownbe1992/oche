@@ -76,7 +76,7 @@ const QUIET = process.argv.includes('--quiet');
 const CHECK_NAMES = [
   'duplicate-function', 'unused-function', 'missing-handler', 'missing-id',
   'missing-script', 'missing-stylesheet', 'load-order', 'scoring-exports', 'ts-check-placement',
-  'leaf-missing-dep',
+  'leaf-missing-dep', 'orphan-script',
 ];
 
 const findings = [];
@@ -489,6 +489,33 @@ for (const [file, html] of [['frontend/index.html', INDEX_SCOPE.text], ['fronten
     for (const k of declaredFunctions(src).keys()) declaredBefore.add(k);
   }
   note(`  split files: ${SPLIT_FILES.length} checked for load-order hazards`);
+}
+
+/* A file in frontend/js/ that no page actually loads.
+ *
+ * The mirror image of `missing-script`, and the one the per-game-type split needed:
+ * that rule catches a <script src> naming a file that isn't there, this catches a file
+ * that is there and is named by nothing. Extracting Bob's 27 into an unwired file left
+ * ten functions — the whole mode's turn loop, panel and leaderboard — orphaned, and
+ * every existing check passed. `missing-handler` could not see it because these are
+ * called from the GAME_TYPES registry by identifier, not from an on*= attribute; the
+ * browser suite would have caught it, minutes later, as a pile of confusing failures.
+ *
+ * Exactly extractable, so no false positives: the set of .js files on disk under
+ * frontend/js/ minus the set every page's <script src> resolves to.
+ */
+{
+  const loaded = new Set([...INDEX_SCOPE.files, ...DISPLAY_SCOPE.files]);
+  const dir = path.join(ROOT, 'frontend', 'js');
+  const onDisk = fs.existsSync(dir)
+    ? fs.readdirSync(dir).filter(n => n.endsWith('.js')).map(n => path.join(dir, n))
+    : [];
+  for (const f of onDisk) {
+    if (loaded.has(f)) continue;
+    report('orphan-script', path.relative(ROOT, f),
+      'exists but no page has a <script src> for it — every function in it is dead code');
+  }
+  note(`  frontend/js: ${onDisk.length} files, all reachable from a page`);
 }
 
 // ---------------------------------------------------------------------------

@@ -24,11 +24,10 @@
 // type fails at start-up and never reaches the assertions.
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
 
-const INDEX = path.join(__dirname, '..', '..', 'frontend', 'index.html');
-const src = fs.readFileSync(INDEX, 'utf8');
+// The whole page scope — these functions can live in index.html or in any
+// frontend/js/ file it loads. See frontend-source.js.
+const src = require('./frontend-source.js').pageSource();
 
 // Each registry entry opens `  <key>: {\n    id: '<key>',` — the id line is
 // what distinguishes a real entry from any other object literal in the file.

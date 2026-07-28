@@ -1115,6 +1115,10 @@
 <script src="js/moments.js"></script>
 <script src="js/daily-challenge.js"></script>
 <script src="js/session-recap.js"></script>
+<!-- Per-game-type files (docs/frontend-module-split-roadmap.md step 3). Classic
+     scripts sharing one global scope with the inline script below, exactly like the
+     six above; each holds the functions its GAME_TYPES entry names. -->
+<script src="js/bobs-27.js"></script>
 <script>
 // Surfaces uncaught client-side errors visibly instead of failing silently —
 // on a phone, there's no console to check, so a button that "does nothing"
@@ -2842,15 +2846,7 @@ function renderHomeTabBodyCheckoutTrainer(){
   });
 }
 
-// Bob's 27's Home page leaderboard — same peak-single-run shape as Checkout
-// Blitz's above (docs/archive/practice-ladders-roadmap.md Part A: "the Checkout
-// Blitz precedent"), no H2H/Practice split (always solo).
-function renderHomeTabBodyBobs27(){
-  renderSimpleHomeLeaderboardTab('bobs27', 'leaderboard', "🎯 Bob's 27 — Best Final Score", {
-    score:r=>r.bestScore, meta:r=>fmtDate(r.achievedAt),
-    emptyMsg:"None recorded yet — play a Bob's 27 run to claim the top spot.",
-  });
-}
+
 
 // The 121 Checkout Ladder's Home page leaderboard (docs/archive/practice-ladders-roadmap.md
 // Part B) — same "peak single-run value, no minimum floor" shape as Bob's 27's.
@@ -7494,38 +7490,7 @@ function renderGamePressureChamber(){
    shape as Cricket/Baseball's (rows=rounds, one column since it's always solo),
    just fixed at exactly 20 rows — no "extra innings"-style dynamic extension
    the way Baseball's own table needs. */
-function renderGameBobs27(){
-  const sb = document.getElementById('scoreboard'); sb.innerHTML='';
-  const p = game.players[0];
 
-  const rows = [];
-  for(let round=1; round<=20; round++){
-    const isCurrentRound = round === game.bobs27Round;
-    const result = p.roundResults[round];
-    const cellText = result==null ? '' : `<span class="cs-points">${result>0?'+'+result:'−'+(round*2)}</span>`;
-    rows.push(`<div class="cs-row"><div class="cs-label">D${round}</div><div class="cs-cell${isCurrentRound?' active':''}">${cellText}</div></div>`);
-  }
-  const bodyRowsHtml = rows.join('');
-
-  const table = document.createElement('div');
-  table.className = 'cs-table';
-  table.style.setProperty('--cs-cols', 1);
-  table.innerHTML = `
-    <div class="cs-row cs-head" role="row"><div class="cs-label"></div><div class="cs-col-head active"><span>${escapeHtml(p.name)}</span><span class="cs-throw-chip">▸ throwing</span></div></div>
-    ${bodyRowsHtml}
-    <div class="cs-row cs-foot"><div class="cs-label">Score</div><div class="cs-cell"><span class="cs-points">${p.running}</span></div></div>`;
-  sb.appendChild(table);
-
-  const roundBanner = document.createElement('p');
-  roundBanner.className = 'pp-meta';
-  roundBanner.style.cssText = 'text-align:center;margin:8px 0 0';
-  roundBanner.textContent = `D${game.bobs27Round} — running score: ${p.running}`;
-  sb.appendChild(roundBanner);
-
-  renderSlots();
-  renderPad();
-  pushLive();
-}
 
 function renderSlots(){
   const wrap=document.getElementById('slots'); wrap.innerHTML='';
@@ -8847,10 +8812,7 @@ function declarePressureHit(hit){
    Treble of the same number, or Miss, all correctly log as "missed the
    double" via the ambient mult the same way Baseball's own single pad button
    already relies on. */
-function renderPadBobs27(full){
-  const target = game.bobs27Round;
-  renderSingleTargetPad(full, target, `D${target}`, `Double ${target} — this round's target`);
-}
+
 
 /* ---------- throwing ---------- */
 function setMult(m){ mult=m; updateMultUI(); }
@@ -10850,69 +10812,8 @@ function onLegWonPressureChamber(wi){
    committed visit (there's no "roundComplete" distinction to make the way
    Baseball's rotation needs — solo, so every visit always completes its own
    round). */
-function enterTurnBobs27(){
-  if(noDartsThrown()) return;
-  const p = game.players[game.current];
-  const ev = GAME_TYPES.bobs_27.evaluateVisit(p, game.darts, game);
 
-  if(ev.gain>0) announce(`${p.name} hits D${ev.round} ${ev.hits===1?'once':ev.hits+' times'} — plus ${ev.gain}, now on ${ev.running}.`);
-  else announce(`${p.name} misses D${ev.round} completely — minus ${ev.round*2}, now on ${ev.running}.`);
 
-  // snapshot state before mutations so undoLastTurn() can restore it — same
-  // convention as X01/enterTurnCricket()/enterTurnBaseball()'s own lastTurnSnapshot.
-  pushVisitSnapshot(p,
-    ['running', 'roundResults', 'legDarts', 'setDarts', 'gameDarts'],
-    ['bobs27Round']);
-
-  p.running = ev.running;
-  p.roundResults = Object.assign({}, p.roundResults, { [ev.round]: ev.gain });
-  const dartsThrown = game.darts.length;
-  p.legDarts += dartsThrown; p.setDarts += dartsThrown; p.gameDarts += dartsThrown;
-
-  // bust (docs/archive/practice-ladders-roadmap.md Part A): reused, X01-style, to
-  // mark the fatal round — the SEC-25-style write-time guard in addTurn()
-  // (backend/db.js) independently re-derives and checks this exact value,
-  // never trusting the client's own ev.dead.
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:ev.scored, bust:ev.dead, checkout:false, checkoutPoints:null,
-    darts: mapDartsForRecord(game.darts) });
-
-  const turnRecord = { player:p.name, scored:ev.scored, darts:game.darts.slice() };
-  game.currentLegTurns.push(turnRecord);
-  game.sessionTurns.push(turnRecord);
-
-  awardTimeOfDayBadges(p);
-
-  // 🎯 Full House: all three darts hit the round's double — the maximum
-  // possible gain for that round, Bob's 27's own "180" for a single visit.
-  if(dartsThrown===3 && isBobs27FullHouse(ev.hits)){
-    queueBadge('bobs27fullhouse', p.name);
-    awardRecurringBadge(p.name, 'bobs27fullhouse', 'bobs27fullhouse',
-      { icon:'🎯', headline:'FULL HOUSE!', player:p.name, statLine:`All three darts on D${ev.round}` });
-  }
-
-  if(ev.matchComplete){
-    onLegWonBobs27(game.current);
-    return;
-  }
-
-  game.bobs27Round += 1;
-  game.darts=[]; game.busted=false; game.won=false;
-  game.turnSeq += 1;
-  document.getElementById('status').className='status';
-  document.getElementById('status').textContent = `D${game.bobs27Round} — three darts. Running score: ${p.running}.`;
-  renderGameBobs27();
-  pushLive();
-}
-function undoLastTurnBobs27(){
-  if(!game || !game.lastTurnSnapshot) return;
-  const snap = game.lastTurnSnapshot;
-  restoreVisitSnapshot(snap);
-  // push:true is redundant (renderGameBobs27() pushes too) but is left exactly
-  // as it was — this item is a refactor, and a second live POST is not the
-  // thing to change while proving the restore behaves identically.
-  _finishUndo(snap, renderGameBobs27, { resetDarts: true, push: true });
-}
 /* ----- Bob's 27 leg / set / game progression (dispatched from enterTurnBobs27) -----
    Always exactly one player (wi is always 0) and always completes after its
    one leg — legsPerSet/setsPerGame are forced to 1 in startGame() (bobs_27 is
@@ -10920,35 +10821,7 @@ function undoLastTurnBobs27(){
    BUG-22 fix established), so the "set won"/"leg won but not set" branches
    below are structurally unreachable in practice — kept anyway for the same
    generic-tree consistency onLegWonBaseball()'s own comment explains. */
-function onLegWonBobs27(wi){
-  const w = game.players[wi];
-  w.legsWon += 1;
 
-  // Survival/score ladder + 🏔️ The Full Anderson — checked once, here,
-  // against THIS RUN's own final score, not a lifetime accumulator (see
-  // BOBS27_SCORE_MILESTONE_LADDERS' own comment on why that's still the same
-  // generic engine, just a different kind of "value").
-  checkChuckinMilestoneTier(BOBS27_SCORE_MILESTONE_LADDERS[0], w.name, w.running);
-  if(isBobs27FullAnderson(w.running)){
-    queueBadge('bobs27fullanderson', w.name);
-    awardRecurringBadge(w.name, 'bobs27fullanderson', 'bobs27fullanderson',
-      { icon:'🏔️', headline:'THE FULL ANDERSON!', player:w.name, statLine:'Every double, all three darts — 1287' });
-  }
-
-  // Bob's 27's own moment card — a run always completes (never re-plays as
-  // a leg/set) so this is the only outcome to celebrate, "MATCH WON!"
-  // reads wrong for a died-early run so this uses a survived-vs-died
-  // headline instead, same "the generic matchWinStatLine() doesn't know
-  // about `running`" reasoning that gives every solo drill its own card copy.
-  advanceLegSetGame(w, {
-    checkElo: false,
-    momentCard: () => {
-      const survived = w.running > 0;
-      return { icon: survived ? '🎯' : '💀', headline: survived ? 'RUN COMPLETE!' : 'RUN OVER',
-        player:w.name, statLine: survived ? `Final score: ${w.running} — survived all 20` : `Died on D${Object.keys(w.roundResults).length} · final score ${w.running}` };
-    },
-  });
-}
 
 /* ----- leg / set / game progression ----- */
 function onLegWon(wi){
@@ -11621,33 +11494,7 @@ function killerPanelSpec(game, winner){
   };
 }
 
-// --- Bob's 27 ---
-function bobs27PanelSpec(game){
-  const p = game.players[0];
-  const results = Array.from({length:20}, (_,i) => p.roundResults[i+1]);
-  const played = results.filter(r => r != null);
-  const hitRounds = played.filter(r => r > 0).length;
-  return {
-    heroes: [
-      { title: p.name, sub: p.running > 0 ? 'Final score · survived all 20' : 'Final score · went bust', value: p.running },
-      { title: 'Doubles hit', sub: `${hitRounds} of ${played.length} round${played.length===1?'':'s'} scored`,
-        value: `${hitRounds}/${played.length}` },
-    ],
-    shelf: {
-      title: 'The twenty doubles', long: true,
-      cells: results.map((r,i) => panelResultCell(`D${i+1}`, r != null, (r||0) > 0,
-        r == null ? 'not reached' : r > 0 ? `+${r}` : `−${(i+1)*2}`)),
-    },
-    // A full house is all three darts in the round's double — a gain of
-    // 3 × 2 × round. Counted over `results` (index === round − 1), never over
-    // the filtered `played`, whose indices no longer name their own round.
-    tallies: [
-      { emoji:'🎯', value:results.filter((r,i) => r != null && r === (i+1)*6).length, label:'full houses' },
-      { emoji:'🥇', value:played.length ? Math.max(...played) : 0, label:'best round' },
-      { emoji:'💀', value:played.filter(r => r === 0).length, label:'missed doubles' },
-    ],
-  };
-}
+
 
 // --- The Gauntlet ---
 function gauntletPanelSpec(game){
@@ -13710,20 +13557,9 @@ function playerSnapshotPressureChamber(p){
    Baseball's lifetimeRunsBase): the survival/score ladder (see
    BOBS27_SCORE_MILESTONE_LADDERS below) checks THIS RUN's own final score
    directly, not a lifetime-cumulative total, so there's nothing to pre-fetch. */
-function newMatchPlayerBobs27(name){
-  return { name, running:27, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0, roundResults:{} };
-}
-function resetPlayerForNextLegBobs27(p, game, newSet){
-  p.running = 27; p.legDarts = 0; p.roundResults = {};
-  if(newSet) p.setDarts = 0;
-}
-function playerSnapshotBobs27(p){
-  return {
-    name:p.name, running:p.running, legsWon:p.legsWon, setsWon:p.setsWon,
-    legDarts:p.legDarts||0, setDarts:p.setDarts||0, gameDarts:p.gameDarts||0,
-    roundResults:Object.assign({}, p.roundResults)
-  };
-}
+
+
+
 
 /* ---------- The 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B) ----------
    Solo-only, perpetual — unlike Bob's 27 (a run IS the game, forced to
