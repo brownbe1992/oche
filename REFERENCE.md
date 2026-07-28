@@ -4722,8 +4722,22 @@ through to "create a new player" — resolving old exports onto the survivor.
 
 Engine: `node:sqlite` (`DatabaseSync`), `PRAGMA journal_mode=WAL`,
 `PRAGMA foreign_keys=ON`. Every table below reflects current state after all
-`ALTER TABLE` migrations (each wrapped in `try/catch`, so re-running them on an
-already-migrated database is a safe no-op).
+`ALTER TABLE` migrations, which re-run harmlessly on an already-migrated database.
+
+**Migrations go through `addColumn()` / `dropColumn()`, never a bare `try/catch`.**
+SQLite has no `ADD COLUMN IF NOT EXISTS`, so re-running one throws `duplicate column
+name` — and each of the 32 migrations used to sit in a `catch(e) {}` that swallowed
+that error *and every other one*. A migration naming a table that does not exist throws
+`no such table`, and swallowing that meant the column was silently never added: no error
+at startup, nothing in the log, and the first symptom a query reading `undefined` months
+later. The helpers swallow exactly the one error that means "already applied" and rethrow
+everything else with the failing statement attached, so a broken migration stops the
+server at boot — the only moment anyone can act on it.
+
+`dropColumn()` exists separately because its already-applied error is a *different* one
+(`no such column`). That distinction was invisible under the blanket catch: narrowing
+`addColumn()` immediately broke the single `DROP COLUMN` in the block on a fresh
+database, a defect the old catch had hidden since it was written.
 
 ### `players`
 | Column | Type | Notes |

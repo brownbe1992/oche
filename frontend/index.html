@@ -4602,13 +4602,18 @@ function setMode(mode){
   // the drill's own type underneath, and startGame() (which reads
   // setup.gameType, not any control) would silently build that drill's game
   // type regardless of what Step 1's ledger visibly shows.
-  // Around the Clock is deliberately NOT here any more: since the race variant
-  // shipped it is a dual type (practice OR h2h), reached the same way X01 and
-  // Cricket are — setMode('practice'|'h2h') + setGameType(). Leaving it in this
-  // list would reset setup.gameType back to 'x01' the instant setMode('practice')
-  // ran, silently starting an X01 game from the Around the Clock ledger row.
-  const drillGameTypes = ['doubles_practice', 'chuckin', 'checkout_trainer', 'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'dead_man_walking'];
-  if(!drillGameTypes.includes(mode) && drillGameTypes.includes(setup.gameType)) setup.gameType = 'x01';
+  // DERIVED from the registry, not listed here. What makes a mode a "drill" for this
+  // purpose is exactly that it has no head-to-head form — which the registry already
+  // states as `soloOnly`, and which `contextsForMode()` already reads.
+  //
+  // It used to be a hand-written array of the same eight keys, and that duplication had
+  // already cost one real bug: when Around the Clock gained its race variant it stopped
+  // being solo-only, and the copy here kept saying it was — so `setMode('practice')`
+  // reset setup.gameType to 'x01' and silently started an X01 game from the Around the
+  // Clock row. Someone caught it and edited the copy. The next mode to change shape
+  // would have needed someone to catch it again; now there is nothing to keep in step.
+  const isDrill = (key) => !!(GAME_TYPES[key] && GAME_TYPES[key].soloOnly);
+  if(!isDrill(mode) && isDrill(setup.gameType)) setup.gameType = 'x01';
   // Daily Challenge's underlying gameType is per-FORMAT (CHALLENGE_FORMAT_DEFS),
   // not hardcoded to X01 — today every format resolves to 'x01', but this reads
   // the registry generically so a future non-X01 format needs no change here.
@@ -4619,7 +4624,7 @@ function setMode(mode){
   } else if(mode === 'ghost' && setup.gameType !== 'x01'){
     setup.gameType = 'x01';
   }
-  if(drillGameTypes.includes(mode)) setup.gameType = mode;
+  if(isDrill(mode)) setup.gameType = mode;
   updateGameTypeOptionSections(setup.gameType);
   document.getElementById('ghost-options-section').hidden = (mode !== 'ghost');
   document.getElementById('doubles-options-section').hidden = (mode !== 'doubles_practice');

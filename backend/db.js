@@ -506,35 +506,80 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_marathon_session_legs_game    ON marathon_session_legs(game_id);
 `);
 
-// Column migrations for tables not recreated above — safe to re-run.
-try { db.exec('ALTER TABLE players      ADD COLUMN dart_weight INTEGER'); } catch(e) {}
-try { db.exec('ALTER TABLE game_players ADD COLUMN dart_weight INTEGER'); } catch(e) {}
-try { db.exec("ALTER TABLE game_players ADD COLUMN out_mode TEXT NOT NULL DEFAULT 'double'"); } catch(e) {}
-try { db.exec('ALTER TABLE games        ADD COLUMN practice    INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
-try { db.exec('ALTER TABLE players ADD COLUMN pin_hash TEXT'); } catch(e) {}
-try { db.exec('ALTER TABLE players ADD COLUMN pin_salt TEXT'); } catch(e) {}
-try { db.exec('ALTER TABLE players ADD COLUMN pin_fail_count INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
-try { db.exec('ALTER TABLE players ADD COLUMN pin_locked_until INTEGER'); } catch(e) {}
-try { db.exec('ALTER TABLE darts ADD COLUMN thrown_at TEXT'); } catch(e) {}
+/* Column migrations for tables not recreated above — safe to re-run.
+ *
+ * SQLite has no `ADD COLUMN IF NOT EXISTS` (unlike the CREATE INDEX statements above,
+ * which say `IF NOT EXISTS` and need no help), so re-running a migration throws
+ * "duplicate column name". Every one of these used to be wrapped in a bare
+ * `catch(e) {}`, which handled that — and every other error identically.
+ *
+ * That is the problem. A migration naming a table that does not exist throws "no such
+ * table", and swallowing it means the column is silently never added: no error at
+ * startup, no clue in the log, and the first symptom is a query reading `undefined`
+ * somewhere far away, months later. The same goes for a migration placed above the
+ * CREATE TABLE it depends on. A catch that exists for one expected error should not be
+ * given the authority to hide the unexpected ones.
+ *
+ * So: swallow exactly "duplicate column name", rethrow everything else. Nothing about
+ * the successful path changes; what changes is that a broken migration now fails loudly
+ * at startup, which is the only moment anyone can act on it.
+ * @param {string} sql  a complete ALTER TABLE ... ADD COLUMN statement
+ */
+function addColumn(sql) { runMigration(sql, /duplicate column name/i); }
+
+/* The subtractive counterpart. Its already-applied error is a DIFFERENT one — "no such
+ * column" — and giving it its own name is the point: under one blanket catch, this
+ * block quietly contained two migration kinds with two expected errors and nothing said
+ * so. (Found exactly that way: narrowing addColumn() to "duplicate column name" made
+ * the one DROP COLUMN in the block fail on a fresh database, which is a defect the
+ * blanket catch had been hiding since the day it was written.)
+ * @param {string} sql  a complete ALTER TABLE ... DROP COLUMN statement
+ */
+function dropColumn(sql) { runMigration(sql, /no such column/i); }
+
+/**
+ * @param {string} sql
+ * @param {RegExp} alreadyApplied  the one error meaning "this has already run"
+ */
+function runMigration(sql, alreadyApplied) {
+  try {
+    db.exec(sql);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!alreadyApplied.test(msg)) {
+      throw new Error(`migration failed: ${sql}\n  ${msg}`);
+    }
+  }
+}
+
+addColumn('ALTER TABLE players      ADD COLUMN dart_weight INTEGER');
+addColumn('ALTER TABLE game_players ADD COLUMN dart_weight INTEGER');
+addColumn("ALTER TABLE game_players ADD COLUMN out_mode TEXT NOT NULL DEFAULT 'double'");
+addColumn('ALTER TABLE games        ADD COLUMN practice    INTEGER NOT NULL DEFAULT 0');
+addColumn('ALTER TABLE players ADD COLUMN pin_hash TEXT');
+addColumn('ALTER TABLE players ADD COLUMN pin_salt TEXT');
+addColumn('ALTER TABLE players ADD COLUMN pin_fail_count INTEGER NOT NULL DEFAULT 0');
+addColumn('ALTER TABLE players ADD COLUMN pin_locked_until INTEGER');
+addColumn('ALTER TABLE darts ADD COLUMN thrown_at TEXT');
 // game_type/config lay the groundwork for future non-X01 game types (see
 // docs/game-modes-roadmap.md) without changing any current behavior — every game
 // created today is still 'x01', config just carries its starting score.
-try { db.exec("ALTER TABLE games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'x01'"); } catch(e) {}
-try { db.exec('ALTER TABLE games ADD COLUMN config TEXT'); } catch(e) {}
-try { db.exec('ALTER TABLE admins ADD COLUMN login_fail_count INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
-try { db.exec('ALTER TABLE admins ADD COLUMN login_locked_until INTEGER'); } catch(e) {}
-try { db.exec('ALTER TABLE player_badges ADD COLUMN count INTEGER NOT NULL DEFAULT 1'); } catch(e) {}
+addColumn("ALTER TABLE games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'x01'");
+addColumn('ALTER TABLE games ADD COLUMN config TEXT');
+addColumn('ALTER TABLE admins ADD COLUMN login_fail_count INTEGER NOT NULL DEFAULT 0');
+addColumn('ALTER TABLE admins ADD COLUMN login_locked_until INTEGER');
+addColumn('ALTER TABLE player_badges ADD COLUMN count INTEGER NOT NULL DEFAULT 1');
 // Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close
 // a leg, best MPR in a leg) need their own "this turn won the leg" signal instead
 // of reusing checkout (X01's narrower double-out concept). Defaults to 0 for every
 // existing/X01 row — X01's own Personal Bests queries keep using checkout=1
 // unchanged. Only Cricket's write path (enterTurnCricket()) sets it.
-try { db.exec('ALTER TABLE turns ADD COLUMN leg_won INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
+addColumn('ALTER TABLE turns ADD COLUMN leg_won INTEGER NOT NULL DEFAULT 0');
 // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score given for
 // that round. Unlike X01 there's no persistent "remaining score" game state to
 // derive it from afterward, so it has to be stored per-turn. Only ever populated
 // for game_type='checkout_trainer'; every other game type leaves it NULL.
-try { db.exec('ALTER TABLE turns ADD COLUMN target_score INTEGER'); } catch(e) {}
+addColumn('ALTER TABLE turns ADD COLUMN target_score INTEGER');
 // Checkout Trainer trick questions (docs/archive/checkout-trainer-roadmap.md "Trick-question
 // difficulty variant"): 1 marks a round answered by declaring "no possible checkout"
 // instead of tapping out darts — the only turn shape allowed to carry zero dart rows
@@ -545,7 +590,7 @@ try { db.exec('ALTER TABLE turns ADD COLUMN target_score INTEGER'); } catch(e) {
 // Personal Best) can exclude declarations — correctly calling 169 a bogey is not
 // the same feat as actually finishing from 169. Defaults to 0 for every existing
 // row and every other game type's write path.
-try { db.exec('ALTER TABLE turns ADD COLUMN declared_unsolvable INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
+addColumn('ALTER TABLE turns ADD COLUMN declared_unsolvable INTEGER NOT NULL DEFAULT 0');
 // Killer (docs/game-modes-roadmap.md "Killer"): which player, if any, had
 // their own life total change because of THIS dart — the one game type where a
 // single dart can affect a DIFFERENT player than the one who threw it (an attack).
@@ -555,7 +600,7 @@ try { db.exec('ALTER TABLE turns ADD COLUMN declared_unsolvable INTEGER NOT NULL
 // magnitude of the change (0-3) either way — the direction (gain vs loss) is
 // derived by replay (rebuildKillerState(), frontend/scoring.js), never stored,
 // same "derive the special case, don't pre-compute it" shape Halve-It/Gauntlet use.
-try { db.exec('ALTER TABLE turns ADD COLUMN affected_player_id INTEGER'); } catch(e) {}
+addColumn('ALTER TABLE turns ADD COLUMN affected_player_id INTEGER');
 // The Pressure Chamber self-declare honesty mechanic (docs/archive/pressure-chamber-roadmap.md
 // build-order step 10): the player's SELF-DECLARED hit/miss call for this round,
 // made BEFORE their actual darts are read off the board — 1 = "I'll hit it",
@@ -569,7 +614,7 @@ try { db.exec('ALTER TABLE turns ADD COLUMN affected_player_id INTEGER'); } catc
 // every other new column there is no consistency guard for it — it is an
 // honor-system self-discipline signal by design. Purely additive, same pattern as
 // target_score/declared_unsolvable/affected_player_id above.
-try { db.exec('ALTER TABLE turns ADD COLUMN declared_hit INTEGER'); } catch(e) {}
+addColumn('ALTER TABLE turns ADD COLUMN declared_hit INTEGER');
 // Item 62 (docs/archive/database-normalization-roadmap.md §3.1) — the one SUBTRACTIVE
 // migration in this block. checkout_points held a copy of `scored` and nothing
 // else (see CHECKOUT_POINTS below for the full argument and the two modes that
@@ -578,19 +623,19 @@ try { db.exec('ALTER TABLE turns ADD COLUMN declared_hit INTEGER'); } catch(e) {
 // try/catch as the additive ones, which makes it idempotent for the same reason —
 // on a database that has already been migrated, DROP COLUMN throws "no such
 // column" and is swallowed.
-try { db.exec('ALTER TABLE turns DROP COLUMN checkout_points'); } catch(e) {}
+dropColumn('ALTER TABLE turns DROP COLUMN checkout_points');
 // player_count is the participant count captured once at game creation. H2H-vs-practice
 // classification reads THIS instead of a live COUNT(game_players) subquery, so deleting
 // or resetting a player can never retroactively reclassify a game (a 2-player H2H game
 // stays H2H even after one participant is removed). Backfilled for existing rows below.
-try { db.exec('ALTER TABLE games ADD COLUMN player_count INTEGER'); } catch(e) {}
+addColumn('ALTER TABLE games ADD COLUMN player_count INTEGER');
 // Dart Builder (docs/archive/dart-builder-roadmap.md): resolved once at game creation and
 // snapshotted, same reasoning already applied to game_players.dart_weight/out_mode —
 // renaming/deleting a loadout later never rewrites a past game's history.
-try { db.exec('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES loadouts(id) ON DELETE SET NULL'); } catch(e) {}
+addColumn('ALTER TABLE game_players ADD COLUMN loadout_id INTEGER REFERENCES loadouts(id) ON DELETE SET NULL');
 // League mode (docs/archive/league-mode-roadmap.md): nullable, set by the onGameCreated
 // auto-tag hook below (or left NULL for any game that isn't a tagged league match).
-try { db.exec('ALTER TABLE games ADD COLUMN league_id INTEGER REFERENCES leagues(id) ON DELETE SET NULL'); } catch(e) {}
+addColumn('ALTER TABLE games ADD COLUMN league_id INTEGER REFERENCES leagues(id) ON DELETE SET NULL');
 // Handicapping (docs/archive/rating-and-handicap-roadmap.md Part B): a per-player,
 // per-game starting-score override — NULL (the default for every existing
 // row and every game that doesn't use it) means "the game's own
@@ -599,12 +644,12 @@ try { db.exec('ALTER TABLE games ADD COLUMN league_id INTEGER REFERENCES leagues
 // work) because getEloRatings() (Part A) already needs to query it to
 // exclude handicapped games from the rating walk — see that function's own
 // comment.
-try { db.exec('ALTER TABLE game_players ADD COLUMN start_score INTEGER'); } catch(e) {}
+addColumn('ALTER TABLE game_players ADD COLUMN start_score INTEGER');
 // League mode Cricket support (docs/archive/league-mode-roadmap.md): a second game type
 // alongside the original X01-only v1. Defaults to 'x01' for every pre-existing row
 // (and any insert that omits it) so the column is purely additive — no backfill
 // guesswork needed, since every league created before this shipped genuinely was X01.
-try { db.exec("ALTER TABLE leagues ADD COLUMN game_type TEXT NOT NULL DEFAULT 'x01'"); } catch(e) {}
+addColumn("ALTER TABLE leagues ADD COLUMN game_type TEXT NOT NULL DEFAULT 'x01'");
 // Dartboard zone/miss/bounce-out tracking (docs/archive/dartboard-zone-tracking-roadmap.md).
 // All four columns are purely additive metadata riding alongside an otherwise-
 // identical dart row — sector/multiplier/scored/is_treble/is_double keep meaning
@@ -613,10 +658,10 @@ try { db.exec("ALTER TABLE leagues ADD COLUMN game_type TEXT NOT NULL DEFAULT 'x
 // needs zero changes. Only Dartboard-mode taps ever populate these (Pad mode and
 // Cricket's own pad have no geometric tap position, so they stay NULL forever) —
 // "precision arrives gradually," never backfilled or guessed for existing rows.
-try { db.exec("ALTER TABLE darts ADD COLUMN zone TEXT"); } catch(e) {}         // 'inner'|'outer', single hits only
-try { db.exec('ALTER TABLE darts ADD COLUMN miss_zone INTEGER'); } catch(e) {} // 1-20 (nearest wedge), misses only
-try { db.exec("ALTER TABLE darts ADD COLUMN miss_depth TEXT"); } catch(e) {}   // 'near'|'far', misses only
-try { db.exec('ALTER TABLE darts ADD COLUMN bounced INTEGER'); } catch(e) {}   // 1 = bounced/fell out, misses only
+addColumn("ALTER TABLE darts ADD COLUMN zone TEXT");         // 'inner'|'outer', single hits only
+addColumn('ALTER TABLE darts ADD COLUMN miss_zone INTEGER'); // 1-20 (nearest wedge), misses only
+addColumn("ALTER TABLE darts ADD COLUMN miss_depth TEXT");   // 'near'|'far', misses only
+addColumn('ALTER TABLE darts ADD COLUMN bounced INTEGER');   // 1 = bounced/fell out, misses only
 // docs/archive/data-export-roadmap.md: portable per-player identity for export/import (see
 // the players table comment above). The ALTER TABLE is required here, unlike some
 // other columns in this block -- CREATE TABLE IF NOT EXISTS above only takes effect
@@ -626,7 +671,7 @@ try { db.exec('ALTER TABLE darts ADD COLUMN bounced INTEGER'); } catch(e) {}   /
 // generated value, so the backfill itself can't be a single UPDATE statement --
 // looped in JS instead, same as any other "one random value per row" migration
 // would have to be.
-try { db.exec('ALTER TABLE players ADD COLUMN uuid TEXT'); } catch (e) {}
+addColumn('ALTER TABLE players ADD COLUMN uuid TEXT');
 {
   const unassigned = db.prepare('SELECT id FROM players WHERE uuid IS NULL').all();
   if (unassigned.length) {
@@ -653,8 +698,8 @@ db.exec(`UPDATE games SET config = json_object('startingScore', CAST(category AS
 // since-abandoned mid-leg's partial totals start counting as real results.
 // games.dnf_at marks "this match ended without a real conclusion" on its own,
 // parallel track; game_players.dnf marks which participant(s) didn't finish it.
-try { db.exec('ALTER TABLE games ADD COLUMN dnf_at TEXT'); } catch(e) {}
-try { db.exec('ALTER TABLE game_players ADD COLUMN dnf INTEGER NOT NULL DEFAULT 0'); } catch(e) {}
+addColumn('ALTER TABLE games ADD COLUMN dnf_at TEXT');
+addColumn('ALTER TABLE game_players ADD COLUMN dnf INTEGER NOT NULL DEFAULT 0');
 
 const DEFAULT_PIN_LOCKOUT_THRESHOLD = 10;
 // Admin login backoff (docs/archive/admin-login-backoff-roadmap.md) — replaces the old flat

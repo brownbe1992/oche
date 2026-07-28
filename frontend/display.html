@@ -906,6 +906,19 @@ const PRESSURE_STREAK_MILESTONE_LADDERS = [
    site-wide default). Checkout suggestions, achievement flashes, and the
    match bar always show — they're small and are the whole point of a
    "resource for checkouts" screen — only the denser stat rows are gated. */
+/* The display's half of index.html's `logErr` convention — see the comment above that
+ * function for the full argument. Short version: "this failing is not worth interrupting
+ * the screen over" is usually the right call for the settings prefetches below (each
+ * falls back to a documented default), but a bare `.catch(()=>{})` is that same decision
+ * with the evidence thrown away.
+ *
+ * That matters more here than in the app, not less. This screen is on a wall with no
+ * keyboard and nobody looking at it; when it renders with default colours or the wrong
+ * layout, the only way anyone will ever find out why is a line in its console. The five
+ * prefetches below used bare catches purely because this file was written before the
+ * convention existed on the other side. */
+function logErr(e){ console.warn('[display] request failed, using the default:', e && e.message ? e.message : e); }
+
 const LAYOUTS = {
   full:    { showTag:true,  showDartCounts:true,  showMeta:true, showAverages:true,  showGameStats:true,  showStrip:true,  showRecent:true  },
   compact: { showTag:false, showDartCounts:false, showMeta:true, showAverages:false, showGameStats:false, showStrip:true,  showRecent:false },
@@ -921,11 +934,11 @@ if(!LAYOUTS[layoutParam]){
       layout = s.layout;
       document.body.classList.add('layout-'+layout);
     }
-  }).catch(()=>{});
+  }).catch(logErr);
 }
 fetch('/api/settings/colorblind-mode', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
   document.body.classList.toggle('colorblind', !!(s && s.enabled));
-}).catch(()=>{});
+}).catch(logErr);
 
 // Mirrors index.html's own heatmapStyle/heatmapNumberStyle globals (admin-toggled,
 // Settings -> Heatmap) so buildChuckinLiveHeatmap() below renders
@@ -938,10 +951,10 @@ let heatmapStyle = 'classic';
 let heatmapNumberStyle = 'original';
 fetch('/api/settings/heatmap-style', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
   heatmapStyle = (s && s.style === 'scorched') ? 'scorched' : 'classic';
-}).catch(()=>{});
+}).catch(logErr);
 fetch('/api/settings/heatmap-number-style', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
   heatmapNumberStyle = (s && ['molten_seam','chalk_ledger'].includes(s.style)) ? s.style : 'original';
-}).catch(()=>{});
+}).catch(logErr);
 
 /* ---- orientation detection ----
    A mounted tablet or spare phone can be portrait or landscape, and can be rotated
@@ -2287,6 +2300,12 @@ function _processQueue(){
   _announcing = true;
   const item = _announceQueue.shift();
   if(item.type === 'sound'){
+    // The ONE deliberately-bare catch in this file, and it stays bare: a browser
+    // refuses audio until the user has interacted with the page, so a rejection here
+    // is the normal state of a wall-mounted screen nobody has touched — not an error.
+    // Routing it through logErr() would print a warning on every single announcement.
+    // What matters is the `.then()` after it: the queue must advance either way, or one
+    // blocked sound stalls every announcement behind it forever.
     Promise.resolve().then(item.play).catch(()=>{}).then(()=>{ _announcing=false; _processQueue(); });
     return;
   }
@@ -2417,7 +2436,7 @@ voiceUnlock.addEventListener('click', ()=>{
 fetch('/api/settings/voice-announcements', {cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
   if(s) VOICE = s;
   if(VOICE.enabled) voiceUnlock.hidden = false;
-}).catch(()=>{});
+}).catch(logErr);
 
 function render(s){
   lastSnapshot = s;
