@@ -5,7 +5,7 @@ description: Run Oche's browser-driven UI regression checks against a real runni
 
 # Verifying Oche's UI
 
-`backend/test/` (1,709 tests, `cd backend && npm test`) covers the maths: stat
+`backend/test/` (1,728 tests, `cd backend && npm test`) covers the maths: stat
 formulas, achievement triggers, DB queries, replay logic. It never loads a
 browser, so it cannot see whether a screen still *works* — and several real
 regressions have lived precisely in that blind spot:
@@ -40,7 +40,7 @@ series, on purpose (see Rate limiting below).
 
 ## What it covers
 
-461 assertions across eighteen checks.
+467 assertions across nineteen checks.
 
 **Each check's assertion count is recorded in `scripts/run.js`'s `CHECKS` table, and
 running fewer than that fails the suite.** That is the check on the checks: a suite
@@ -72,6 +72,7 @@ commit; the suite tells you which way it disagrees and by how much.
 | `keyboard` | The app is operable without a pointer: focus is visible and light enough to see on the dark board (asserted by relative luminance, not a string match), modals move focus in, trap Tab both ways, close on Escape and restore focus to whatever opened them, and SOME input mode offers a full keyboard scoring path. That last one names no mode on purpose — the pad is the path today and the board is not, but that is a known gap, not a rule, and an assertion pinning it would fail on the day someone closes it. |
 | `live-scoreboard` | The `/display` second screen picks up players, updates on a scored visit, renders an end-of-leg card, and switches renderer for Cricket. The end-of-leg assertions read the **card**, not its heading: a leg is announced in two pushes (the controller's own "X wins the leg" wording, then later pushes with `message:''` that fall through to "X takes the leg"), so any check pinning one heading string is pinning a race — this one did, matching only the transient first state and failing on the settled one. What it asserts instead is the payload the contract actually carries: both players lane'd, the winner marked, and the winner's darts and average — which come straight from the `legSummary` winner row, the field mapping that has silently broken before. |
 | `home-settings` | Home ticker hides with no activity and shows with some; a Settings tile summary tracks a script-driven change. |
+| `home-leaderboards` | Every game type's Home leaderboard renders, on both tabs, driven through the app's own `homeGameTypeVisible()` predicate so a new type is covered the day it is added. Exists because a 2026-07 page-coverage measurement found the fourteen `renderHomeTabBody<Type>()` functions had **never executed** in any check or test — leaderboard renderers on the landing screen with nothing exercising them, which is the shape of bug (a board sorted the wrong way round looks entirely normal) that committed tests exist here to catch. It spies on each registered renderer, so "was it called, and did it throw" is a fact rather than an inference from the panel afterwards: an earlier version asserted only "rendered markup, not stuck on Loading…" and a deliberately broken renderer passed it, because `undefined` reaches the shared leaderboard helper and becomes its empty state — which is what a healthy board looks like too against a suite with no seeded history. It does NOT assert the numbers or the sort order; that needs a seeded database (`backend/seed-dev-db.js`) and is its own piece of work. |
 
 `all-game-types` reads the list from the app's own registry rather than one kept
 here, so a new game type arrives with coverage already in place — the same
