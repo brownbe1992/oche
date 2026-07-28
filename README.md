@@ -2022,19 +2022,56 @@ test runner is Node's own.
 | `npm start` | Run the server |
 | `npm test` | Run the whole test suite |
 | `npm run check` | Static checks (the project's linter — no install needed) |
+| `npm run scan` | Secret scan — refuses anything that must not enter git history |
 | `npm run test:coverage` | Same as `npm test`, with Node's built-in coverage report |
 | `npm run seed` | Build a populated test database (see below) |
 
 `npm run check` runs `backend/check.js`, which is hand-rolled rather than ESLint
 so the project keeps its "no dependencies, none to install" promise for dev
-tooling too. It covers the five things `node --check` cannot see: a duplicate
+tooling too. It covers the seven things `node --check` cannot see: a duplicate
 top-level function (legal JavaScript — the later one silently wins), a function
 nothing calls, an inline `on*=` handler naming a function that no longer exists
 (those resolve at *click* time, so nothing else catches them), a
-`getElementById` for an id nothing creates, and `scoring.js`'s hand-maintained
-CommonJS export list drifting from what the file defines. It holds itself to one
-rule — **no false positives** — and stays silent wherever it would have to guess;
-its header says what it therefore misses.
+`getElementById` for an id nothing creates, a `<script src>` pointing at a file
+that isn't there, a top-level line in a split script file reading a name that
+hasn't loaded yet, and `scoring.js`'s hand-maintained CommonJS export list
+drifting from what the file defines. It holds itself to one rule — **no false
+positives** — and stays silent wherever it would have to guess; its header says
+what it therefore misses.
+
+`npm run scan` runs `backend/scan-secrets.js`. It exists because a bad commit is
+something you fix in the next commit, but a leaked credential is not: git history
+is permanent, so deleting the file afterwards changes nothing. Oche has no API
+keys of its own — the realistic accident here is **committing the database or a
+backup of it**, since that holds admin password hashes, player PIN hashes and the
+Home Assistant webhook config. `.gitignore` already covers `data/` and `*.db`, so
+the scanner is the backstop for the cases that slips past: `git add -f`, or a
+debugging copy saved as `darts.db.bak`. It detects those by their file contents
+rather than their name, so an unusual extension changes nothing.
+
+**Turn on the pre-commit hook** (once per checkout — git deliberately will not use
+a committed hooks directory on its own, since cloning a repository must never run
+its code):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+That runs the secret scan, and only the secret scan, against your staged files
+before each commit. It takes well under a second: a pre-commit hook that also ran
+the tests would be slow enough to get switched off, and a hook people switch off
+protects nothing. Everything else runs in CI.
+
+If you host this on GitHub, also turn on **push protection** in the repository's
+security settings. It is free, covers every vendor's token format, and stays
+current without anyone maintaining a list — strictly better than the scanner's own
+credential patterns. The two are complementary: push protection is the wider net,
+the hook is the one that catches a mistake before it is ever pushed.
+
+Every push and pull request runs four independent CI jobs
+(`.github/workflows/test.yml`): the static checks, the test suite, the browser
+suite, and the secret scan. They are independent so one push tells you everything
+that is wrong instead of only the first thing.
 
 `npm run seed` writes a realistic, deterministic database to `data/seed-dev.db`
 by simulating real X01 and Cricket matches — every row goes through the same

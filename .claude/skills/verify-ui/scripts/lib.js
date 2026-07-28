@@ -142,7 +142,14 @@ function chromium() {
 //    the markup exists before the inline <script> has finished defining the
 //    functions the checks drive.
 async function withPage(viewport, fn) {
-  const browser = await chromium().launch({ executablePath: CHROMIUM });
+  // executablePath ONLY when that browser actually exists. This image ships one at
+  // a fixed path (see CHROMIUM above); a GitHub Actions runner does not — there,
+  // `npx playwright install chromium` puts it under ~/.cache/ms-playwright and
+  // Playwright finds its own. Passing a path that isn't there fails with a confusing
+  // "browser not found" that reads like a suite bug rather than a missing install,
+  // so the environment that has one says so and every other environment is left to
+  // Playwright's own resolution.
+  const browser = await chromium().launch(fs.existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {});
   const ctx = await browser.newContext({ viewport });
   const page = await ctx.newPage();
   const pageErrors = [];

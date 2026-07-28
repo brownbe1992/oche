@@ -260,8 +260,9 @@ oche/
   throw a second, unhandled exception from inside the error handler.
 - **Automated test suite** (`backend/test/`, `docs/testing-and-observability-roadmap.md`
   Part B): Node's built-in `node:test` + `node:assert` (zero new dependency), run
-  via `npm test` in `backend/` (also wired into `.github/workflows/test.yml` on
-  every push/PR), 161 assertions across 11 files. `scoring.test.js` covers the
+  via `npm test` in `backend/` (also one of the four jobs in
+  `.github/workflows/test.yml` on every push/PR — see §38), 1,696 tests across 110
+  files. `scoring.test.js` covers the
   extracted pure scoring logic above; `db.*.test.js` files cover `backend/db.js`'s
   X01/Cricket stat formulas and leaderboards, checkout-route/dart-analytics
   functions, `getOnThisDay`'s priority ordering, H2H record/summary lookups, Daily
@@ -9719,7 +9720,10 @@ none because it looks like coverage. So every check runs over a surface that can
 be extracted **exactly** — a declaration line, an HTML attribute, a quoted id —
 and wherever a judgement call would be needed the check stays silent rather than
 guessing. It does not parse JavaScript; `node --check` (hook step 4) covers
-syntax, and this covers the five things `node --check` cannot see.
+syntax, and this covers the seven things `node --check` cannot see. Those seven are
+named once, in `CHECK_NAMES`, which `report()` validates against — the count in the
+"clean" line is derived from it rather than written out, because it previously was
+written out and went stale two checks ago.
 
 ### The checks
 
@@ -9761,3 +9765,124 @@ resolve their names against `window`, so moving those functions into a module
 breaks every one of them at once, at click time, with nothing in the syntax
 check or the backend suite noticing. `missing-handler` reports the whole set
 immediately.
+
+---
+
+## 37. Secret Scanning (`backend/scan-secrets.js`)
+
+`npm run scan`, in `backend/`. Refuses anything that must never enter git history.
+Runs as its own CI job (`.github/workflows/test.yml`, job `secrets`) over every
+tracked file, and as a pre-commit hook (`.githooks/pre-commit`) over staged files
+only. Asserted by `backend/test/scan-secrets.test.js`, which feeds it a crafted
+example of every defect class *and* every known-safe shape in this repo.
+
+### Why it is separate from `backend/check.js`
+
+A static-check finding is a code-quality problem you fix in the next commit. A
+leaked credential is not: git history is permanent, so deleting the file
+afterwards changes nothing — the value is still there for anyone who clones the
+repo, and the only real remedy is rewriting history and rotating whatever leaked.
+That asymmetry is why this is its own CI job (legible in the checks list as "stop
+and rewrite history", not "fix it later") and the *only* thing in the pre-commit
+hook. A hook that also ran the tests would be slow enough to get turned off, and
+a hook people turn off protects nothing.
+
+### What this repo actually risks
+
+Oche has no API keys of its own. What it has is a SQLite database holding admin
+password hashes, player PIN hashes and the Home Assistant webhook config. So the
+realistic leak is **not** a pasted token — it is a database or a backup being
+committed. `.gitignore` covers `data/` and `*.db`, which is most of the
+protection, but `git add -f` overrides it and a debugging copy can be written
+anywhere with any extension. Rule 1 therefore detects databases by **content**
+(the SQLite file-header magic), so an unusual extension changes nothing.
+
+### The rules
+
+| Rule | What it catches | How it avoids false positives |
+|---|---|---|
+| `database-file` | A SQLite database or backup, at any path with any extension | Exact: the 16 magic bytes every SQLite file begins with |
+| `credential` | GitHub PAT/OAuth/server tokens, AWS key ids, Slack tokens, private-key blocks, OpenAI-style keys, JWTs | Fixed vendor prefixes plus a length, so prose mentioning "ghp_..." or "keys start with AKIA" cannot match |
+| `high-entropy-secret` | A key from a vendor the table above doesn't know, assigned to something named like a credential | Four gates — see below |
+| `ha-webhook` | A configured Home Assistant webhook id | The literal path `/api/webhook/` appears throughout this codebase; the id itself must be ≥24 characters |
+
+Binary files other than SQLite are skipped entirely, and the scanner plus the docs
+describing these patterns exempt themselves — otherwise they report each other forever.
+
+### Why `high-entropy-secret` gates on structure, not entropy
+
+This is the only rule that could in principle misfire, and **two obvious designs
+for it are wrong**. Both are recorded in the file's header and pinned by tests,
+because both look correct and neither survives measurement:
+
+1. *"High entropy means secret."* The ranges overlap completely. Measured on this
+   repo's own strings: `game-type-around-the-clock-1` scores 3.94 bits/char and
+   an MD5-shaped 32-character key scores 3.39. Hex has only 16 symbols so it caps
+   at 4.0 however random it is, while hyphenated English reaches 3.9 easily —
+   there is no threshold that admits the secrets and rejects the identifiers.
+2. *"Entropy ≥ 4.0."* This was the first version written, and it scanned clean —
+   which is precisely the trap. 4.0 sits **on** hex's theoretical ceiling, so it
+   could never catch a hex key at all. It reported "clean" for the same reason a
+   scanner with a typo'd regex does. The test suite caught it, which is why every
+   rule here has a test feeding it a real-shaped example rather than only
+   confirming the repo is clean.
+
+What actually separates them is *structure*: a key is one unbroken run of
+alphanumerics, while a descriptive identifier is short words joined by
+separators (longest run in the safe examples above: 8–9 characters). So the
+primary gate is a **≥20-character unbroken alphanumeric run**, with entropy
+(≥3.0) and character-class diversity (≥2 of lower/upper/digit) kept only to
+reject the degenerate long runs a repository really does contain, like
+`aaaaaaaaaaaaaaaaaaaa1111`.
+
+**What it knowingly gives up:** a secret written with hyphens in it, or one of
+pure lowercase letters. Both are indistinguishable from the readable identifiers
+this must not report — and reporting those is what gets a pre-commit hook
+bypassed with `--no-verify` for good, which would leave no protection at all.
+
+### What it is not a substitute for
+
+GitHub's own push protection is a free repository setting, covers every vendor's
+token format, and stays current without anyone editing a table. It is strictly
+better than anything hand-rolled here. This file is the part that can live in the
+repo and run *before* a push — the two are complementary, not alternatives.
+
+---
+
+## 38. Continuous Integration (`.github/workflows/test.yml`)
+
+Four **independent** jobs on every push and pull request. Independent so one push
+tells you everything that is wrong rather than only the first thing, and so a fast
+failure reports fast — the static job finishes in seconds, the browser job in
+minutes.
+
+| Job | Runs | Time |
+|---|---|---|
+| `static` | `node --check` over every `.js` in `backend/`, `frontend/` and `frontend/js/`, then `npm run check` (§36) | seconds |
+| `tests` | `npm test` (1,696 tests), then `npm run test:coverage` piped to `tail -40` | ~30s |
+| `browser` | the `verify-ui` suite (457 assertions, 18 checks) against a real Chromium | minutes |
+| `secrets` | `node backend/scan-secrets.js` over every tracked file (§37) | seconds |
+
+**Why the browser job exists, concretely.** CI used to run `npm test` alone —
+which is one layer of three, and not the one that catches the worst failures. A
+2026-07 frontend split broke every screen in the app and all 1,683 backend tests
+of the day stayed green throughout. Only the browser suite noticed, because the
+failure was inline handlers silently resolving to `undefined`, which nothing
+Node-side can see. It uploads a screenshot of the exact failing moment as a build
+artifact; a log says an assertion failed, the picture usually says why.
+
+**Playwright is installed globally on the runner, never into the repo.** The
+zero-dependency promise is about what *running* Oche requires; this is test
+tooling that never ships. It is pinned to an exact version so a Playwright release
+cannot change what CI means without a commit saying so. `lib.js` uses the image's
+bundled Chromium when that path exists and otherwise falls back to Playwright's
+own download, which is what lets the same script run unchanged locally and in CI.
+
+**Coverage is printed, never enforced.** A coverage threshold turns "add a test"
+into "the build is red", which trains people to delete assertions instead of
+writing them. A number in the log is enough to notice a section going unmeasured.
+It runs under `if: always()` so it still prints when a test failed — exactly when
+knowing what is covered is most useful.
+
+**No install step anywhere except the browser job**, because there is nothing to
+install: no dependencies, no `package-lock.json`, no `node_modules`.

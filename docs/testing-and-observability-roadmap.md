@@ -222,6 +222,15 @@ arithmetic, extend `node:test`. When it is visual, take the screenshot.
 - **CI added.** `.github/workflows/test.yml` runs `npm test` on every push and PR —
   no code prerequisite was blocking this once the suite existed, so it was built
   in the same pass rather than left for a future session.
+- **CI widened to all three verification layers** (2026-07). Running `npm test`
+  alone turned out to be the wrong single layer: a frontend split broke every
+  screen in the app while all 1,683 backend tests stayed green, because the
+  failure was inline handlers resolving to `undefined` — invisible to anything
+  running in Node. The workflow is now four independent jobs: `static`
+  (`node --check` + `backend/check.js`), `tests`, `browser` (the 457-assertion
+  `verify-ui` suite against a real Chromium), and `secrets`. See `REFERENCE.md`
+  §38 for why they are separate jobs rather than steps, and why coverage is
+  printed but never enforced.
 
 ## Remaining open questions
 

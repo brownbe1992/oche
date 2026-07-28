@@ -50,8 +50,21 @@ const ROOT = path.resolve(__dirname, '..');
 const rd = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const QUIET = process.argv.includes('--quiet');
 
+// Every check's name, listed once. This exists because the "clean" line below used to
+// hardcode how many checks had run, and two checks were added without anyone noticing
+// the number — so the tool that exists to catch drift was quietly reporting the wrong
+// thing about itself. report() now refuses a name that isn't here, which means adding a
+// check without registering it fails immediately instead of silently.
+const CHECK_NAMES = [
+  'duplicate-function', 'unused-function', 'missing-handler', 'missing-id',
+  'missing-script', 'load-order', 'scoring-exports',
+];
+
 const findings = [];
-const report = (check, file, msg) => findings.push({ check, file, msg });
+const report = (check, file, msg) => {
+  if (!CHECK_NAMES.includes(check)) throw new Error(`check.js: unregistered check '${check}' — add it to CHECK_NAMES`);
+  findings.push({ check, file, msg });
+};
 const note = (s) => { if (!QUIET) console.log(s); };
 
 const scriptsOf = (html) =>
@@ -336,7 +349,7 @@ for (const [file, html] of [['frontend/index.html', INDEX_SCOPE.text], ['fronten
 
 // ---------------------------------------------------------------------------
 if (!findings.length) {
-  console.log(`check: clean (${SOURCES.length} sources, 5 checks).`);
+  console.log(`check: clean (${SOURCES.length} sources, ${CHECK_NAMES.length} checks).`);
   process.exit(0);
 }
 const byCheck = {};

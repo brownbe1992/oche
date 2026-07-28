@@ -9,12 +9,23 @@
 # hook verifies the prerequisites and sets up the environment instead.
 set -euo pipefail
 
+cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"
+
+# --- 0. Git hooks ----------------------------------------------------------
+# Runs BEFORE the web-session gate below, deliberately: git will not use a hook
+# directory that is merely committed, because a repository cannot silently make
+# `git clone` run code from the internet. Someone or something has to opt in per
+# checkout, and .githooks/pre-commit is the one check worth that — it refuses a
+# commit that would put a database or a credential into history, which is the one
+# mistake no later commit can undo. Idempotent, and a no-op if git isn't there.
+if [ -d .githooks ] && command -v git >/dev/null 2>&1; then
+  git config core.hooksPath .githooks 2>/dev/null || true
+fi
+
 # Web sessions only — a local checkout already has whatever its owner set up.
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
-
-cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"
 
 # --- 1. Node version -------------------------------------------------------
 # `npm test` (node --test) loads backend/db.js, which requires `node:sqlite`.
@@ -68,7 +79,7 @@ fi
 # that actually bites here — a syntax error in a file the backend test suite
 # never loads. Non-fatal: report, don't block.
 SYNTAX_BAD=""
-for f in backend/*.js frontend/*.js; do
+for f in backend/*.js frontend/*.js frontend/js/*.js; do
   [ -e "$f" ] || continue
   node --check "$f" >/dev/null 2>&1 || SYNTAX_BAD="$SYNTAX_BAD $f"
 done

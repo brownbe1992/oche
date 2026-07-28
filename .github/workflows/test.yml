@@ -1,15 +1,46 @@
-name: Backend tests
+name: Checks
 
-# docs/testing-and-observability-roadmap.md's open "is CI worth adding" question,
-# closed now that a real committed suite exists (backend/test/, node:test). Runs
-# the same `npm test` a contributor runs locally — no separate CI-only config.
+# Everything the project can verify about itself, run automatically.
+#
+# This used to run `npm test` alone, which is one of three layers — and not the one
+# that catches the worst failures. A 2026-07 frontend split broke every screen in the
+# app and the 1,683 backend tests stayed green throughout; only the browser suite
+# noticed, because the failure was inline handlers silently resolving to `undefined`,
+# which no amount of Node-side testing can see.
+#
+# Separate jobs rather than steps in one, so a fast failure reports fast: the static
+# checks finish in seconds, the backend suite in about half a minute, the browser
+# suite in a few minutes. They are independent, so all of them run even when one
+# fails — one push tells you everything that is wrong, not just the first thing.
 on:
   push:
     branches: ['**']
   pull_request:
 
 jobs:
-  test:
+  # Seconds. The things `node --check` cannot see — see backend/check.js's header.
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # No install step anywhere in this file: the project is intentionally
+      # dependency-free (no package-lock.json, no node_modules) — nothing to install.
+      - name: Syntax check every JS file
+        run: |
+          for f in backend/*.js frontend/*.js frontend/js/*.js; do
+            [ -e "$f" ] || continue
+            node --check "$f"
+          done
+      - name: Static checks
+        run: npm run check
+        working-directory: backend
+
+  tests:
+    name: Backend tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,8 +55,63 @@ jobs:
           # latest 22.x here instead of a fixed patch avoids re-hitting this
           # same class of bug later.
           node-version: '22'
-      # No install step: the project is intentionally dependency-free (no
-      # package-lock.json, no node_modules) — nothing to install.
       - name: Run tests
         run: npm test
         working-directory: backend
+      # Printed, never enforced. A coverage threshold turns "add a test" into "the
+      # build is red", which trains people to delete assertions instead of writing
+      # them; a number in the log is enough to notice a section going unmeasured.
+      # `if: always()` so it still prints when a test failed — that is exactly when
+      # knowing what is covered is most useful.
+      - name: Coverage report (informational)
+        if: always()
+        run: npm run test:coverage 2>&1 | tail -40
+        working-directory: backend
+
+  # Minutes. The only layer that sees a rendered screen, and therefore the only one
+  # that catches a handler that silently stopped resolving, a focus ring nobody can
+  # see, or a scoreboard showing the wrong number.
+  browser:
+    name: Browser checks (verify-ui)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Installed GLOBALLY on the runner, never into the repo. The zero-dependency
+      # promise is about what RUNNING Oche requires; this is test tooling that never
+      # ships. Pinned so a Playwright release cannot change what CI means without a
+      # commit saying so.
+      - name: Install Playwright (CI only — never a repo dependency)
+        run: |
+          npm install -g playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Browser checks
+        run: |
+          export NODE_PATH="$(npm root -g)"
+          node .claude/skills/verify-ui/scripts/run.js
+      # The suite screenshots the exact moment an assertion fails. A CI log says a
+      # layout assertion failed; the picture usually says why at a glance.
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-ui-screenshots
+          path: /tmp/oche-verify-ui-artifacts/
+          if-no-files-found: ignore
+
+  # Refuses anything that must never enter git history. Deliberately its own job and
+  # not a step in `static`: a leak is not a code-quality problem. History is
+  # permanent, so this failing means "stop and rewrite history", not "fix it in the
+  # next commit" — and it should be legible as that in the checks list.
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Scan tracked files
+        run: node backend/scan-secrets.js

@@ -1,0 +1,20 @@
+#!/bin/sh
+# Refuses a commit that would put a secret into git history.
+#
+# WHY THIS IS THE ONLY THING HERE. A pre-commit hook that runs the test suite gets
+# turned off within a week, because it makes every commit slow and most commits do not
+# need it — and a hook people turn off protects nothing. So this runs exactly one check,
+# it takes well under a second, and it guards the one mistake that a later commit cannot
+# fix: once a database or a credential is in history, deleting the file changes nothing.
+# Everything else (syntax, static checks, tests, browser checks) runs in CI, where being
+# slow is fine and being late is survivable.
+#
+# TO ENABLE (once per checkout — git will not use a committed hooks directory on its own,
+# by design, since cloning a repository must never run its code):
+#
+#     git config core.hooksPath .githooks
+#
+# TO BYPASS in a genuine emergency: `git commit --no-verify`. If you find yourself doing
+# that routinely, the scanner has a false positive and the scanner is what needs fixing —
+# see the no-false-positives note in backend/scan-secrets.js.
+exec node backend/scan-secrets.js --staged
