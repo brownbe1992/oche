@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* =============================================================================
    Outbound-request egress guard (docs/security-audit-roadmap.md, SEC-4).
@@ -32,6 +33,10 @@ const BLOCK_PRIVATE = String(process.env.HA_BLOCK_PRIVATE || '').toLowerCase() =
 // and the hex form (`::ffff:7f00:1`, the same address) — so a loopback/private
 // target can't hide behind the hex spelling the dotted-only regex used to miss
 // (docs/security-audit-roadmap.md SEC-16). `norm` is already lower-cased.
+/**
+ * @param {string} norm  an already-lower-cased IPv6 string
+ * @returns {string|null} the dotted IPv4, or null if `norm` is not IPv4-mapped
+ */
 function embeddedIPv4(norm) {
   const dotted = norm.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
   if (dotted) return dotted[1];
@@ -47,12 +52,20 @@ function embeddedIPv4(norm) {
 // eight hextets zero, in any spelling (`::`, `::0`, `0:0:0:0:0:0:0:0`). On Linux a
 // client socket connecting to the unspecified address reaches the local host, the
 // same as 0.0.0.0 does for IPv4 (SEC-16).
+/**
+ * @param {string} norm  an already-lower-cased IPv6 string
+ * @returns {boolean}
+ */
 function isUnspecifiedIPv6(norm) {
   if (norm === '::' || norm === '::0') return true;
   if (norm.includes('::')) return false; // any other compressed form has a nonzero group
   return norm.split(':').every(h => parseInt(h, 16) === 0);
 }
 
+/**
+ * @param {string} ip  a literal address, v4 or v6 — never a hostname
+ * @returns {boolean} true if this address must never be contacted
+ */
 function isLoopbackOrLinkLocal(ip) {
   if (net.isIPv4(ip)) {
     const o = ip.split('.').map(Number);
@@ -79,6 +92,10 @@ function isLoopbackOrLinkLocal(ip) {
   return false;
 }
 
+/**
+ * @param {string} ip  a literal address, v4 or v6
+ * @returns {boolean} true for LAN ranges — allowed by default, blocked when HA_BLOCK_PRIVATE is set
+ */
 function isPrivateRange(ip) {
   if (net.isIPv4(ip)) {
     const o = ip.split('.').map(Number);
@@ -101,6 +118,12 @@ function isPrivateRange(ip) {
 // the single IP address the caller should actually connect to. Throws a
 // caller-safe Error (no internal detail beyond "this destination isn't allowed") on
 // rejection or unresolvable hosts.
+/**
+ * @param {string} hostname
+ * @returns {Promise<string>} the single IP the caller must connect to — using this
+ *   rather than re-resolving is what closes the DNS-rebinding window
+ * @throws {Error} with a caller-safe message when the host is disallowed or unresolvable
+ */
 async function resolveAllowedHost(hostname) {
   let addresses;
   try {

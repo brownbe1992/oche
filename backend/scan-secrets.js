@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 'use strict';
 /* Refuses anything that must never enter git history.
  *
@@ -67,6 +68,7 @@ const SQLITE_MAGIC = Buffer.from('SQLite format 3\0', 'binary');
 // Only vendor formats whose prefix cannot occur by accident. No generic "looks like a
 // key" guessing: that is where false positives come from.
 // ---------------------------------------------------------------------------
+/** @type {Array<[RegExp, string]>} — pattern paired with what to call it in a finding */
 const TOKEN_PATTERNS = [
   [/\bghp_[A-Za-z0-9]{36}\b/,               'GitHub personal access token'],
   [/\bgho_[A-Za-z0-9]{36}\b/,               'GitHub OAuth token'],

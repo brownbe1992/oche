@@ -9930,5 +9930,76 @@ version of this step:
   says so in place, because a reader who notices the absence will otherwise assume
   the file is untested.
 
-**No install step anywhere except the browser job**, because there is nothing to
-install: no dependencies, no `package-lock.json`, no `node_modules`.
+**No install step anywhere except the browser and static jobs**, and both install
+*globally on the runner*, never into the repo: there is nothing to install here — no
+dependencies, no `package-lock.json`, no `node_modules`.
+
+---
+
+## 39. Type Checking (`jsconfig.json`)
+
+`npm run typecheck`, in `backend/`. TypeScript used as a **checker over plain
+JavaScript** — there are no `.ts` files, nothing is emitted, and no build step
+exists. Part of CI's `static` job.
+
+### What it buys that `check.js` structurally cannot
+
+`backend/check.js` works on text: declaration lines, HTML attributes, quoted ids. It
+cannot know that `addTurn`'s second argument is a turn object, so it cannot see a
+misspelled property, a swapped argument pair, or a call that passes a number where a
+string is required. Those are a whole class of bug, and they are exactly the ones a
+newcomer makes. Verified against this codebase by introducing each and watching it
+fail:
+
+| Injected mistake | Reported |
+|---|---|
+| `req.header.cookie` (missing the `s`) | `Property 'header' does not exist… Did you mean 'headers'?` |
+| `scryptAsync(secret, KEYLEN, salt)` — arguments swapped | `Argument of type 'number' is not assignable to parameter of type 'string'` |
+| `addresses[0].adress` | `Property 'adress' does not exist on type 'LookupAddress'. Did you mean 'address'?` |
+
+The JSDoc that drives it is the second half of the value, and arguably the larger
+one: `@param {string} secret  a password or PIN` documents the function where a
+newcomer reads it, and unlike a prose comment it cannot drift, because CI fails when
+it stops being true.
+
+### Adoption is per file, via `// @ts-check`
+
+`checkJs` is **false** in `jsconfig.json`. A file opts in by carrying a `// @ts-check`
+comment, and once opted in it stays clean because CI fails otherwise. Turning it on
+globally would report thousands of findings across `db.js` and `server.js` on day one,
+which is the same as reporting none — nobody reads a wall of output.
+
+**`// @ts-check` must be in the file's LEADING comment block — above `'use strict';`,
+not below it.** Put it below and TypeScript ignores it entirely: no warning, no error,
+the file is simply never checked while looking adopted and while `npm run typecheck`
+still reports success. That happened to all five of the first files adopted here and
+was caught only by deliberately breaking one and noticing that nothing complained. It
+is now `check.js`'s `ts-check-placement` rule, so it cannot happen quietly again.
+
+**Adopted so far:** `auth.js`, `netguard.js`, `backup-lib.js`, `check.js`,
+`scan-secrets.js` — the security-relevant and tooling files, smallest-and-most-valuable
+first. **Not yet:** `db.js`, `server.js`, `seed-dev-db.js`, `scoring.js` and the
+frontend.
+
+### Why `strictNullChecks` is off, and what that costs
+
+With it on, `db.js` alone reports ~600 "possibly undefined" findings. Most are places
+the code is genuinely correct — a query that cannot return no rows, a lookup whose key
+is known present — and proving each to the compiler means annotating far more than it
+catches. It is a real future improvement and a bad first step. The cost of leaving it
+off is stated plainly: **this setup will not catch a null dereference.** It catches
+wrong shapes, wrong types and wrong names.
+
+### Nothing is added to the repo
+
+`typescript` and `@types/node` are installed **globally** — on the CI runner by the
+workflow, and on a dev machine by the person who wants them — exactly as Playwright is.
+`jsconfig.json` lists several candidate `typeRoots` (a local `node_modules/@types`
+first, then the usual global locations) and TypeScript ignores the ones that do not
+exist, so one committed config works across machines with no `node_modules` anywhere.
+
+The file is named `jsconfig.json` rather than `tsconfig.json` deliberately: to the
+compiler they are the same file, but the name tells editors "this is a JavaScript
+project", so **VS Code picks it up automatically and a newcomer gets hover
+documentation and inline type errors with no setup at all**. That editor experience is
+most of the point; the CI job is what keeps it honest.

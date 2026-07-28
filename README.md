@@ -2026,6 +2026,7 @@ test runner is Node's own.
 | `npm test` | Run the whole test suite |
 | `npm run check` | Static checks (the project's linter — no install needed) |
 | `npm run scan` | Secret scan — refuses anything that must not enter git history |
+| `npm run typecheck` | Type-checks the JavaScript (needs a global TypeScript — see below) |
 | `npm run test:coverage` | Same as `npm test`, with Node's built-in coverage report |
 | `npm run seed` | Build a populated test database (see below) |
 
@@ -2070,6 +2071,24 @@ security settings. It is free, covers every vendor's token format, and stays
 current without anyone maintaining a list — strictly better than the scanner's own
 credential patterns. The two are complementary: push protection is the wider net,
 the hook is the one that catches a mistake before it is ever pushed.
+
+`npm run typecheck` runs TypeScript as a **checker over the plain JavaScript** — there
+are no `.ts` files, nothing is compiled, and there is still no build step. It catches
+what a text-based checker cannot: a misspelled property, a swapped pair of arguments, a
+number passed where a string is expected. The JSDoc comments that drive it double as
+documentation that cannot go stale, because CI fails when it stops being true.
+
+It is opt-in per file, via a `// @ts-check` comment at the very top (above
+`'use strict';` — below it, TypeScript silently ignores the file, which is why
+`npm run check` has a rule for exactly that mistake). So far: `auth.js`, `netguard.js`,
+`backup-lib.js`, `check.js` and `scan-secrets.js`. Adding a file means adding the
+comment and fixing whatever it reports.
+
+To run it locally you need TypeScript installed **globally**, not in the repo:
+
+```bash
+npm install -g typescript @types/node
+```
 
 Every push and pull request runs four independent CI jobs
 (`.github/workflows/test.yml`): the static checks, the test suite, the browser

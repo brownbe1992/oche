@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 /* =============================================================================
    Shared backup/restore mechanics (docs/archive/backups-roadmap.md).
@@ -138,7 +139,10 @@ function validateSqliteFile(filePath) {
       throw new Error('Database failed integrity check');
     }
   } catch (e) {
-    throw new Error('Database failed integrity check: ' + e.message);
+    // `e` is `unknown` in a catch clause and this string is diagnostic only, so
+    // read the message defensively rather than asserting a shape we don't control.
+    const why = e instanceof Error ? e.message : String(e);
+    throw new Error('Database failed integrity check: ' + why);
   } finally {
     if (testDb) testDb.close();
   }

@@ -8,6 +8,7 @@
     "start": "node server.js",
     "check": "node check.js",
     "scan": "node scan-secrets.js",
+    "typecheck": "tsc -p ../jsconfig.json --typeRoots \"$(npm root -g)/@types\"",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude='test/**'",
     "seed": "node seed-dev-db.js"

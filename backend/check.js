@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 'use strict';
 /* Oche's static checker — the project's linter, with no dependency to install.
  *
@@ -19,9 +20,10 @@
  * It does not parse JavaScript. Writing a parser to find every undeclared
  * variable would be a large, subtly-wrong program whose false positives would
  * defeat the rule above. `node --check` (already in the SessionStart hook)
- * covers syntax; this covers the five things `node --check` cannot see.
+ * covers syntax; this covers the seven things `node --check` cannot see.
  *
- * THE CHECKS.
+ * THE CHECKS. (Named once in CHECK_NAMES below, which report() validates against —
+ * this list is prose, that one is the source of truth.)
  *   1. Duplicate top-level function declarations. In `frontend/index.html`'s
  *      single ~18,600-line script scope, 657 functions share one namespace and a
  *      redeclaration is silently legal — the later one wins and the earlier
@@ -35,7 +37,13 @@
  *      module scope is not global scope and all ~335 handlers would silently
  *      stop resolving at once.
  *   4. `getElementById('x')` for an id that appears nowhere else in the file.
- *   5. scoring.js's hand-maintained CommonJS export list against what it
+ *   5. A `<script src>` pointing at a file that isn't there — a whole section of
+ *      the app silently not loading, which the browser reports only in its console.
+ *   6. A top-level initialiser in a split `frontend/js/` file that reads a name the
+ *      main script declares. Split files load FIRST, so such a line throws
+ *      ReferenceError and aborts the entire file, taking every function in it with
+ *      it. One such line killed all 15 league functions at once.
+ *   7. scoring.js's hand-maintained CommonJS export list against what it
  *      actually defines. The file is dual browser/CommonJS: the browser gets
  *      every top-level name free via <script src>, Node gets only what the
  *      literal names — so a drifted name is missing in exactly one environment.
@@ -57,7 +65,7 @@ const QUIET = process.argv.includes('--quiet');
 // check without registering it fails immediately instead of silently.
 const CHECK_NAMES = [
   'duplicate-function', 'unused-function', 'missing-handler', 'missing-id',
-  'missing-script', 'load-order', 'scoring-exports',
+  'missing-script', 'load-order', 'scoring-exports', 'ts-check-placement',
 ];
 
 const findings = [];
@@ -90,6 +98,21 @@ function loadedScripts(html, dir) {
   }
   return [...seen];
 }
+// Every .js file the typecheck config covers — backend/ and frontend/, recursively.
+function tsCheckCandidates() {
+  const out = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+      if (e.name === 'node_modules') continue;
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(rel);
+      else if (e.name.endsWith('.js')) out.push(rel);
+    }
+  };
+  walk('backend'); walk('frontend');
+  return out;
+}
+
 function scopeOf(html, dir) {
   const files = loadedScripts(html, dir);
   const missing = files.filter(f => !fs.existsSync(f));
@@ -108,9 +131,37 @@ const DISPLAY_JS = DISPLAY_SCOPE.js;
 // A <script src> naming a file that isn't there is a whole section of the app silently
 // not loading — the exact failure mode a staged split can introduce, and one the browser
 // reports only in its console.
-for (const [file, scope] of [['frontend/index.html', INDEX_SCOPE], ['frontend/display.html', DISPLAY_SCOPE]]) {
+/** @type {Array<[string, typeof INDEX_SCOPE]>} — the page's repo path, paired with its scope */
+const PAGES = [['frontend/index.html', INDEX_SCOPE], ['frontend/display.html', DISPLAY_SCOPE]];
+for (const [file, scope] of PAGES) {
   for (const m of scope.missing) {
     report('missing-script', file, `<script src> points at ${path.relative(ROOT, m)}, which does not exist`);
+  }
+}
+
+// `// @ts-check` only works in a file's LEADING comment block. Put it after
+// `'use strict';` — the obvious-looking place — and TypeScript ignores it completely:
+// no warning, no error, the file simply is not checked. That is the worst possible
+// failure for an opt-in tool, because `npm run typecheck` still reports success and
+// the file looks adopted. It happened on the first five files adopted, and was only
+// caught by deliberately breaking one and noticing that nothing complained.
+//
+// Exact, so it cannot false-positive: everything above the marker must be blank, a
+// shebang, or a comment.
+for (const rel of tsCheckCandidates()) {
+  const lines = rd(rel).split('\n');
+  const at = lines.findIndex(l => /^\s*\/\/\s*@ts-check\s*$/.test(l));
+  if (at === -1) continue;
+  let inBlock = false;
+  for (let i = 0; i < at; i++) {
+    const t = lines[i].trim();
+    if (inBlock) { if (t.includes('*/')) inBlock = false; continue; }
+    if (!t || t.startsWith('#!') || t.startsWith('//')) continue;
+    if (t.startsWith('/*')) { if (!t.includes('*/')) inBlock = true; continue; }
+    report('ts-check-placement', rel,
+      `// @ts-check is on line ${at + 1}, below code (line ${i + 1}: ${t.slice(0, 40)}) — ` +
+      'TypeScript ignores it there and the file is silently unchecked. Move it above.');
+    break;
   }
 }
 

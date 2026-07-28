@@ -38,6 +38,15 @@ jobs:
       - name: Static checks
         run: npm run check
         working-directory: backend
+      # TypeScript as a CHECKER over plain JavaScript — no .ts files, no build step,
+      # nothing emitted, and (like Playwright) installed globally on the runner rather
+      # than into the repo, so the zero-dependency promise holds. Only files carrying
+      # `// @ts-check` are checked; see jsconfig.json for why adoption is per file.
+      - name: Install TypeScript (CI only — never a repo dependency)
+        run: npm install -g typescript@6.0.2 @types/node@22
+      - name: Type check
+        run: npm run typecheck
+        working-directory: backend
 
   tests:
     name: Backend tests
