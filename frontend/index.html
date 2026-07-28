@@ -7459,7 +7459,12 @@ function restoreSetup(){
   try{
     const s = JSON.parse(localStorage.getItem('oche_last_setup')||'null');
     if(!s) return;
-    if(s.start)       { setup.start=s.start; const sel=document.getElementById('start-score-select'); if(sel) sel.value=String(s.start); }
+    // Only the state is restored, not a control. The New Game revamp replaced the
+    // old #start-score-select with #setup-flavor-select, which
+    // renderSetupFlavorAndBlurb() populates and sets from setup.start at the
+    // moment X01 is chosen — long after this runs, and correctly. The lookup left
+    // behind here found nothing and was silently swallowed by its own `if(sel)`.
+    if(s.start)       { setup.start=s.start; }
     if(s.legsPerSet)  { setup.legsPerSet=s.legsPerSet; const el=document.getElementById('legs-val'); if(el) el.textContent=s.legsPerSet; }
     if(s.setsPerGame) { setup.setsPerGame=s.setsPerGame; const el=document.getElementById('sets-val'); if(el) el.textContent=s.setsPerGame; }
     if(typeof s.practice==='boolean') setMode(s.practice ? 'practice' : 'h2h'); // never restores into 'challenge' — that's a fresh choice each visit
@@ -19070,14 +19075,6 @@ function submitCheckoutAttempt(){
    already a free-standing per-turn grouping integer, and this mode has no concept
    of sets to conflict with it. */
 function routeRecallCeiling(){ return (game.config && game.config.routeCeiling) || 3; }
-// The complete route set for the hunt in progress. Recomputed rather than cached
-// on `game`: allCheckoutRoutes() is a pure function of three values that only
-// change when a new target is served, and a stale cached total is exactly the bug
-// that would make a hunt uncompletable.
-function routeRecallRoutes(){
-  const p = game.players[0];
-  return allCheckoutRoutes(p.score, p.doubleOut, routeRecallCeiling());
-}
 // Whether this tier tells the player how many exist. See setRouteRecallCeiling().
 function routeRecallRevealsTotal(){ return routeRecallCeiling() <= 2; }
 

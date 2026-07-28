@@ -78,6 +78,23 @@ else
   echo "session-start: syntax check OK (node --check, all backend/ and frontend/ .js files)."
 fi
 
+# --- 4b. Static checks (backend/check.js) ---------------------------------
+# The five things node --check cannot see: a duplicate top-level function (legal
+# JS, and in index.html's single 18k-line scope the later one silently wins), a
+# function nothing calls, an inline on*= handler naming a function that no longer
+# exists (resolved at CLICK time, so nothing catches it until a user taps it), a
+# getElementById for an id nothing creates, and scoring.js's hand-maintained
+# CommonJS export list drifting from what the file defines. No dependency to
+# install — see that file's header for why it is hand-rolled and what it
+# deliberately declines to check. Non-fatal here: report, don't block.
+if [ -f backend/check.js ]; then
+  if node backend/check.js --quiet >/dev/null 2>&1; then
+    echo "session-start: static checks OK (backend/check.js)."
+  else
+    echo "session-start: WARNING — backend/check.js reported findings; run 'npm run check' in backend/ to see them." >&2
+  fi
+fi
+
 # --- 5. Confirm the test runner actually works -----------------------------
 # One small, fast suite rather than all 1305 tests — enough to prove node:sqlite
 # loaded and the runner is usable, without adding ~25s to every session start.

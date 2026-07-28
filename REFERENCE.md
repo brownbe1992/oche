@@ -9617,3 +9617,68 @@ format; argument validation; and an end-to-end run asserting two same-seed runs
 produce identical darts, that every game reaches exactly one ending
 (`completed_at` xor `dnf_at`), that every leg has exactly one winning turn, that
 play is spread across more than one day, and that both write guards hold.
+
+---
+
+## 36. Static Checks (`backend/check.js`)
+
+`npm run check`, in `backend/`. The project's linter. Also run by the
+SessionStart hook (`.claude/hooks/session-start.sh` step 4b), where it warns
+rather than blocks, and asserted by `backend/test/check-script.test.js`, where a
+finding against the committed tree is a **failing test**.
+
+### Why it is hand-rolled
+
+`backend/package.json` declares no dependencies and no devDependencies on
+purpose. The decision was to keep that true for dev tooling too rather than take
+ESLint, which changes what the tool should be: ESLint's value is breadth across
+any JavaScript codebase; a hand-rolled checker's value is encoding *this*
+codebase's own invariants exactly.
+
+### The rule it holds to: no false positives
+
+A checker that cries wolf gets ignored, and an ignored checker is worse than
+none because it looks like coverage. So every check runs over a surface that can
+be extracted **exactly** — a declaration line, an HTML attribute, a quoted id —
+and wherever a judgement call would be needed the check stays silent rather than
+guessing. It does not parse JavaScript; `node --check` (hook step 4) covers
+syntax, and this covers the five things `node --check` cannot see.
+
+### The five checks
+
+| Check | What it catches | Why nothing else does |
+|---|---|---|
+| `duplicate-function` | The same top-level `function name()` declared twice | Legal JavaScript. The later one silently wins and the earlier definition is simply gone — in `index.html`'s single ~18,600-line scope holding 679 functions, with no error anywhere |
+| `unused-function` | A top-level function nothing references | Counted across all frontend scripts, the backend, the whole test suite, **and the raw HTML** (an inline handler is markup, so it is invisible in the extracted script text) |
+| `missing-handler` | An inline `on*=` handler naming a function that does not exist | These resolve against the global object at **click time**, so a broken one throws nothing at load. Invisible to `node --check`, to the backend suite, and to any test that doesn't happen to click that control |
+| `missing-id` | `getElementById('x')` where `x` appears nowhere else in the file | A missing element returns `null` and usually fails silently inside a render path |
+| `scoring-exports` | A name in `scoring.js`'s CommonJS export list that isn't defined | The file is dual browser/CommonJS: the browser gets every top-level name free via `<script src>`, Node gets only what the hand-maintained literal names — so a drifted name is missing in exactly one environment, the tests |
+
+### What it deliberately declines to do
+
+- **Reference counting reads raw text**, comments and string literals included.
+  That trades recall for the no-false-positives rule: a function mentioned only
+  in a comment reads as used and goes unreported. The first draft stripped
+  comments and strings with a hand-written tokenizer whose failure mode was a
+  silent desync on a regex literal containing a quote — it swallowed the rest of
+  `db.js` and reported six live functions as dead. Over-counting can only ever
+  hide a finding; the tokenizer could invent them.
+- **Constructed ids are skipped.** `id="db-slot-${type}"` and
+  `getElementById('db-slot-' + type)` between them mean the literal
+  `db-slot-barrel` never appears in the file though the element is real, so
+  prefixes from both forms are collected and matching lookups skipped.
+- **`${...}` inside a handler attribute is ignored.** That is build-time
+  JavaScript, already replaced by its result before the attribute exists in the
+  DOM, so its names belong to the surrounding function's scope and not the
+  global one.
+- **Handler-local declarations are honoured.** Several handlers are IIFEs
+  holding a `var f = window.__modalSubmit`; `f()` is theirs, not a global.
+
+### `missing-handler` and the ES-module question
+
+This check is the safety net for any future move of `index.html`'s script into
+ES modules. **Module scope is not global scope**: all ~335 inline handlers
+resolve their names against `window`, so moving those functions into a module
+breaks every one of them at once, at click time, with nothing in the syntax
+check or the backend suite noticing. `missing-handler` reports the whole set
+immediately.

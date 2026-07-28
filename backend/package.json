@@ -6,6 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "check": "node check.js",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",
     "seed": "node seed-dev-db.js"

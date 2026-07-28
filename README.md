@@ -2021,8 +2021,20 @@ test runner is Node's own.
 |---|---|
 | `npm start` | Run the server |
 | `npm test` | Run the whole test suite |
-| `npm run test:coverage` | Same, with Node's built-in coverage report |
+| `npm run check` | Static checks (the project's linter — no install needed) |
+| `npm run test:coverage` | Same as `npm test`, with Node's built-in coverage report |
 | `npm run seed` | Build a populated test database (see below) |
+
+`npm run check` runs `backend/check.js`, which is hand-rolled rather than ESLint
+so the project keeps its "no dependencies, none to install" promise for dev
+tooling too. It covers the five things `node --check` cannot see: a duplicate
+top-level function (legal JavaScript — the later one silently wins), a function
+nothing calls, an inline `on*=` handler naming a function that no longer exists
+(those resolve at *click* time, so nothing else catches them), a
+`getElementById` for an id nothing creates, and `scoring.js`'s hand-maintained
+CommonJS export list drifting from what the file defines. It holds itself to one
+rule — **no false positives** — and stays silent wherever it would have to guess;
+its header says what it therefore misses.
 
 `npm run seed` writes a realistic, deterministic database to `data/seed-dev.db`
 by simulating real X01 and Cricket matches — every row goes through the same
