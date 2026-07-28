@@ -20,9 +20,10 @@
 > the `node:test` suite under `backend/test/` (all green as of this writing). This doc
 > tracks the correctness gaps that suite doesn't yet assert.
 >
-> **BUG-58 is the one open item on this tracker** (opened by the 2026-07 tenth-pass
-> audit — see `docs/security-audit-roadmap.md` Part 12, whose SEC-29/SEC-30 came from the
-> same pass). Everything below it is fixed.
+> **BUG-1 through BUG-58 are all fixed.** BUG-58 was opened by the 2026-07 tenth-pass
+> audit (see `docs/security-audit-roadmap.md` Part 12, whose SEC-29/SEC-30 came from the
+> same pass) and fixed in the following change, with a committed regression test proven
+> to fail against the pre-fix source.
 >
 > **BUG-1 … BUG-8 fixed.** BUG-1/BUG-2/BUG-3 (second pass); BUG-4/BUG-5/BUG-6/BUG-7
 > (fixed 2026-07 alongside `security-audit-roadmap.md` SEC-15/SEC-16), each with a
@@ -2909,9 +2910,18 @@ reachable by any realistic attempt, but the margin is thinner than the filler's
 
 ### BUG-58 — an import file whose `playerBadges` is not an array crashes the import with an unhandled `TypeError`, returning a 500 instead of "this file is malformed"  **(LOW, unhandled error / diagnostic-log noise)**
 
-**Status: Open.** Opened by the tenth-pass audit — see
-`docs/security-audit-roadmap.md` Part 12, whose **SEC-29** is the same function's
-larger validation gap.
+**Status: ✅ Fixed (2026-07).** `playerBadges` joined the existing shape check, allowing
+absent/null (so exports written before the field existed stay importable, which is what
+the `|| []` at the badge loop is for) and rejecting a present-but-wrong-shape value with
+a tagged 400. Fixed in the same change as **SEC-29**, the same function's larger
+validation gap — see `docs/security-audit-roadmap.md` Part 12.
+
+**Verification.** `backend/test/audit-part12-fixes.test.js` asserts the **status code**,
+not merely that it throws — the whole point of the fix is which status comes back, since
+an untagged throw is what made this a 500 and a `server_errors` row. Covers an object, a
+string, a number and `true`, plus absent and null still importing, and asserts the
+message is not the raw `is not iterable` TypeError. Confirmed to fail when the check is
+reverted.
 
 **What actually goes wrong, in plain terms.** `importPlayerExport()` starts by checking
 the shape of the file it was handed: it confirms `games`, `gamePlayers`, `turns`,

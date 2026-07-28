@@ -1254,7 +1254,65 @@ function recordTurn(gameId, t) {
 // opt-in HERE so those internal seeders keep working, but the network never calls addTurn
 // directly — it goes through recordTurn() above, which is validated by construction, so
 // the trust boundary doesn't depend on a caller remembering to pass a flag.
+// One dart, validated and normalised. Extracted from addTurn()'s own map callback
+// (docs/security-audit-roadmap.md SEC-29) so the import path can reuse the identical
+// rules rather than growing a second copy of them — a second copy is precisely how
+// SEC-25 happened, where SEC-22's consistency guard was written for one game type and
+// never re-run against Baseball. Two callers today: addTurn() and
+// importPlayerExport().
+//
+// Rejects garbage rather than silently coercing it: sector 0 (a miss), 1-20, or 25
+// (bull), multiplier 1-3. Also rejects physically impossible combinations no client
+// can produce — there is no treble bull (makeDart() downgrades that tap to a single),
+// and a miss is always stored as multiplier 1 (a "double/treble miss" tap expands to N
+// single misses client-side). Left unchecked, those two would store phantom distinct
+// (sector, multiplier) outcomes and corrupt the Around the World progress count, whose
+// 63-outcome total assumes only real combinations exist.
+//
+// zone/missZone/missDepth/bounced (docs/archive/dartboard-zone-tracking-roadmap.md) are
+// purely additive Dartboard-mode positional metadata, each meaningful only on the dart
+// shape it actually describes — a hit cannot have a miss wedge, a miss cannot have an
+// inner/outer zone.
+function validateDart(d, i) {
+  const sector = Number(d.sector), multiplier = Number(d.multiplier);
+  const validSector = Number.isInteger(sector) && (sector === 0 || sector === 25 || (sector >= 1 && sector <= 20));
+  const validMult   = Number.isInteger(multiplier) && multiplier >= 1 && multiplier <= 3;
+  if (!validSector || !validMult) throw httpError(400, 'Invalid dart sector or multiplier');
+  if (sector === 25 && multiplier === 3) throw httpError(400, 'No treble bull exists');
+  if (sector === 0 && multiplier !== 1) throw httpError(400, 'A miss must have multiplier 1');
+  const zone = (d.zone === 'inner' || d.zone === 'outer') ? d.zone : null;
+  if (d.zone != null && zone == null) throw httpError(400, "zone must be 'inner' or 'outer'");
+  if (zone != null && !(sector >= 1 && sector <= 20 && multiplier === 1)) {
+    throw httpError(400, 'zone is only valid for a single hit on a number 1-20');
+  }
+  const missDepth = (d.missDepth === 'near' || d.missDepth === 'far') ? d.missDepth : null;
+  if (d.missDepth != null && missDepth == null) throw httpError(400, "missDepth must be 'near' or 'far'");
+  let missZone = null;
+  if (d.missZone != null) {
+    missZone = Number(d.missZone);
+    if (!Number.isInteger(missZone) || missZone < 1 || missZone > 20) throw httpError(400, 'missZone must be an integer 1-20');
+  }
+  if ((missZone != null) !== (missDepth != null)) throw httpError(400, 'missZone and missDepth must be set together');
+  if (missZone != null && sector !== 0) throw httpError(400, 'missZone/missDepth are only valid on a miss (sector 0)');
+  const bounced = !!d.bounced;
+  if (bounced && sector !== 0) throw httpError(400, 'bounced is only valid on a miss (sector 0)');
+  return { dartNo: Number.isInteger(Number(d.dartNo)) ? Number(d.dartNo) : i + 1, sector, multiplier,
+           thrownAt: d.thrownAt ? String(d.thrownAt) : null, zone, missZone, missDepth, bounced };
+}
+
 function addTurn(gameId, t, opts = {}) {
+  // docs/security-audit-roadmap.md SEC-30: a game that has already ended must not
+  // accept new turns. completeGame()/forfeitPlayer()/abandonGame()/saveGame() all
+  // refuse a finished game via this same guard; this path did not, so a completed
+  // match could be handed extra darts it never saw — and under the documented
+  // OCHE_REQUIRE_AUTH=false LAN-trust mode, by any device on the network.
+  //
+  // Gated by opts, not placed in recordTurn(), for the reason recordTurn()'s own
+  // comment gives: the trust boundary must not depend on a future route remembering
+  // to call the wrapper. `allowFinished` exists only for the ~14 test files and the
+  // seeder that call addTurn() directly to plant history, the same opt-in shape
+  // `enforceConsistency` already uses in the other direction.
+  if (!opts.allowFinished) _requireLiveGame(gameId);
   const p = ensurePlayer(t.player);
   // Checkout Trainer trick-question declarations (docs/archive/checkout-trainer-roadmap.md
   // "Trick-question difficulty variant"): answering "no possible checkout" is the
@@ -1278,43 +1336,7 @@ function addTurn(gameId, t, opts = {}) {
   // 1-3. Rejecting garbage here keeps sector/treble/checkout analytics trustworthy.
   // (A declared-unsolvable turn reaches here with no darts array at all — validated
   // empty above — so it maps over nothing.)
-  const darts = (t.darts || []).map((d, i) => {
-    const sector = Number(d.sector), multiplier = Number(d.multiplier);
-    const validSector = Number.isInteger(sector) && (sector === 0 || sector === 25 || (sector >= 1 && sector <= 20));
-    const validMult   = Number.isInteger(multiplier) && multiplier >= 1 && multiplier <= 3;
-    if (!validSector || !validMult) throw httpError(400, 'Invalid dart sector or multiplier');
-    // Reject physically impossible combinations the client can never produce: no
-    // treble bull exists (makeDart() downgrades that tap to a single), and a miss is
-    // always stored as multiplier 1 (a "double/treble miss" tap expands to N single
-    // misses client-side). Left unchecked, a hostile/buggy client could store these
-    // as phantom distinct (sector, multiplier) outcomes and corrupt the Around the
-    // World progress count, whose 63-outcome total assumes only real combos exist.
-    if (sector === 25 && multiplier === 3) throw httpError(400, 'No treble bull exists');
-    if (sector === 0 && multiplier !== 1) throw httpError(400, 'A miss must have multiplier 1');
-    // docs/archive/dartboard-zone-tracking-roadmap.md: zone/missZone/missDepth/bounced are all
-    // purely additive, Dartboard-mode-only positional metadata — validated the same
-    // "reject garbage, don't silently coerce" way as sector/multiplier above, and
-    // each only meaningful on the specific dart shape it actually describes (a hit
-    // can't have a miss wedge, a miss can't have an inner/outer zone).
-    const zone = (d.zone === 'inner' || d.zone === 'outer') ? d.zone : null;
-    if (d.zone != null && zone == null) throw httpError(400, "zone must be 'inner' or 'outer'");
-    if (zone != null && !(sector >= 1 && sector <= 20 && multiplier === 1)) {
-      throw httpError(400, 'zone is only valid for a single hit on a number 1-20');
-    }
-    const missDepth = (d.missDepth === 'near' || d.missDepth === 'far') ? d.missDepth : null;
-    if (d.missDepth != null && missDepth == null) throw httpError(400, "missDepth must be 'near' or 'far'");
-    let missZone = null;
-    if (d.missZone != null) {
-      missZone = Number(d.missZone);
-      if (!Number.isInteger(missZone) || missZone < 1 || missZone > 20) throw httpError(400, 'missZone must be an integer 1-20');
-    }
-    if ((missZone != null) !== (missDepth != null)) throw httpError(400, 'missZone and missDepth must be set together');
-    if (missZone != null && sector !== 0) throw httpError(400, 'missZone/missDepth are only valid on a miss (sector 0)');
-    const bounced = !!d.bounced;
-    if (bounced && sector !== 0) throw httpError(400, 'bounced is only valid on a miss (sector 0)');
-    return { dartNo: Number.isInteger(Number(d.dartNo)) ? Number(d.dartNo) : i + 1, sector, multiplier,
-             thrownAt: d.thrownAt ? String(d.thrownAt) : null, zone, missZone, missDepth, bounced };
-  });
+  const darts = (t.darts || []).map((d, i) => validateDart(d, i));
   // Validate the visit-level numbers too, not just the darts. turns.scored feeds every
   // points/average stat, so a negative or absurd value would silently corrupt them; a
   // negative set/leg number is meaningless. Max single-visit score is 180 (3xT20) and
@@ -6709,6 +6731,13 @@ function clearPlayerStats(playerName, mode) {
 // newest turn would delete a turn this device never recorded. Fails closed (409)
 // rather than guessing.
 function deleteLastTurn(gameId, turnId) {
+  // docs/security-audit-roadmap.md SEC-30: undo is a mid-game action. Without this,
+  // the last turn of a FINISHED match could be deleted — repeatedly — leaving a game
+  // still stamped completed_at and still crediting its winner with none of the turns
+  // that produced the result, and the winning checkout gone from every finishes
+  // leaderboard. The turnId guard below is optimistic concurrency for the
+  // two-devices-scoring case (BUG-13) and says nothing about whether the game is over.
+  _requireLiveGame(gameId);
   if (turnId != null) {
     const requestedId = Number(turnId);
     const newest = db.prepare('SELECT id FROM turns WHERE game_id = ? ORDER BY id DESC LIMIT 1').get(Number(gameId));
@@ -7395,13 +7424,45 @@ function _findMatchingLocalGame(g, participantTargetIds) {
   return null;
 }
 
+// Atomic: the whole import is one transaction, so a file rejected part-way leaves
+// nothing behind. This became load-bearing with the SEC-29 validation above. The
+// function already threw mid-loop for malformed `config` JSON, but that was a rare
+// hand-corrupted case; validating every game, turn and dart makes a mid-import
+// rejection the NORMAL way a bad file fails, and the rows are inserted in dependency
+// order (games, then turns, then darts) — so a dart rejected on the last row would
+// otherwise leave every game and turn ahead of it committed, with the admin told the
+// import failed. Half a history is worse than none: it cannot be retried cleanly,
+// because _findMatchingLocalGame() would then skip the games that did land.
+// Same BEGIN/rollback shape mergePlayers() uses, for the same reason.
 function importPlayerExport(payload) {
+  db.exec('BEGIN');
+  try {
+    const result = _importPlayerExport(payload);
+    db.exec('COMMIT');
+    return result;
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+
+function _importPlayerExport(payload) {
   if (!payload || typeof payload !== 'object') throw httpError(400, 'Invalid import file');
   if (payload.schemaVersion !== 1) throw httpError(400, `Unsupported schemaVersion (expected 1, got ${payload.schemaVersion})`);
   const { player, games, gamePlayers, turns, darts, opponents, playerBadges } = payload;
   if (!player || typeof player !== 'object' || !Array.isArray(games) || !Array.isArray(gamePlayers)
       || !Array.isArray(turns) || !Array.isArray(darts) || !Array.isArray(opponents)) {
     throw httpError(400, 'Malformed import file — expected the shape produced by GET /api/players/export');
+  }
+  // docs/bug-roadmap.md BUG-58: playerBadges was the one field missing from the check
+  // above. Absent/null is legitimate — exports written before the field existed have
+  // no such key, which is what the `|| []` at the badge loop below is for — but a
+  // present-but-wrong-shape value slipped past that `||` and reached `for...of`, which
+  // threw an untagged TypeError. Untagged means no status, which the top-level handler
+  // treats as a server fault: the admin got a 500 instead of "your file is malformed",
+  // and the failure was persisted into the server_errors diagnostic table.
+  if (playerBadges != null && !Array.isArray(playerBadges)) {
+    throw httpError(400, 'Malformed import file — playerBadges must be an array');
   }
 
   const idMap = new Map(); // exported (source-server) player id -> this server's local player id
@@ -7474,6 +7535,16 @@ function importPlayerExport(payload) {
     const existingId = _findMatchingLocalGame(g, targetIds);
     if (existingId) { gameIdMap.set(g.id, existingId); skippedGameIds.add(g.id); gamesSkipped++; continue; }
 
+    // docs/security-audit-roadmap.md SEC-29: this path writes straight into `games`,
+    // so createGame()'s checks have to be repeated here or they are simply absent —
+    // the file is trusted to have come from a well-behaved Oche server and nothing
+    // verifies that. Same list, same source of truth (KNOWN_GAME_TYPES,
+    // clampMatchFormat), so the two write paths cannot drift into disagreeing about
+    // what a legal game is.
+    if (!KNOWN_GAME_TYPES.includes(g.game_type)) {
+      throw httpError(400, `Import file has an unknown game_type "${g.game_type}" (source game ${g.id})`);
+    }
+
     // games.config is untrusted file content and the read paths parse it
     // unguarded — reject malformed JSON at the boundary rather than inserting a
     // row that would 500 every later turn write / saved-games read. For killer
@@ -7499,8 +7570,12 @@ function importPlayerExport(payload) {
       }
     }
 
+    // clampMatchFormat() rather than a reject: it is the same lenient shape
+    // createGame() applies (BUG-5 — garbage floors to 1 rather than erroring), and an
+    // old export carrying a since-tightened value should still import, just bounded.
     const info = insertGame.run(
-      g.category, g.legs_per_set, g.sets_per_game, g.created_at, g.completed_at,
+      g.category, clampMatchFormat(g.legs_per_set), clampMatchFormat(g.sets_per_game),
+      g.created_at, g.completed_at,
       g.winner_id != null ? (idMap.get(g.winner_id) ?? null) : null,
       g.practice, g.game_type, configJson, g.player_count
     );
@@ -7530,7 +7605,25 @@ function importPlayerExport(payload) {
     // carrying the source server's raw id would attribute the effect to an arbitrary
     // local player.
     const affectedTid = t.affected_player_id != null ? (idMap.get(t.affected_player_id) ?? null) : null;
-    const info = insertTurn.run(newGameId, tid, t.set_no, t.leg_no, t.scored, t.bust, t.checkout, t.created_at, t.leg_won, t.target_score, t.declared_unsolvable ?? 0, affectedTid, t.declared_hit ?? null);
+    // docs/security-audit-roadmap.md SEC-29: the visit-level bounds addTurn() enforces.
+    // These are the numbers every points/average stat is built from, so a negative or
+    // absurd `scored` silently corrupts them, and a set/leg below 1 is meaningless.
+    // Deliberately NOT the full scored-vs-darts cross-check addTurn() can run: that
+    // recomputes a visit's value from its darts, which is right for a LIVE visit being
+    // scored, but an imported row is history whose darts may legitimately not sum to
+    // `scored` (a bust stores 0 while its darts hold real values, and the fixed-round
+    // modes store a mode-specific figure that is not a dart sum at all). Bounding the
+    // value is the check that holds for every game type; equating it to the darts is
+    // not, which is the same reasoning that keeps enforceConsistency opt-in.
+    const tScored = Number(t.scored ?? 0);
+    if (!Number.isFinite(tScored) || tScored < 0 || tScored > 180) {
+      throw httpError(400, `Import file has a turn with scored=${t.scored} (source game ${t.game_id}) — must be between 0 and 180`);
+    }
+    const tSet = Number(t.set_no ?? 1), tLeg = Number(t.leg_no ?? 1);
+    if (!Number.isInteger(tSet) || tSet < 1 || !Number.isInteger(tLeg) || tLeg < 1) {
+      throw httpError(400, `Import file has a turn with a non-positive set/leg number (source game ${t.game_id})`);
+    }
+    const info = insertTurn.run(newGameId, tid, tSet, tLeg, tScored, t.bust, t.checkout, t.created_at, t.leg_won, t.target_score, t.declared_unsolvable ?? 0, affectedTid, t.declared_hit ?? null);
     turnIdMap.set(t.id, Number(info.lastInsertRowid));
     turnsImported++;
   }
@@ -7541,7 +7634,17 @@ function importPlayerExport(payload) {
   for (const d of darts) {
     const newTurnId = turnIdMap.get(d.turn_id);
     if (newTurnId == null) continue;
-    insertDart.run(newTurnId, d.dart_no, d.sector, d.multiplier, d.thrown_at, d.zone, d.miss_zone, d.miss_depth, d.bounced);
+    // docs/security-audit-roadmap.md SEC-29: the same validateDart() addTurn() runs, not
+    // a second copy of its rules — writing the checks out again here is how SEC-25
+    // happened. The export's column names are snake_case (it is a straight row dump),
+    // so they are mapped onto the camelCase shape the shared validator takes; its
+    // normalised return is then what gets inserted, so an imported dart is stored in
+    // exactly the form a played one would be.
+    const v = validateDart({ dartNo: d.dart_no, sector: d.sector, multiplier: d.multiplier,
+      thrownAt: d.thrown_at, zone: d.zone, missZone: d.miss_zone, missDepth: d.miss_depth,
+      bounced: d.bounced }, 0);
+    insertDart.run(newTurnId, v.dartNo, v.sector, v.multiplier, v.thrownAt, v.zone,
+      v.missZone, v.missDepth, v.bounced ? 1 : 0);
     dartsImported++;
   }
 

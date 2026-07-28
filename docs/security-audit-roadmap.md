@@ -73,8 +73,10 @@
 > unvalidated" but "this exact value is refused here and accepted there". Its functional
 > counterpart is `docs/bug-roadmap.md` **BUG-58**.
 >
-> **Open right now: SEC-29 and SEC-30 (Part 12), plus `docs/bug-roadmap.md` BUG-58.**
-> Everything else on both trackers is fixed.
+> **SEC-1 through SEC-30 are all fixed**, as is BUG-1 through BUG-58. Part 12's three
+> findings were opened as a scan and fixed in the following change, each with a
+> committed regression test proven to fail against the pre-fix source. Nothing open on
+> either tracker.
 >
 > See the "Status" line
 > under each finding below for what actually shipped, which in a couple of places is
@@ -2059,7 +2061,39 @@ Functional-defect counterpart from this same pass: `docs/bug-roadmap.md` **BUG-5
 
 ### SEC-29 — `POST /api/players/import` inserts games, turns and darts with none of the validation `createGame()`/`recordTurn()` enforce, so one file can write records the app itself would refuse to create  **(MED, data integrity / stat poisoning)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** All five steps of the fix list below shipped, plus a
+sixth the fix list did not anticipate. `validateDart()` was **extracted** from
+`addTurn()`'s own map callback rather than reimplemented, and is now called by both
+callers — the import maps the export's snake_case column names onto the camelCase shape
+it takes and inserts its normalised return, so an imported dart is stored in exactly the
+form a played one would be. `game_type` is checked against `KNOWN_GAME_TYPES`;
+`legs_per_set`/`sets_per_game` go through `clampMatchFormat()` (clamped, not rejected —
+the lenient BUG-5 shape, so an old export carrying a since-tightened value still
+imports); `scored` is bounded 0-180 and set/leg required positive.
+
+**Deliberately not shipped: step 4's full scored-vs-darts cross-check.** Writing the
+test for it is what showed it to be wrong here. That check recomputes a visit's value
+from its darts, which is right for a live visit being scored and wrong for history — a
+bust legitimately stores 0 while its darts hold real values, and the fixed-round modes
+store a mode-specific figure that is not a dart sum at all. Bounding `scored` holds for
+every game type; equating it to the darts does not, which is the same reasoning that
+keeps `enforceConsistency` opt-in in the first place.
+
+**The sixth change, which the regression test demanded rather than the fix list:**
+the import is now **one transaction**. Step 5 chose "abort" over "skip and count", and
+the test written to pin that choice (`a rejected file writes nothing at all`) failed —
+rows are inserted in dependency order (games → turns → darts), so a dart rejected on the
+last row left every game and turn ahead of it committed while the admin was told the
+import had failed. That is worse than either option the fix list considered, because a
+half-import cannot be retried cleanly: `_findMatchingLocalGame()` would then skip the
+games that did land. Wrapped in the same `BEGIN`/`ROLLBACK` shape `mergePlayers()` uses.
+The gap pre-dated this finding (the malformed-`config` throw could already do it) but
+was rare; validating every row made it the normal failure mode.
+
+`backend/test/audit-part12-fixes.test.js`, 7 cases for this finding — each asserting
+**both** write paths refuse the same value, so a future drift between them fails rather
+than passing quietly. Every guard confirmed to fail the suite when individually
+reverted.
 
 **What actually goes wrong, in plain terms.** Oche has one careful front door for
 writing a game and one for writing a turn. `createGame()` refuses a game type it
@@ -2135,7 +2169,23 @@ when its own guard is reverted.
 
 ### SEC-30 — a finished game is still writable: `recordTurn()` and `deleteLastTurn()` never call `_requireLiveGame()`, so completed match history can be silently rewritten  **(MED, data integrity)**
 
-**Status: Open.**
+**Status: ✅ Fixed (2026-07).** `_requireLiveGame()` now guards `addTurn()` (gated by
+`opts.allowFinished`, the same opt-in shape `enforceConsistency` uses in the other
+direction, for the ~14 test files and the seeder that plant history directly) and
+`deleteLastTurn()` (unconditionally — undo is a mid-game action). Six write paths now
+share the guard, and the regression test asserts **all six together** rather than only
+the two that changed, so a seventh added without it stands out against the pattern.
+
+**The fix list missed a regression it would have caused, found by tracing the call
+graph before shipping.** `DB.recordTurn()` is pushed onto a serialising queue in
+`frontend/index.html`, but `DB.abandonGame()`/`DB.forfeitPlayer()` were fire-and-forget
+outside it — so ending a game could reach the server *ahead* of a turn still in flight.
+With this finding fixed, that turn is refused with a 409, and `DB._queue`'s
+`.catch(logErr)` swallows it: the last dart a player threw would have vanished with no
+error they ever saw. Both now chain onto `_chain` without joining it, exactly as
+`saveGame()` has since item 60 and for a sharper version of the same reason. Worth
+recording as the general lesson: **closing a write path is only safe once you know what
+is still in flight toward it.**
 
 **What actually goes wrong, in plain terms.** When a match ends, the game row is stamped
 `completed_at` and a winner. Four write paths correctly refuse to touch a game in that

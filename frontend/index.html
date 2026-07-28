@@ -2694,13 +2694,26 @@ const DB = {
   recordEvent(type, setNo, legNo){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/events`, {type, setNo:setNo??null, legNo:legNo??null})); } },
   completeGame(winner){ if(this.gameId!=null){ const id=this.gameId; this._queue(()=>Backend.send('POST',`/api/games/${id}/complete`, {winner})); } },
   // Forfeit/abandon (docs/open-roadmap-items.md "Forfeiting a multiplayer game" /
-  // "abandoned games count as a DNF") — not queued through DB._queue like
+  // "abandoned games count as a DNF") — not PUSHED onto DB._queue like
   // recordTurn/recordEvent above: both are one-shot actions whose caller needs
-  // the real response (forfeitPlayer's `ended`/`winnerName` decide what the
-  // live UI shows next) rather than fire-and-forget, the same reasoning
+  // the real response rather than fire-and-forget, the same reasoning
   // saveGame()/abandonSavedGame() below already follow.
-  forfeitPlayer(playerName){ return this.gameId!=null ? Backend.send('POST', `/api/games/${this.gameId}/forfeit`, { player: playerName }) : Promise.reject(new Error('No active game')); },
-  abandonGame(){ return this.gameId!=null ? Backend.send('POST', `/api/games/${this.gameId}/abandon`) : Promise.reject(new Error('No active game')); },
+  //
+  // Both AWAIT the write queue without joining it, the same way saveGame() below
+  // does and for a sharper version of the same reason (docs/security-audit-roadmap.md
+  // SEC-30). Ending a game now makes the server refuse further turns for it, so a
+  // turn still in flight when the abandon lands is rejected 409 — and _queue's
+  // `.catch(logErr)` swallows that, so the last dart thrown would vanish with no
+  // error the player ever sees. Chaining means every queued turn is already written
+  // before the game is closed. Chained onto rather than pushed onto _chain because
+  // this promise IS the caller's answer (forfeitPlayer's `ended`/`winnerName` decide
+  // what the live UI shows next), which _queue's fire-and-forget shape can't give;
+  // and _chain never rejects, so a failed turn write can't strand a player in a game
+  // they can't leave.
+  forfeitPlayer(playerName){ if(this.gameId==null) return Promise.reject(new Error('No active game'));
+    const id=this.gameId; return this._chain.then(()=>Backend.send('POST', `/api/games/${id}/forfeit`, { player: playerName })); },
+  abandonGame(){ if(this.gameId==null) return Promise.reject(new Error('No active game'));
+    const id=this.gameId; return this._chain.then(()=>Backend.send('POST', `/api/games/${id}/abandon`)); },
   deleteLastTurn(){ if(this.gameId!=null){ const id=this.gameId; const turnId=this.lastTurnId; this.lastTurnId=null;
     this._queue(()=>Backend.send('DELETE',`/api/games/${id}/turns/last`+(turnId!=null?`?turnId=${turnId}`:''))); } },
 

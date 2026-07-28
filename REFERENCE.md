@@ -4534,6 +4534,41 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   `GET /api/players/export` produces. Uses a raised body-size cap
   (`MAX_PLAYER_IMPORT_BYTES`, 20MB vs. the usual 1MB `readJson()` default —
   a prolific player's full history can genuinely exceed 1MB as JSON).
+
+  **Validated to the same standard as live play** (`docs/security-audit-roadmap.md`
+  SEC-29). This path writes straight into `games`/`turns`/`darts`, bypassing
+  `createGame()`/`addTurn()` and their lifecycle hooks, so every check they perform is
+  repeated here or it is simply absent. The file is *untrusted input*, not trusted
+  history: it arrives from another server, or from anywhere.
+
+  | Rejected | Same rule as |
+  |---|---|
+  | a `game_type` not in `KNOWN_GAME_TYPES` | `createGame()` |
+  | a dart that isn't a real board segment, a treble bull, a ringed miss, or miss metadata on a hit | `addTurn()` — via the **shared `validateDart()`**, not a second copy |
+  | a turn with `scored` outside 0–180, or a set/leg below 1 | `addTurn()` |
+  | `playerBadges` present but not an array (`docs/bug-roadmap.md` BUG-58) | its five sibling fields |
+
+  `legs_per_set`/`sets_per_game` are **clamped** rather than rejected, via the same
+  `clampMatchFormat()` `createGame()` uses — lenient by the BUG-5 precedent, so an old
+  export carrying a since-tightened value still imports, just bounded.
+
+  `validateDart()` is **extracted, not duplicated**. A second copy of those rules is
+  exactly how SEC-25 happened: SEC-22's consistency guard was written for one game type
+  and never re-run against Baseball. One function, two callers.
+
+  Deliberately **not** applied: `addTurn()`'s full scored-vs-darts cross-check. That
+  recomputes a visit's value from its darts, which is right for a live visit being
+  scored but wrong for history — a bust legitimately stores 0 while its darts hold real
+  values, and the fixed-round modes store a mode-specific figure that is not a dart sum
+  at all. Bounding `scored` holds for every game type; equating it to the darts does
+  not, which is the same reasoning that keeps `enforceConsistency` opt-in.
+
+  **The whole import is one transaction.** Rows are inserted in dependency order
+  (games → turns → darts), so without this a dart rejected on the last row would leave
+  every game and turn ahead of it committed while the admin is told the import failed.
+  Half a history is worse than none, because it cannot be retried cleanly:
+  `_findMatchingLocalGame()` would then skip the games that did land. Same
+  `BEGIN`/`ROLLBACK` shape as `mergePlayers()`.
 - The Settings → Admin & Danger Zone → **Data Export** section, and the
   dedicated `#screen-player-export` screen it links to, cover both
   directions: **"Export all data"** navigates straight to `/api/export-all`
@@ -4700,6 +4735,41 @@ already-migrated database is a safe no-op).
 | `loadout_id` | `INTEGER REFERENCES loadouts(id) ON DELETE SET NULL` | The loadout selected for this player in this game, if any (§16). Nullable — playing without a loadout remains fully valid |
 | `start_score` | `INTEGER` | X01 handicapping only (§25): this player's own handicap starting score for this game, when it differs from the game-wide `games.category` score. `NULL` for every non-handicapped player and every non-X01 game. The presence of any non-NULL value in a game is what the `NOT_HANDICAPPED` exclusion (nine-darter/fewest-darts/first-9 leaderboards, Elo) filters on, so it must survive export/import round trips |
 | `dnf` | `INTEGER NOT NULL DEFAULT 0` | Set on this one participant when they leave the match early — see "Forfeiting a game / DNF" below. `0` for every player who finished (or is still playing) |
+
+### A game that has ended is closed to writes
+
+`_requireLiveGame(gameId)` throws `409 "This game has already ended"` for any game
+carrying `completed_at` **or** `dnf_at`. **Six write paths call it, and that set is the
+invariant** — a seventh added without it is the bug (`docs/security-audit-roadmap.md`
+SEC-30):
+
+| Path | |
+|---|---|
+| `completeGame()` | can't be completed twice |
+| `forfeitPlayer()` | can't bow out of a finished match |
+| `abandonGame()` | can't abandon a finished match |
+| `saveGame()` | can't pause a finished match |
+| `addTurn()` | **can't be handed darts it never saw** |
+| `deleteLastTurn()` | **can't have its history deleted out from under it** |
+
+The last two were missing. Without them a completed match could be left still stamped
+`completed_at`, still crediting its winner, with every one of its turns deleted — and
+the winning checkout gone from every finishes leaderboard. Reachable by any admin, and
+under the documented `OCHE_REQUIRE_AUTH=false` LAN-trust mode by any device on the
+network.
+
+`addTurn()` takes `opts.allowFinished` to opt out — the same shape `enforceConsistency`
+uses in the other direction, for the ~14 test files and the seeder that call it directly
+to plant history. The guard lives in `addTurn()` rather than only in `recordTurn()` so
+the trust boundary doesn't depend on a future route remembering to call the wrapper,
+which is the reasoning `recordTurn()`'s own comment already gives.
+
+**`DB.abandonGame()`/`DB.forfeitPlayer()` (`frontend/index.html`) await the write queue**
+as a direct consequence. Both were fire-and-forget while `recordTurn` is queued, so
+ending a game could overtake a turn still in flight — which the server now refuses with
+a 409 that `DB._queue`'s `.catch(logErr)` swallows, silently losing the last dart
+thrown. They chain onto `_chain` without joining it, exactly as `saveGame()` has since
+item 60, so every queued turn is written before the game is closed.
 
 ### Forfeiting a game / DNF
 
