@@ -40,7 +40,17 @@ series, on purpose (see Rate limiting below).
 
 ## What it covers
 
-374 assertions across fifteen checks:
+462 assertions across eighteen checks.
+
+**Each check's assertion count is recorded in `scripts/run.js`'s `CHECKS` table, and
+running fewer than that fails the suite.** That is the check on the checks: a suite
+that only reports what it happened to run cannot tell "everything passed" from "most
+of it never executed", and both print green. When two checks threw on a CI runner, the
+suite reported *385/387 assertions passed* — the denominator had quietly shrunk with
+the numerator, so 72 missing assertions looked like a healthy run with two failures.
+Worse, a check that ran *nothing at all* used to print `0/0 assertions passed` and
+`All checks green`. Adding assertions therefore means raising that number in the same
+commit; the suite tells you which way it disagrees and by how much.
 
 | Check | Guards |
 |---|---|
@@ -57,7 +67,10 @@ series, on purpose (see Rate limiting below).
 | `pad-reuse` | The dart pads are built once and toggled, not rebuilt per dart — and still update. Asserts BOTH, because they pull against each other: the buttons must be the same nodes after a dart (stamped before, looked for after — a rebuild is invisible to a check that only reads the rendered result, which is why the per-dart rebuild survived so long), and Cricket's marks glyph, `closed` class and `aria-label` must still move when a number closes (the naive way to stop rebuilding is to stop rendering, which freezes the pad while the real state moves underneath). Reads the pad-owning types from the app's own `MODE_PAD_RENDERERS`. |
 | `profile-a11y` | The Player Profile is navigable and audible, not just visible. Asserts a heading outline (an H2 name, no skipped levels, every collapsible section carrying a heading as well as its `<summary>` disclosure button) *structurally* rather than as a list of expected titles, so adding a section doesn't mean editing the check; that every visible button has an accessible name and the per-checkout drill buttons are told apart by theirs; and that all three scope controls announce through `#sr-announcer` when they replace the page's entire contents. |
 | `route-recall` | Checkout Trainer's Route Recall sub-mode, played through the real screen. Pins the things its unit tests cannot see: that a hunt HOLDS its target across submissions (if it moved on, the mode would silently be Freeform and every unit test would still pass), that the found-so-far list is rendered at all, that a duplicate does not take the bust styling every other wrong answer uses, and that the 1-2 dart tiers reveal the total while the 3-dart tier shows no denominator — that split being the whole reason the mode has tiers. |
-| `live-scoreboard` | The `/display` second screen picks up players, updates on a scored visit, renders an end-of-leg card, and switches renderer for Cricket. |
+| `mode-state-hygiene` | Leaving a mode leaves nothing of it behind — per-mode state that survives into the next game shows up as a scoreboard describing a game nobody is playing. |
+| `challenge-scoreboards` | Every Daily Challenge format says the same true thing on both scoreboards (the in-app one and `/display`), which previously disagreed — `/display` showing "1 ton · 2/6 visits" while the app showed a filler countdown from 1000 that reads as a target the player is meant to be chasing. |
+| `keyboard` | The app is operable without a pointer: focus is visible, modals trap focus and restore it on close, and controls reachable by tab activate by keyboard. |
+| `live-scoreboard` | The `/display` second screen picks up players, updates on a scored visit, renders an end-of-leg card, and switches renderer for Cricket. The end-of-leg assertions read the **card**, not its heading: a leg is announced in two pushes (the controller's own "X wins the leg" wording, then later pushes with `message:''` that fall through to "X takes the leg"), so any check pinning one heading string is pinning a race — this one did, matching only the transient first state and failing on the settled one. What it asserts instead is the payload the contract actually carries: both players lane'd, the winner marked, and the winner's darts and average — which come straight from the `legSummary` winner row, the field mapping that has silently broken before. |
 | `home-settings` | Home ticker hides with no activity and shows with some; a Settings tile summary tracks a script-driven change. |
 
 `all-game-types` reads the list from the app's own registry rather than one kept

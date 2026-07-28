@@ -14,25 +14,45 @@
 const path = require('path');
 const L = require('./lib');
 
+/* Each check, and HOW MANY ASSERTIONS IT MUST RUN.
+ *
+ * The count is not bookkeeping — it is the check on the checks. A suite that only
+ * reports what it happened to run cannot tell "everything passed" from "most of it
+ * never executed", and both print as green.
+ *
+ * That is not hypothetical: when two checks threw on a CI runner (a browser path that
+ * existed locally and not there), the suite reported **385/387 assertions passed** and
+ * a tidy list with two FAIL lines. It looked 99% healthy. In fact 72 assertions had not
+ * run at all, and the total had silently shrunk from 457 to 387 to match — the
+ * denominator moved with the numerator, so nothing looked wrong.
+ *
+ * A count that is too LOW is therefore a failure in its own right, whatever the
+ * assertions that did run said. It catches a check that throws, one that returns early
+ * past half its body, and one whose setup silently produced no rows to assert on.
+ *
+ * Raising a number here is a deliberate act, done in the same commit that adds the
+ * assertions. If this file disagrees with reality the suite tells you which way and by
+ * how much.
+ */
 const CHECKS = {
-  'results-takeover': './checks/results-takeover',
-  'new-game': './checks/new-game',
-  'ghost-picker': './checks/ghost-picker',
-  'scoring-modes': './checks/scoring-modes',
-  'all-game-types': './checks/all-game-types',
-  'turn-loop': './checks/turn-loop',
-  'save-resume': './checks/save-resume',
-  'leg-reset': './checks/leg-reset',
-  'resume-fidelity': './checks/resume-fidelity',
-  'pad-reuse': './checks/pad-reuse',
-  'profile-a11y': './checks/profile-a11y',
-  'route-recall': './checks/route-recall',
-  'mode-state-hygiene': './checks/mode-state-hygiene',
-  'challenge-scoreboards': './checks/challenge-scoreboards',
-  'keyboard': './checks/keyboard',
-  'live-scoreboard': './checks/live-scoreboard',
-  'live-shell': './checks/live-shell',
-  'home-settings': './checks/home-settings',
+  'results-takeover':      { path: './checks/results-takeover',      assertions: 29 },
+  'new-game':              { path: './checks/new-game',              assertions: 9 },
+  'ghost-picker':          { path: './checks/ghost-picker',          assertions: 11 },
+  'scoring-modes':         { path: './checks/scoring-modes',         assertions: 32 },
+  'all-game-types':        { path: './checks/all-game-types',        assertions: 82 },
+  'turn-loop':             { path: './checks/turn-loop',             assertions: 47 },
+  'save-resume':           { path: './checks/save-resume',           assertions: 6 },
+  'leg-reset':             { path: './checks/leg-reset',             assertions: 12 },
+  'resume-fidelity':       { path: './checks/resume-fidelity',       assertions: 14 },
+  'pad-reuse':             { path: './checks/pad-reuse',             assertions: 19 },
+  'profile-a11y':          { path: './checks/profile-a11y',          assertions: 10 },
+  'route-recall':          { path: './checks/route-recall',          assertions: 16 },
+  'mode-state-hygiene':    { path: './checks/mode-state-hygiene',    assertions: 16 },
+  'challenge-scoreboards': { path: './checks/challenge-scoreboards', assertions: 52 },
+  'keyboard':              { path: './checks/keyboard',              assertions: 15 },
+  'live-scoreboard':       { path: './checks/live-scoreboard',       assertions: 11 },
+  'live-shell':            { path: './checks/live-shell',            assertions: 66 },
+  'home-settings':         { path: './checks/home-settings',         assertions: 15 },
 };
 
 async function main() {
@@ -73,7 +93,7 @@ async function main() {
   try {
     for (const name of names) {
       console.log(`\n=== ${name} ===`);
-      const run = require(path.join(__dirname, CHECKS[name]));
+      const run = require(path.join(__dirname, CHECKS[name].path));
       try {
         summaries.push(await run());
       } catch (err) {
@@ -93,13 +113,34 @@ async function main() {
   const failed = summaries.flatMap(s => s.results.filter(r => !r.passed));
   const shots = summaries.flatMap(s => s.artifacts || []);
 
+  // Expected only for the checks this run was actually asked for, so running one
+  // check doesn't report the other seventeen as missing.
+  const expectedTotal = names.reduce((n, name) => n + CHECKS[name].assertions, 0);
+  const shortfalls = summaries
+    .map(s => ({ check: s.check, ran: s.results.length, want: CHECKS[s.check].assertions }))
+    .filter(s => s.ran < s.want);
+
   console.log('\n' + '='.repeat(60));
   for (const s of summaries) {
     const bad = s.results.filter(r => !r.passed).length;
-    console.log(`${bad ? 'FAIL' : 'ok  '}  ${s.check}  (${s.results.length - bad}/${s.results.length})`);
+    const want = CHECKS[s.check].assertions;
+    const missing = want - s.results.length;
+    console.log(`${bad ? 'FAIL' : 'ok  '}  ${s.check}  (${s.results.length - bad}/${s.results.length})` +
+      (missing > 0 ? `   [expected ${want} — ${missing} never ran]` : ''));
   }
   console.log('='.repeat(60));
-  console.log(`${total - failed.length}/${total} assertions passed`);
+  console.log(`${total - failed.length}/${total} assertions passed` +
+    (total < expectedTotal ? `  —  but ${expectedTotal} were expected` : ''));
+
+  if (shortfalls.length) {
+    // Deliberately louder than a failed assertion. A failing assertion tells you
+    // something is broken; this tells you the suite does not know whether it is.
+    console.log('\nCOVERAGE LOSS — these checks ran fewer assertions than they should have:');
+    for (const s of shortfalls) console.log(`  - ${s.check}: ran ${s.ran}, expected ${s.want}`);
+    console.log('\nEither the check stopped early (look for a throw above) or it legitimately');
+    console.log('changed — if the new count is right, update it in CHECKS in this file, in the');
+    console.log('same commit that changed the assertions.');
+  }
 
   if (failed.length) {
     console.log('\nFailures:');
@@ -112,6 +153,10 @@ async function main() {
     }
     return 1;
   }
+  // A shortfall fails the run on its own. A check that quietly ran three of its
+  // twenty assertions and passed all three is not a green suite, and the whole
+  // point of counting is that nobody has to notice the number by eye.
+  if (shortfalls.length) return 1;
   console.log('All checks green.');
   return 0;
 }

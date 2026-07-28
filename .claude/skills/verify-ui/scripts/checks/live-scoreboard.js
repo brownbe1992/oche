@@ -55,6 +55,20 @@ async function waitForDisplayText(display, re, timeoutMs = 15000) {
   return { matched: false, text: last };
 }
 
+// Polls a DOM predicate rather than body text, and returns the first non-null
+// result. Text polling cannot express "the result card exists" — only "some
+// string appeared somewhere" — which is what let the end-of-leg assertion below
+// pass on a state that was about to be replaced.
+async function waitForDisplayState(display, fn, timeoutMs = 15000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const got = await display.evaluate(fn);
+    if (got) return got;
+    await display.waitForTimeout(400);
+  }
+  return null;
+}
+
 module.exports = async function run() {
   const rep = L.makeReporter('live-scoreboard');
 
@@ -81,12 +95,54 @@ module.exports = async function run() {
       scored.matched ? '501 -> 361' : `no 361 in: ${JSON.stringify(scored.text.slice(0, 160))}`);
 
     // --- end-of-leg summary card -----------------------------------------
-    // The controller/display contract that has broken before.
+    // The controller/display contract that has broken before: legSummary rows in,
+    // a card with real numbers out.
+    //
+    // WHY THIS ASSERTS THE CARD AND NOT ITS HEADING. It used to wait for the text
+    // /LEG COMPLETE|wins the leg|Darts Thrown/, and that assertion had its pass and
+    // fail conditions backwards. A leg is announced in TWO pushes: the first carries
+    // the controller's own wording ("X wins the leg") as s.message, and every later
+    // push carries message:'' — at which point display.html's verdictText() falls
+    // through to "X takes the leg" (the "LEG COMPLETE" branch needs no winner, so a
+    // real H2H leg never reaches it). So the old regex matched only the FIRST,
+    // transient state. Sample a moment later — as CI's slower machine did — and none
+    // of the three alternatives could ever match again, and it polled for 15s and
+    // failed on a display that was rendering the card perfectly.
+    //
+    // Both wordings are legitimate, so a check that pins either one is pinning a
+    // race. What is actually worth asserting is the payload: the winner's darts and
+    // average come straight from the legSummary winner row, so a broken contract
+    // shows up here as a blank cost line or a missing lane — the exact failure this
+    // check exists for, and stable in both push phases.
     await L.winLeg(controller);
-    const summary = await waitForDisplayText(display, /LEG COMPLETE|wins the leg|Darts Thrown/i);
-    rep.ok('x01: display renders an end-of-leg card', summary.matched,
-      summary.matched ? '' : `display text: ${JSON.stringify(summary.text.slice(0, 200))}`);
-    if (!summary.matched) await rep.captureIfFailed(display, 'x01-leg-summary');
+    const card = await waitForDisplayState(display, () => {
+      const v = document.getElementById('verdict');
+      if (!v || v.classList.contains('hidden')) return null;
+      const grid = document.getElementById('grid');
+      return {
+        verdict: (v.querySelector('.v') || {}).textContent || '',
+        cost: (v.querySelector('.cost') || {}).textContent || '',
+        lanes: [...(grid ? grid.querySelectorAll('.lane-name') : [])].map(el => el.textContent),
+      };
+    });
+    rep.ok('x01: display renders an end-of-leg card', !!card,
+      card ? '' : 'the #verdict element never left .hidden');
+    if (card) {
+      rep.ok('x01: the card names the result', /\S/.test(card.verdict), JSON.stringify(card.verdict));
+      // Both players get a lane, and the winner is marked — rows.length > 1 is what
+      // makes it a head-to-head card rather than a solo one.
+      rep.ok('x01: both players appear on the result card', card.lanes.length === 2,
+        JSON.stringify(card.lanes));
+      rep.ok('x01: the winner is marked', card.lanes.some(n => n.includes('🏆')),
+        JSON.stringify(card.lanes));
+      // The contract payload. "28 darts · 53.7 average" — both read from the
+      // legSummary winner row, which is the field mapping that has silently broken.
+      rep.ok('x01: the card shows what the leg cost', /\d+\s*darts/i.test(card.cost),
+        JSON.stringify(card.cost));
+      rep.ok('x01: the card shows the winning average', /[\d.]+\s*average/i.test(card.cost),
+        JSON.stringify(card.cost));
+    }
+    if (!card) await rep.captureIfFailed(display, 'x01-leg-summary');
 
     // --- Cricket ----------------------------------------------------------
     // A different renderer entirely (marks/closed grid rather than a countdown),
