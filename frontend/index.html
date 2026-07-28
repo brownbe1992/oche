@@ -46,6 +46,21 @@
     --bust:#e2711d;   /* bust status pairs against win-green in the same status line */
   }
   *{box-sizing:border-box}
+
+  /* Visible keyboard focus, everywhere (docs/accessibility-roadmap.md gap 6).
+     Measured before writing this: tabbing through a live game landed on
+     .btn controls whose focus ring was the BROWSER DEFAULT — computed
+     `outline: auto 1px rgb(16,16,16)`. Near-black, on a board background of
+     #0e0f0d. It is technically drawn and effectively invisible, which is worse
+     than none at all: a keyboard user cannot see where they are, on any screen.
+     Individual :focus rules existed for text inputs, the tournament tabs and a
+     few scoped areas, so the gap was every button in the app.
+
+     :focus-visible, not :focus — a mouse click on a button must not leave a ring
+     behind it, which is the reason the browser draws one only for keyboard
+     interaction in the first place. The gold accent is the app's own, and reads
+     against every surface in both the dark and paper themes. */
+  :focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:2px}
   html,body{margin:0}
   /* touch-action:manipulation disables the double-tap-to-zoom gesture (the
      "tapped a scoring button twice quickly and it zoomed the whole page in"
@@ -1490,8 +1505,10 @@
     <div id="game-header-controls">
       <span></span>
       <div class="imt-row">
-        <button class="imt-btn" id="imt-pad"   onclick="setDartMode('pad')"   aria-pressed="false">Pad</button>
-        <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="true">🎯</button>
+        <button class="imt-btn" id="imt-pad"   onclick="setDartMode('pad')"   aria-pressed="false"
+                aria-label="Score with the keypad — the keyboard-operable input">Pad</button>
+        <button class="imt-btn" id="imt-board" onclick="setDartMode('board')" aria-pressed="true"
+                aria-label="Score on the dartboard — needs a pointer">🎯</button>
       </div>
       <div class="header-actions">
         <div class="game-menu">
@@ -1900,7 +1917,8 @@
           <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
         </div>
         <div class="pad" id="pad"></div>
-        <div class="dart-board-wrap" id="dart-board-wrap"></div>
+        <div class="dart-board-wrap" id="dart-board-wrap" role="img"
+             aria-label="Dartboard — tap a segment to score. This input needs a pointer; switch to Pad for keyboard scoring."></div>
       </div>
 
       <!-- Results host for GAME OVER / LEG COMPLETE / MARATHON COMPLETE /
@@ -2530,7 +2548,9 @@
   </section>
 </div>
 
-<div class="modal-overlay" id="modal" hidden>
+<!-- role/aria-modal so assistive tech announces this as a dialog and treats the page
+     behind it as inert; see openModal()'s focus handling for the rest of the contract. -->
+<div class="modal-overlay" id="modal" hidden role="dialog" aria-modal="true">
   <div class="modal-card" id="modal-body"></div>
 </div>
 
@@ -2740,8 +2760,24 @@ const DB = {
   async wipeAll(){ await Backend.send('POST','/api/wipe-all'); await this.refreshStats(); },
 
   // push the current game snapshot to any scoreboard screens
-  pushLive(snapshot){ Backend.send('POST','/api/live', snapshot).catch(()=>{}); }
+  pushLive(snapshot){ Backend.send('POST','/api/live', snapshot).catch(logErr); }
 };
+// The project's one way to say "this request failing is not worth interrupting the
+// player over." Use `.catch(logErr)` — never a bare `.catch(()=>{})`, which is the
+// same decision with the evidence thrown away.
+//
+// The distinction matters because most of these ARE genuinely non-fatal: a live-
+// scoreboard push that fails is overwritten by the next one; a settings prefetch that
+// fails falls back to a documented default; a lifetime-baseline fetch that fails leaves
+// a milestone counting from 0. None of those should stop a game. But "don't interrupt
+// the player" and "don't tell anyone" are different choices, and 46 sites had silently
+// taken the second one — so a self-hoster asking "why isn't my colourblind mode
+// applying" or "why did that badge fire early" had nothing at all to look at. A
+// console warning costs nothing and is the only breadcrumb a browser leaves.
+//
+// If a failure genuinely needs the player to know (it changes what they should do next
+// — an abandon that did not take, a save that did not happen), it does NOT belong here:
+// surface it with uiAlertErr() instead.
 function logErr(e){ console.warn('darts backend:', e && e.message ? e.message : e); }
 
 /* =========================================================================
@@ -2791,7 +2827,7 @@ const Auth = {
     if(!this.loggedIn) throw new Error("Logged in, but couldn't confirm the session — try refreshing the page.");
   },
   async logout(){
-    await Backend.send('POST','/api/logout').catch(()=>{});
+    await Backend.send('POST','/api/logout').catch(logErr);
     await this.refresh();
   },
   async createAdmin(username, password){
@@ -3225,7 +3261,7 @@ function show(name){
       setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
       sanitizeSlots(); renderPlayers(); updateFormatLine();
       showSetupStep(2);
-      DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
+      DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(logErr);
     } else if(_enteringSetupFromDrill){
       // drillCheckout() (Top Finishes row / Coaching Insights "🎯 Drill" button)
       // presets setup.slots to the one player drilling, calls setMode('checkout_trainer')
@@ -3245,7 +3281,7 @@ function show(name){
         const continueBtn = document.getElementById('setup-step1-continue');
         if(continueBtn && typeof continueBtn.focus==='function') continueBtn.focus();
       });
-      DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
+      DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(logErr);
     } else {
       setup.slots=[]; setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
       sanitizeSlots(); renderPlayers(); updateFormatLine();
@@ -3255,7 +3291,7 @@ function show(name){
       showSetupStep(1);
       // stats are cached client-side and only refetched on demand — without this, averages
       // shown here can be stale after playing a game earlier in the same session.
-      DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(()=>{});
+      DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(logErr);
     }
   }
   if(name==='players') renderRoster();
@@ -3485,7 +3521,17 @@ const CHALLENGE_FORMAT_DEFS = {
     shortLabel: () => `Ton Hunter`,
     metricLabel: (v) => `${v} ton${v===1?'':'s'}`,
     pickTarget: () => null,
-    startScore: () => 1000,
+    // Derived, not the flat 1000 the 3-visit formats use. A filler score exists so the
+    // X01 engine can never naturally bust or win mid-attempt — the whole format is
+    // decided by checkCompletion() at the visit cap. At 6 visits Ton Hunter's own
+    // theoretical maximum is 6 × 180 = 1080, so a flat 1000 was 80 points BELOW it:
+    // a perfect attempt could drive the underlying score under 170 and start drawing
+    // checkout hints, or reach 0 and end the leg through the engine instead of through
+    // checkCompletion(). Unreachable in practice, but the premise the filler rests on
+    // was simply false here. Computed from the cap so a future change to
+    // TON_HUNTER_VISITS can't quietly reintroduce it. (The 3-visit formats have
+    // 3 × 180 = 540 against the same 1000 and were never close.)
+    startScore: () => TON_HUNTER_VISITS * 180 + 180,
     usesFillerScore: true,
     visitCap: TON_HUNTER_VISITS,
     checkCompletion: (game) => {
@@ -5980,7 +6026,7 @@ function confirmMergePlayers(source, target){
   closeModal();
   Backend.send('POST','/api/players/merge', { source, target })
     .then(async r=>{
-      await DB.refreshStats().catch(()=>{});
+      await DB.refreshStats().catch(logErr);
       renderMergePlayersControls();
       renderPinPlayersList();
       uiAlert(`Merged "${r.source.name}" into "${r.target.name}": ${r.moves.games} game(s), ${r.moves.turns} turn(s), and ${r.moves.badges} badge(s) moved; the duplicate record was deleted.`);
@@ -6275,7 +6321,7 @@ function testHaConnection(){
 let haWebhookStatus = { enabled: false, events: {} };
 function sendHaWebhook(event, player, category, extra){
   if(!haWebhookStatus.enabled || !haWebhookStatus.events[event]) return;
-  Backend.send('POST','/api/ha-webhook',{ event, player, category, ...(extra||{}) }).catch(()=>{});
+  Backend.send('POST','/api/ha-webhook',{ event, player, category, ...(extra||{}) }).catch(logErr);
 }
 
 /* ---------- player roster (saved profiles) ---------- */
@@ -6448,7 +6494,7 @@ function onSlotChange(i, value){
       if(value && !setup.loadoutByName[value]){
         Backend.get(`/api/players/default-loadout?name=${encodeURIComponent(value)}`)
           .then(lo=>{ if(lo && setup.slots[i]===value){ setup.loadoutByName[value]=lo; renderPlayers(); } })
-          .catch(()=>{});
+          .catch(logErr);
       }
     },
     ()=>{
@@ -6489,7 +6535,7 @@ function selectLoadoutForSlot(name, slotIndex, loadoutId){
   if(loadoutId==null){ delete setup.loadoutByName[name]; renderPlayers(); return; }
   Backend.get(`/api/loadouts/${loadoutId}?name=${encodeURIComponent(name)}`)
     .then(lo=>{ setup.loadoutByName[name] = lo; renderPlayers(); })
-    .catch(()=>{});
+    .catch(logErr);
 }
 
 function addExistingPlayer(){
@@ -7920,7 +7966,7 @@ function newMatchPlayer(name, start){
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}`).then(stats=>{
     if(!stats) return;
     p.lifetimeOneEightiesBase = (stats.one80s || 0) - p.sessionOneEighties;
-  }).catch(()=>{});
+  }).catch(logErr);
   // Around the World baseline (see atwHitSet/atwBaselineHitSet above) — fetched
   // unconditionally once here, same as newMatchPlayerAroundTheWorld()'s own
   // precedent; enterTurn()'s per-visit check below still skips entirely once
@@ -7930,7 +7976,7 @@ function newMatchPlayer(name, start){
   // the 180 ladder above.
   Backend.get(`/api/players/around-the-world?name=${encodeURIComponent(name)}`).then(prog=>{
     p.atwBaselineHitSet = new Set((prog.hit||[]).map(h=>`${h.sector}:${h.mult}`));
-  }).catch(()=>{});
+  }).catch(logErr);
   return p;
 }
 
@@ -9603,7 +9649,7 @@ function checkChallengeBadges(playerName){
       awardOnceBadge(playerName, 'challengeallformats', 'challengeallformats', game && game.lastTurnSnapshot,
         { icon:'🗓️', headline:'FULL ROTATION', statLine:'Every Daily Challenge format completed' });
     }
-  }).catch(()=>{});
+  }).catch(logErr);
 }
 function loadChallengeHistory(){
   const container = document.getElementById('player-challenge-history');
@@ -9786,7 +9832,7 @@ function loadGhostRaceRecord(){
     const el = document.getElementById('ghost-race-record');
     if(!el) return;
     el.textContent = (rec && rec.totalRaces > 0) ? `👻 Ghost races: ${rec.wins}W–${rec.losses}L` : '';
-  }).catch(()=>{});
+  }).catch(logErr);
 }
 function renderPersonalBests(data){
   const container=document.getElementById('player-personal-bests');
@@ -11102,7 +11148,7 @@ function checkCheckoutBlitzMilestones(playerName){
     if(!pb || pb.bestScore == null) return;
     const ladder = CHECKOUT_BLITZ_MILESTONE_LADDERS[0];
     checkChuckinMilestoneTier(ladder, playerName, pb.bestScore);
-  }).catch(()=>{});
+  }).catch(logErr);
 }
 // Shared helper for the one-off flagship badges below — same once:true /
 // earnedBadgeCache / queueBadge / fireMomentCard pattern the ladder tiers use
@@ -11950,7 +11996,7 @@ function awardTimeOfDayBadges(p){
 }
 function trackBadgeForUndo(snap, playerName, badgeId){
   if(!snap) return;
-  if(snap.voided){ Backend.send('POST','/api/badges/revoke', { player:playerName, badgeId }).catch(()=>{}); return; }
+  if(snap.voided){ Backend.send('POST','/api/badges/revoke', { player:playerName, badgeId }).catch(logErr); return; }
   snap.badgeReverts.push({ player:playerName, badgeId });
 }
 // Persists a recurring badge occurrence (count-mode: increments every call, since
@@ -12019,7 +12065,7 @@ function awardOnceBadge(player, backendBadgeId, achId, snap, momentOpts, opts){
       queueBadge(achId, player, snap, 'First time!');
       fireMomentCard(achId, { ...momentOpts, player });
     }
-  }).catch(()=>{});
+  }).catch(logErr);
 }
 
 const momentCards = {};
@@ -13061,7 +13107,12 @@ function askEndGame(){
   const wasChallenge = !!activeChallenge;
   uiConfirm(msg, ()=>{
     activeChallenge = null;
-    if(!wasChallenge) DB.abandonGame().catch(()=>{});
+    // Surfaced, not logged — this is the case logErr's own comment carves out. The
+    // screen returns to New Game either way, so a swallowed failure told the player
+    // the match had ended while the server still had it open: the next game with the
+    // same players then hit the resume-or-abandon prompt for a match they believed
+    // was already gone. Telling them costs one dialog and explains the prompt.
+    if(!wasChallenge) DB.abandonGame().catch(e => uiAlertErr("Couldn't tell the server this game ended", e));
     stopCheckoutBlitzTimer();   // no-op if no Blitz run is in progress
     // 🌟 Perfectionist (docs/archive/checkout-trainer-roadmap.md): ending a Freeform
     // session — this mode's only "session over" moment — with 15+ attempts and
@@ -13172,7 +13223,7 @@ function _finishUndo(snap, renderFn, opts){
   // itself on arrival instead of registering into a revert list nobody reads again.
   snap.voided = true;
   (snap.badgeReverts || []).forEach(({player, badgeId})=>{
-    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(()=>{});
+    Backend.send('POST','/api/badges/revoke', { player, badgeId }).catch(logErr);
   });
   cancelQueuedAchievementsForSnapshot(snap);
   clearDartFlash();
@@ -13911,7 +13962,7 @@ function checkEloOnMatchWin(w, opp){
       queueBadge('upset', w.name, _snap);
       awardRecurringBadge(w.name, 'upset', 'upset', { icon:'🗡️', headline:'UPSET!', player:w.name, statLine:'Beat a much higher-rated opponent' });
     }
-  }).catch(()=>{});
+  }).catch(logErr);
 }
 // Shared leg → set → game progression tree for the 7 modes whose
 // onLegWon* handler has no badge logic interleaved *inside* the tree
@@ -14691,7 +14742,7 @@ function onLegWon(wi){
             // only undo-tracking, since the moment belongs to the winner's match.
             awardOnceBadge(opp.name, 'grudge_match', 'grudgematch', _snapGm, null, { silent:true });
           }
-        }).catch(()=>{});
+        }).catch(logErr);
       }
       // Ghost Opponent win/loss tracking (docs/archive/ghost-opponent-roadmap.md): a ghost
       // race is always exactly 1 leg/1 set (legsPerSet/setsPerGame are forced to 1 in
@@ -14758,7 +14809,7 @@ function onLegWon(wi){
       { player:activeChallenge.player, challengeDate:activeChallenge.date, resultDarts:_metric }).then(r=>{
         renderChallengeResultExtra(document.getElementById('challenge-result-extra'), r, _challengeFormat, _challengeTarget);
         checkChallengeBadges(w.name);
-      }).catch(()=>{});
+      }).catch(logErr);
     fireMomentCard('dailychallenge', { icon:'📅', headline:'CHALLENGE COMPLETE!', player:w.name,
       statLine: `${challengeShortLabel(activeChallenge.format, activeChallenge.target)} — ${challengeMetricLabel(activeChallenge.format, _metric)}` });
     lastLegWasChallenge = true;
@@ -15524,7 +15575,7 @@ function finishUnit(kind, winner, opts){
           queueBadge('tournamentgiantslayer', _winnerName, _snapT, 'First time!');
           fireMomentCard('tournamentgiantslayer', { icon:'⚔️', headline:'GIANT SLAYER', player:_winnerName, statLine:'Upset a higher seed' });
         }
-      }).catch(()=>{});
+      }).catch(logErr);
     }
     // Play Again / Return Home (2026-07 completion-screen work): the two
     // options every completed game should offer, per the standing convention
@@ -15752,7 +15803,8 @@ function renderGameShell(){
           <button class="m-t" id="m-t" aria-pressed="false" onclick="setMult(3)">Treble</button>
         </div>
         <div class="pad" id="pad"></div>
-        <div class="dart-board-wrap" id="dart-board-wrap"></div>
+        <div class="dart-board-wrap" id="dart-board-wrap" role="img"
+             aria-label="Dartboard — tap a segment to score. This input needs a pointer; switch to Pad for keyboard scoring."></div>
       </div>
       <div class="game-result" id="game-result" hidden></div>`;
   applyDartMode();
@@ -17126,7 +17178,7 @@ function newMatchPlayerBaseball(name){
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=baseball`).then(stats=>{
     if(!stats) return;
     p.lifetimeRunsBase = (stats.totalRuns || 0) - p.sessionRuns;
-  }).catch(()=>{});
+  }).catch(logErr);
   return p;
 }
 function resetPlayerForNextLegBaseball(p, game, newSet){
@@ -17211,7 +17263,7 @@ function newMatchPlayerPressureChamber(name){
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=pressure_chamber`).then(stats=>{
     p.lifetimeRunsBase = (stats.runsCompleted || 0) - p.sessionRunsCompleted;
     p.lifetimeCpBase = (stats.totalCpEarned || 0) - p.sessionCpEarned;
-  }).catch(()=>{});
+  }).catch(logErr);
   return p;
 }
 function resetPlayerForNextLegPressureChamber(p, game, newSet){
@@ -17466,7 +17518,7 @@ function newMatchPlayerGauntlet(name){
     if(!stats) return;
     p.lifetimeRunsBase = stats.runsCompleted || 0;
     p.lifetimeCleanStationsBase = stats.cleanStations || 0;
-  }).catch(()=>{});
+  }).catch(logErr);
   return p;
 }
 // Never actually called — legsPerSet/setsPerGame are forced to 1 (a run IS the
@@ -17696,7 +17748,7 @@ function newMatchPlayerDeadManWalking(name){
     if(!stats) return;
     p.lifetimeRunsBase = stats.runsCompleted || 0;
     p.lifetimeWalkedOutBase = stats.totalWalkedOut || 0;
-  }).catch(()=>{});
+  }).catch(logErr);
   return p;
 }
 // Never actually called — resolveDeadManWalkingRound() below handles the real
@@ -17917,7 +17969,7 @@ function onDeadManWalkingComplete(){
     if(stats && stats.longestWalkedOutStreak != null){
       checkChuckinMilestoneTier(DMW_STREAK_MILESTONE_LADDERS[0], p.name, stats.longestWalkedOutStreak);
     }
-  }).catch(()=>{});
+  }).catch(logErr);
 
   sendHaWebhook('setend', p.name, game.category, { setNo: game.setNo });
   sendHaWebhook('gameend', p.name, game.category);
@@ -18391,7 +18443,7 @@ function checkMarathonAchievements(player, detail, fullDistance){
     checkChuckinMilestoneTier(sessionsLadder, player, bubbles.sessionsCompleted);
     const legsLadder = MARATHON_MILESTONE_LADDERS.find(l=>l.metric==='legs');
     checkChuckinMilestoneTier(legsLadder, player, bubbles.totalLegsCompleted);
-  }).catch(()=>{});
+  }).catch(logErr);
 }
 const MARATHON_MILESTONE_LADDERS = [
   { metric:'sessions', idPrefix:'marathon_sessions_', statNoun:'lifetime Marathon Mode sessions completed',
@@ -18544,10 +18596,10 @@ function newMatchPlayerDoublesPractice(name){
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(name)}&gameType=doubles_practice`).then(stats=>{
     if(!stats) return;
     p.lifetimeHitsBase = (stats.hits || 0) - p.sessionHits;
-  }).catch(()=>{});
+  }).catch(logErr);
   Backend.get(`/api/players/doubles-hit-sectors?name=${encodeURIComponent(name)}`).then(prog=>{
     p.baselineHitSectors = new Set(prog.hit || []);
-  }).catch(()=>{});
+  }).catch(logErr);
   return p;
 }
 // Not called by startNextLeg() (Doubles Practice never uses it — see
@@ -18743,7 +18795,7 @@ function newMatchPlayerChuckin(name){
     if(!stats) return;
     p.lifetimeDartsBase = (stats.dartsThrown || 0) - p.sessionDarts;
     p.lifetimeTreblesBase = (stats.trebles || 0) - p.sessionTrebles;
-  }).catch(()=>{});
+  }).catch(logErr);
   return p;
 }
 // Not called by startNextLeg() (this mode never advances a leg) — provided only
@@ -18930,7 +18982,7 @@ function newMatchPlayerCheckoutTrainer(name, config){
     if(!stats) return;
     p.lifetimeAttemptsBase = (stats.totalAttempts || 0) - p.attempts;
     p.lifetimeOptimalBase = (stats.optimalCount || 0) - p.optimalCount;
-  }).catch(()=>{});
+  }).catch(logErr);
   return p;
 }
 // Not called by startNextLeg() (this mode never advances a leg the X01 way —
@@ -19827,7 +19879,7 @@ function newMatchPlayerAroundTheWorld(name){
     if(!prog) return;
     p.baselineHitSet = new Set((prog.hit||[]).map(h=>`${h.sector}:${h.mult}`));
     if(game && game.players && game.players[0] === p) renderGameAroundTheWorld();
-  }).catch(()=>{});
+  }).catch(logErr);
   return p;
 }
 // Not called by startNextLeg() (this mode never advances a leg) — provided only
@@ -20286,7 +20338,7 @@ function loadStatBubbles(){
       // gets a genuinely different per-type response here, so
       // loadPlayerHeaderStats() still fetches its own in that case.
       if(!gtParam) applyPlayerHeaderStatsData(data);
-    }).catch(()=>{});
+    }).catch(logErr);
 }
 function renderStatBubbles(data){
   if(!data) return;
@@ -20341,7 +20393,7 @@ function loadPlayerHeaderStats(){
   const player=currentPlayer;
   const modeParam=playerPageTab==='overall'?'':'&mode='+playerPageTab;
   Backend.get(`/api/players/stat-bubbles?name=${encodeURIComponent(player)}${modeParam}`)
-    .then(data=>{ if(currentPlayer === player) applyPlayerHeaderStatsData(data); }).catch(()=>{});
+    .then(data=>{ if(currentPlayer === player) applyPlayerHeaderStatsData(data); }).catch(logErr);
 }
 // Household Rating header tile: its own fetch (not the stat-bubbles endpoint
 // above) since the rating is a separate cross-game-type Elo record, not a
@@ -20359,7 +20411,7 @@ function loadPlayerHeaderRating(){
       if(currentPlayer !== player) return;
       const e = document.getElementById('bv-header-rating');
       if(e) e.textContent = (data && data.played) ? data.rating : '—';
-    }).catch(()=>{});
+    }).catch(logErr);
 }
 
 function loadDartWeights(){
@@ -20574,7 +20626,7 @@ function loadDartHeatmap(){
     bounceEl.textContent = '';
     Backend.get(`/api/players/bounce-outs?name=${encodeURIComponent(player)}&gameType=${gt}${modeParam}`)
       .then(r => { if(currentPlayer === player && r && r.count > 0) bounceEl.textContent = `Bounce-outs: ${r.count}`; })
-      .catch(()=>{});
+      .catch(logErr);
   }
 }
 function buildDartHeatmap(cells, opts){
@@ -20930,7 +20982,7 @@ function loadCoachingInsights(){
   const modeParam = (playerPageTab==='h2h'||playerPageTab==='practice') ? `&mode=${playerPageTab}` : '';
   Backend.get(`/api/players/coaching-insights?name=${encodeURIComponent(player)}${modeParam}`)
     .then(insights => { if(currentPlayer === player) renderCoachingInsights(insights, section, body); })
-    .catch(()=>{});
+    .catch(logErr);
 }
 const COACHING_TAG = { weakness: '🔧 Focus area', strength: '✅ Good form' };
 function renderCoachingInsights(insights, section, body){
@@ -20971,15 +21023,64 @@ function setPressed(idsByKey, chosenKey){
 }
 
 /* ---------- in-app dialogs (native confirm/prompt are blocked in the sandbox) ---------- */
-function closeModal(){ const o=document.getElementById('modal'); if(o) o.hidden=true; document.getElementById('modal-body').innerHTML=''; }
+// The element focus should return to when the modal closes — captured at open time,
+// since by close time the modal's own button has focus and the original is long gone.
+let _modalReturnFocus = null;
+function closeModal(){
+  const o=document.getElementById('modal'); if(o) o.hidden=true;
+  document.getElementById('modal-body').innerHTML='';
+  // Focus goes back where it came from. Without this it falls to <body>, and the next
+  // Tab restarts from the top of the document — on the profile page that is 222 stops
+  // away from wherever the player actually was.
+  const back = _modalReturnFocus; _modalReturnFocus = null;
+  if(back && document.contains(back)) { try{ back.focus(); }catch(e){} }
+}
+// The standard dialog keyboard contract, added after an audit measured all three
+// halves of it missing (docs/accessibility-roadmap.md gap 6): focus never moved INTO
+// the modal, Tab walked straight out of it into the page behind, and Escape did
+// nothing. A confirm dialog you cannot reach, cannot stay inside, and cannot dismiss
+// is not a dialog — with a screen reader it is an invisible question the page is
+// silently waiting on.
+//
+// One document-level listener rather than per-modal wiring: every modal in the app
+// goes through openModal(), and there is only ever one open (openModal replaces the
+// body outright), so the open/closed check is just the overlay's `hidden`.
+document.addEventListener('keydown', (e) => {
+  const modal = document.getElementById('modal');
+  if(!modal || modal.hidden) return;
+  if(e.key === 'Escape'){ e.preventDefault(); closeModal(); return; }
+  if(e.key !== 'Tab') return;
+  const items = [...modal.querySelectorAll('button, [href], input:not([type=hidden]), select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter(el => el.offsetParent !== null && !el.disabled);
+  if(!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  // Wrap at both ends. Focus can also be OUTSIDE the modal entirely (the page behind
+  // still holds it if something stole focus), in which case any Tab pulls it back in
+  // rather than letting the player walk further away.
+  if(!modal.contains(document.activeElement)){ e.preventDefault(); first.focus(); return; }
+  if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+  else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+});
 // Shared by every modal builder (docs/code-quality-roadmap.md item 52) — the
 // innerHTML+unhide tail was repeated identically 12 times; about half also
 // repeated a setTimeout-focus (some additionally select()ing the value) tail,
 // which focusId/selectText fold in here instead of at each call site.
 function openModal(html, focusId, selectText){
+  // Remembered before the modal takes focus, so closeModal() can hand it back.
+  _modalReturnFocus = (document.activeElement && document.activeElement !== document.body)
+    ? document.activeElement : null;
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('modal').hidden = false;
-  if(focusId) setTimeout(()=>{ const el=document.getElementById(focusId); if(el){ el.focus(); if(selectText) el.select(); } },0);
+  // focusId is an explicit choice (a text input the player is meant to type into);
+  // without one, focus still has to enter the dialog, so it goes to the first control.
+  // Previously neither happened for the ~half of modals that pass no focusId — the
+  // dialog opened and focus stayed on whatever was behind it.
+  setTimeout(()=>{
+    const el = focusId ? document.getElementById(focusId) : null;
+    if(el){ el.focus(); if(selectText) el.select(); return; }
+    const first = document.querySelector('#modal-body button, #modal-body input, #modal-body select, #modal-body textarea');
+    if(first) first.focus();
+  },0);
 }
 // Standard error alert: one place for the message fallback and null-safety —
 // call sites previously hand-rolled three variants, one of which rendered
@@ -21135,17 +21236,17 @@ function showBackendErrorScreen(){
   // Promise.all pattern the auth bootstrap above uses); awaiting them in
   // sequence stacked 3-4 needless round-trips onto every page load.
   await Promise.all([
-    Backend.get('/api/settings/dart-timing').then(dt => { dartTimingEnabled = !!dt.enabled; }).catch(()=>{}),
-    Backend.get('/api/settings/default-input').then(di => { dartboardMode = di.input !== 'pad'; }).catch(()=>{}),
-    Backend.get('/api/settings/colorblind-mode').then(cb => { colorblindMode = !!cb.enabled; }).catch(()=>{}),
-    Backend.get('/api/settings/card-tagline').then(ct => { cardTagline = ct.tagline || DEFAULT_CARD_TAGLINE; }).catch(()=>{}),
-    Backend.get('/api/settings/ha-webhook-status').then(hw => { haWebhookStatus = { enabled: !!hw.enabled, events: hw.events || {} }; }).catch(()=>{}),
-    Backend.get('/api/settings/heatmap-style').then(hs => { heatmapStyle = hs.style === 'scorched' ? 'scorched' : 'classic'; }).catch(()=>{}),
-    Backend.get('/api/settings/heatmap-number-style').then(ns => { heatmapNumberStyle = ['molten_seam','chalk_ledger'].includes(ns.style) ? ns.style : 'original'; }).catch(()=>{}),
+    Backend.get('/api/settings/dart-timing').then(dt => { dartTimingEnabled = !!dt.enabled; }).catch(logErr),
+    Backend.get('/api/settings/default-input').then(di => { dartboardMode = di.input !== 'pad'; }).catch(logErr),
+    Backend.get('/api/settings/colorblind-mode').then(cb => { colorblindMode = !!cb.enabled; }).catch(logErr),
+    Backend.get('/api/settings/card-tagline').then(ct => { cardTagline = ct.tagline || DEFAULT_CARD_TAGLINE; }).catch(logErr),
+    Backend.get('/api/settings/ha-webhook-status').then(hw => { haWebhookStatus = { enabled: !!hw.enabled, events: hw.events || {} }; }).catch(logErr),
+    Backend.get('/api/settings/heatmap-style').then(hs => { heatmapStyle = hs.style === 'scorched' ? 'scorched' : 'classic'; }).catch(logErr),
+    Backend.get('/api/settings/heatmap-number-style').then(ns => { heatmapNumberStyle = ['molten_seam','chalk_ledger'].includes(ns.style) ? ns.style : 'original'; }).catch(logErr),
     // Re-resolved rather than trusted: an unknown id from anywhere falls back to
     // the default here too, and the colours come from this file's own constants.
     Backend.get('/api/settings/board-colors')
-      .then(bc => { boardColors = resolveBoardColors({ sector20: bc.sector20 }); }).catch(()=>{}),
+      .then(bc => { boardColors = resolveBoardColors({ sector20: bc.sector20 }); }).catch(logErr),
   ]);
   document.body.classList.toggle('colorblind', colorblindMode);
   // Settings tiles (2026-07 modular-dashboard redesign) show a live one-line

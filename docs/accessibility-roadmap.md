@@ -139,6 +139,43 @@ in isolation.
    (2026-07) — see gap 4 above and the status header.
 5. ~~**Type-size pass**~~ ✅ **Done** (2026-07) — see gap 5 above and the status header.
 
+6. **Keyboard navigation had never been audited as its own pass.** ✅ **Done** (2026-07).
+   The five gaps above were all found by reading; this one was found by *driving* — real
+   `Tab` presses through the real app, reading `document.activeElement` back. Four
+   defects, measured rather than inferred:
+
+   | Measured | Fixed |
+   |---|---|
+   | The focus ring on every `.btn` was the browser default: computed `outline: auto 1px rgb(16,16,16)` — near-black, on a `#0e0f0d` board. Drawn, and invisible. `:focus` rules existed for text inputs and a few scoped areas, so the gap was every button in the app | One global `:focus-visible` rule in the app's own gold (relative luminance 0.72). `:focus-visible`, not `:focus`, so a mouse click leaves no ring behind it |
+   | Modals had none of the dialog contract: focus never moved in, `Tab` walked straight out into the page behind, `Escape` did nothing, and there was no `role`/`aria-modal` | `openModal()` moves focus in (to `focusId`, or the first control — about half the modals pass no `focusId` and got nothing at all before); one document-level `keydown` traps `Tab`/`Shift+Tab` and closes on `Escape`; the overlay is `role="dialog" aria-modal="true"` |
+   | Focus was not restored on close, so the next `Tab` restarted from the top of the document — 222 stops away on the profile | `openModal()` captures the opener, `closeModal()` hands focus back |
+   | **The default scoring input is not keyboard-operable at all.** `getDefaultScoringInput()` returns `'board'` when unset, and the dartboard is 120 SVG segments with **zero** focusable elements — so in a default install, a keyboard user cannot score | Documented rather than rebuilt, with the escape hatch made explicit — see below |
+
+   **On that last one, stated honestly:** making the dartboard itself keyboard-driven
+   (roving focus across 120 segments, in an order that means something on a board laid
+   out radially) is a *feature*, not a fix, and it is not in this pass. What shipped is
+   the escape hatch made discoverable and asserted: the Pad toggle is reachable by
+   keyboard, both toggles carry an `aria-label` saying which input they are, and the
+   board wrapper tells a screen reader it needs a pointer and to switch to Pad. Pad
+   mode is fully operable — 24 reachable scoring buttons — so there IS a keyboard path;
+   it just isn't the default. The verify-ui `keyboard` check asserts the hatch works, so
+   if that ever stops being true the app has no keyboard scoring at all and the suite
+   fails.
+
+   **Considered and deliberately not done: a skip link on the profile.** The page has
+   222 tabbable elements, which sounds like the textbook case for one — but the measured
+   layout does not support it. The "← Players" back button is tab stop #1 and the scope
+   controls are near the top, so *leaving* and *re-scoping* are already cheap; the long
+   run is in the middle, where a skip link helps least. The heading outline shipped in
+   gap 4 already gives screen-reader users jump-by-heading through exactly that region.
+   Adding a link that doesn't match the measured problem would be worse than saying so.
+
+   New verify-ui check `keyboard` (15 assertions), driving real key presses throughout —
+   `:focus-visible` deliberately does not match a programmatic `.focus()`, so a check
+   built on `el.focus()` would report a passing focus ring no keyboard user ever sees.
+   That mistake was made while writing the audit, which is why the check documents it.
+   All five fixes confirmed to fail the check when individually reverted.
+
 ## Standing practice going forward
 
 Every future roadmap item in this folder (Cricket/game modes, tournament mode, the
