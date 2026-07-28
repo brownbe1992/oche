@@ -1973,6 +1973,8 @@ oche/
 │   ├── backup.js    Stand-alone WAL-safe backup script (see Backups)
 │   ├── backup-lib.js  Shared backup/restore mechanics (used by backup.js and server.js)
 │   ├── admin-recovery.js  Stand-alone admin password reset / lockout-clear CLI
+│   ├── tournaments.js / leagues.js / marathon.js / coaching.js
+│   │                Leaf areas split out of db.js, wired in at the bottom of it
 │   ├── seed-dev-db.js  Deterministic test-data seeder (see Development)
 │   └── test/        node:test suite (`npm test`)
 ├── frontend/

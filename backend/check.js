@@ -20,7 +20,7 @@
  * It does not parse JavaScript. Writing a parser to find every undeclared
  * variable would be a large, subtly-wrong program whose false positives would
  * defeat the rule above. `node --check` (already in the SessionStart hook)
- * covers syntax; this covers the eight things `node --check` cannot see.
+ * covers syntax; this covers the nine things `node --check` cannot see.
  *
  * THE CHECKS. (Named once in CHECK_NAMES below, which report() validates against —
  * this list is prose, that one is the source of truth.)
@@ -47,7 +47,13 @@
  *      main script declares. Split files load FIRST, so such a line throws
  *      ReferenceError and aborts the entire file, taking every function in it with
  *      it. One such line killed all 15 league functions at once.
- *   8. scoring.js's hand-maintained CommonJS export list against what it
+ *   8. A leaf module (backend/tournaments.js and friends, cut out of db.js) naming
+ *      a db.js constant or scoring.js export it neither injects nor requires. Those
+ *      files used to have every name in scope for free; now a missed one is a
+ *      ReferenceError, but only when that function is CALLED — the module loads
+ *      fine, `node --check` parses it, the typechecker passes it. Extracting four
+ *      leaves hit this five times.
+ *   9. scoring.js's hand-maintained CommonJS export list against what it
  *      actually defines. The file is dual browser/CommonJS: the browser gets
  *      every top-level name free via <script src>, Node gets only what the
  *      literal names — so a drifted name is missing in exactly one environment.
@@ -70,6 +76,7 @@ const QUIET = process.argv.includes('--quiet');
 const CHECK_NAMES = [
   'duplicate-function', 'unused-function', 'missing-handler', 'missing-id',
   'missing-script', 'missing-stylesheet', 'load-order', 'scoring-exports', 'ts-check-placement',
+  'leaf-missing-dep',
 ];
 
 const findings = [];
@@ -169,6 +176,92 @@ for (const [file, html] of STYLESHEETS) {
 //
 // Exact, so it cannot false-positive: everything above the marker must be blank, a
 // shebang, or a comment.
+/* A leaf module (backend/tournaments.js and friends) naming something it never got.
+ *
+ * Those files were cut out of db.js, where every name in the file was in scope for
+ * free. A reference the factory neither injects nor requires is now a ReferenceError
+ * — but only when that function is actually CALLED. `node --check` parses it happily,
+ * the typechecker passes it, and the module loads fine. It surfaces as a 500 the
+ * first time someone opens the screen that uses it.
+ *
+ * Extracting the four leaves hit this five times (CHECKOUT_POINTS, X01_ONLY,
+ * computeFatigueSplit, checkoutHint, dartLabel), each caught only because a test
+ * happened to cover that path. This is the same class as `missing-handler`: a name
+ * resolved at call time, invisible to every other tool here.
+ *
+ * Two surfaces are checked, both extractable exactly, per this file's no-false-
+ * positives rule: db.js's top-level SCREAMING_CASE constants, and scoring.js's own
+ * export list. A leaf referencing anything else — a lowercase db.js helper it forgot
+ * to inject — is NOT caught, because deciding that needs a real parser. Comments and
+ * template-literal SQL are stripped first, so prose naming a constant is not a hit.
+ */
+/* Blanks comments and string literals, but KEEPS `${...}` interpolations, which are
+ * code. That is not a detail: every one of these SQL-fragment constants is used as
+ * `SELECT ${X01_ONLY} ...` inside a template literal, so a stripper that blanked the
+ * whole literal would miss the exact case this check exists for. The first version
+ * did, and caught two of the three real bugs it was written against. */
+function stripCommentsAndStrings(text) {
+  const out = text.split('');
+  const stack = [];                 // nesting of template literals we are inside
+  let mode = null, braceDepth = 0;  // braceDepth: { } seen inside the current ${ }
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], next = text[i + 1];
+    if (mode === null) {
+      if (c === '/' && next === '/') { mode = '//'; out[i] = out[i + 1] = ' '; i++; }
+      else if (c === '/' && next === '*') { mode = '/*'; out[i] = out[i + 1] = ' '; i++; }
+      else if (c === '"' || c === "'" || c === '`') { mode = c; out[i] = ' '; }
+      else if (c === '}' && stack.length && braceDepth === 0) {
+        // Closing a ${ } — back into the template literal that opened it.
+        out[i] = ' '; mode = stack.pop(); braceDepth = 0;
+      } else if (stack.length) {
+        if (c === '{') braceDepth++;
+        else if (c === '}') braceDepth--;
+      }
+    } else if (mode === '//') {
+      if (c === '\n') mode = null; else out[i] = ' ';
+    } else if (mode === '/*') {
+      if (c === '*' && next === '/') { out[i] = out[i + 1] = ' '; mode = null; i++; }
+      else if (c !== '\n') out[i] = ' ';
+    } else {
+      if (c === '\\') { out[i] = out[i + 1] = ' '; i++; continue; }
+      if (mode === '`' && c === '$' && next === '{') {
+        out[i] = out[i + 1] = ' '; stack.push('`'); mode = null; braceDepth = 0; i++; continue;
+      }
+      if (c === mode) mode = null;
+      out[i] = ' ';
+    }
+  }
+  return out.join('');
+}
+
+const DB_JS = rd('backend/db.js');
+const DB_CONSTS = new Set([...DB_JS.matchAll(/^const ([A-Z][A-Z0-9_]+)\s*=/gm)].map(m => m[1]));
+const SCORING_EXPORT_NAMES = new Set(
+  [...SCORING.slice(SCORING.indexOf('module.exports = {')).matchAll(/([A-Za-z_$][\w$]*)\s*[,:}]/g)]
+    .map(m => m[1]));
+
+for (const rel of tsCheckCandidates()) {
+  if (!/^backend\/[^/]+\.js$/.test(rel)) continue;
+  const raw = rd(rel);
+  if (!/module\.exports = function init/.test(raw)) continue;   // leaf factories only
+  const code = stripCommentsAndStrings(raw);
+  const declared = new Set();
+  for (const m of code.matchAll(/(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)) declared.add(m[1]);
+  for (const m of code.matchAll(/(?:const|let)\s*\{([^}]*)\}\s*=/g)) {
+    for (const part of m[1].split(',')) {
+      const name = part.split(':').pop().split('=')[0].trim();
+      if (name) declared.add(name);
+    }
+  }
+  for (const name of [...DB_CONSTS, ...SCORING_EXPORT_NAMES]) {
+    if (declared.has(name)) continue;
+    if (new RegExp(`(?<![\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(code)) {
+      report('leaf-missing-dep', rel, `uses '${name}' but neither injects nor requires it — ` +
+        `a ReferenceError the first time that code path runs`);
+    }
+  }
+}
+
 for (const rel of tsCheckCandidates()) {
   const lines = rd(rel).split('\n');
   const at = lines.findIndex(l => /^\s*\/\/\s*@ts-check\s*$/.test(l));

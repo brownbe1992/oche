@@ -2056,7 +2056,15 @@ const GAME_TYPE_REGISTRY = {
     },
     position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo, pressureChamberRound: r.pressureChamberRound,
       players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalCp: p.totalCp })) }) },
-  marathon:         { dispatchOnly: true, statBubbles: getMarathonStatBubbles,      personalBests: getMarathonPersonalBests },
+  // The one entry that cannot name its functions directly: they live in
+  // backend/marathon.js, wired below this literal (see the leaf-modules block for
+  // why it cannot be wired above). These two arrows resolve when a stat is asked
+  // for, by which time _marathon is built. Every other entry here names a hoisted
+  // function declaration and needs no such indirection — do not copy this shape
+  // unless a leaf forces it.
+  marathon:         { dispatchOnly: true,
+    statBubbles:   (...args) => _marathon.getMarathonStatBubbles(...args),
+    personalBests: (...args) => _marathon.getMarathonPersonalBests(...args) },
 };
 // Resolves the per-type Player Profile stat function, falling back to the X01 default
 // for an unknown/absent type — the same behavior the old server.js ternary's trailing
@@ -6969,152 +6977,8 @@ function getDartAnalytics(playerName, mode) {
   return { topSectors, trebleRates, checkoutRoutes };
 }
 
-/* ---------- coaching insights (docs/archive/coaching-insights-roadmap.md) ----------
-   Turns tables that already exist (getDartAnalytics/getCheckoutRoutes above,
-   getPersonalBests) into plain-language practice guidance. No new data
-   collection — X01 only (checkout routes and bust parity are X01-specific
-   concepts; Cricket/Doubles Practice/Chuckin aren't in scope for this pass).
-
-   Thresholds below were chosen deliberately conservative ("Strict" — see the
-   roadmap doc's now-resolved open question): a wrong coaching insight
-   actively misleads a player about their own game, a worse failure mode than
-   a wrong descriptive stat, so every insight requires a large enough sample
-   that it reflects a real pattern rather than noise from a handful of visits. */
-const COACHING_MIN_NUMBER_DARTS     = 40; // darts at a number before judging its treble rate
-const COACHING_WEAK_NUMBER_GAP_PP   = 10; // percentage points below the player's own baseline
-const COACHING_MIN_ROUTE_USES       = 10; // times a checkout score must have been hit before judging the route
-const COACHING_MIN_PARITY_ATTEMPTS  = 20; // checkout-range attempts required in EACH of odd/even
-const COACHING_BUST_RATE_GAP_PP     = 15; // percentage points difference to flag a parity bust bias
-const COACHING_MIN_LEGS_FOR_FORM    = 20; // lifetime legs required before trusting the recent-form delta
-
-function getCoachingInsights(playerName, mode) {
-  const p = getPlayer(playerName);
-  if (!p) return [];
-  const mf = _mf(mode);
-  const insights = [];
-
-  // 1 — Weak number: player's own treble rate on a number vs. their own overall
-  // treble rate (never a fixed external benchmark).
-  const { trebleRates } = getDartAnalytics(playerName, mode) || { trebleRates: [] };
-  const totalTrebles = trebleRates.reduce((s, r) => s + r.trebles, 0);
-  const totalDarts   = trebleRates.reduce((s, r) => s + r.total, 0);
-  if (totalDarts > 0) {
-    const baseline = 100 * totalTrebles / totalDarts;
-    trebleRates
-      .filter(r => r.total >= COACHING_MIN_NUMBER_DARTS && baseline - r.treble_pct >= COACHING_WEAK_NUMBER_GAP_PP)
-      .sort((a, b) => a.treble_pct - b.treble_pct)
-      .slice(0, 2)
-      .forEach(r => insights.push({
-        type: 'weak_number', tone: 'weakness',
-        text: `Your treble-${r.sector} accuracy (${r.treble_pct.toFixed(0)}%) is well below your overall treble rate (${baseline.toFixed(0)}%) — worth some focused practice.`,
-      }));
-  }
-
-  // 2 — Checkout route inefficiency: the player's most-used route for their
-  // most-established checkout score, compared against checkoutHint()'s
-  // dart-count-optimal route for that same score.
-  const doubleOut = p.out_mode !== 'single';
-  const scoreRow = db.prepare(`
-    SELECT ${CHECKOUT_POINTS} AS score, COUNT(*) AS times
-    FROM turns t JOIN games g ON g.id = t.game_id
-    WHERE t.player_id = ? AND t.checkout = 1 ${X01_ONLY} ${mf}
-    GROUP BY score
-    HAVING COUNT(*) >= ${COACHING_MIN_ROUTE_USES}
-    ORDER BY times DESC
-    LIMIT 1
-  `).get(p.id);
-  if (scoreRow) {
-    const topRoute = getCheckoutRoutes(playerName, scoreRow.score, mode)[0];
-    const optimal = checkoutHint(scoreRow.score, doubleOut, 3);
-    if (topRoute && optimal) {
-      const actualParts = [[topRoute.s1, topRoute.m1], [topRoute.s2, topRoute.m2], [topRoute.s3, topRoute.m3]]
-        .filter(([s]) => s != null);
-      const optimalDartCount = optimal.split(' ').length;
-      if (optimalDartCount < actualParts.length) {
-        const actualLabel = actualParts.map(([s, m]) => dartLabel(s, m)).join(' ');
-        insights.push({
-          type: 'checkout_route', tone: 'weakness',
-          text: `Your usual route for ${scoreRow.score} (${actualLabel}, ${actualParts.length} darts) takes more darts than necessary — ${optimal} finishes it in ${optimalDartCount}.`,
-          // docs/archive/checkout-drill-link-roadmap.md "Drill this checkout": the one coaching
-          // insight type with a concrete drillable number — weak_number/bust_parity/
-          // form_trend below have no single checkout score to pin, so they carry no
-          // `score` field and the frontend only offers the Drill button where one exists.
-          score: scoreRow.score,
-        });
-      }
-    }
-  }
-
-  // 3 — Bust pattern by parity (double-out only — single-out has no such bias,
-  // any score reaching exactly zero wins). Reconstructs the remaining score
-  // entering each turn (starting score minus the running sum of this player's
-  // prior scored points in that same leg) since turns doesn't store it directly.
-  if (doubleOut) {
-    const parityRows = db.prepare(`
-      WITH ordered AS (
-        SELECT t.bust,
-               json_extract(g.config,'$.startingScore')
-                 - COALESCE(SUM(t.scored) OVER (
-                     PARTITION BY t.game_id, t.set_no, t.leg_no
-                     ORDER BY t.id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-                   ), 0) AS remaining
-        FROM turns t
-        JOIN games g ON g.id = t.game_id
-        JOIN game_players gp ON gp.game_id = t.game_id AND gp.player_id = t.player_id
-        WHERE t.player_id = ? AND gp.out_mode = 'double'
-          AND g.game_type = 'x01' AND json_extract(g.config,'$.startingScore') IN (501,301,170,101)
-          ${mf}
-      )
-      SELECT CASE WHEN remaining % 2 = 0 THEN 'even' ELSE 'odd' END AS parity,
-             COUNT(*) AS attempts, SUM(bust) AS busts
-      FROM ordered
-      WHERE remaining BETWEEN 2 AND 170
-      GROUP BY parity
-    `).all(p.id);
-    const odd  = parityRows.find(r => r.parity === 'odd');
-    const even = parityRows.find(r => r.parity === 'even');
-    if (odd && even && odd.attempts >= COACHING_MIN_PARITY_ATTEMPTS && even.attempts >= COACHING_MIN_PARITY_ATTEMPTS) {
-      const oddRate  = 100 * odd.busts  / odd.attempts;
-      const evenRate = 100 * even.busts / even.attempts;
-      const [worse, better, worseRate, betterRate] = oddRate >= evenRate
-        ? ['odd', 'even', oddRate, evenRate] : ['even', 'odd', evenRate, oddRate];
-      if (worseRate - betterRate >= COACHING_BUST_RATE_GAP_PP) {
-        insights.push({
-          type: 'bust_parity', tone: 'weakness',
-          text: `You bust ${worseRate.toFixed(0)}% of the time when left on an ${worse} number, vs. ${betterRate.toFixed(0)}% on ${better} numbers — worth drilling ${worse}-number finishes specifically.`,
-        });
-      }
-    }
-  }
-
-  // 4 — Form trend: plain-language wrapper around getPersonalBests' existing
-  // recentFormAvg/lifetimeAvg, gated on enough lifetime legs that the "last 10"
-  // window isn't simply most/all of the player's history.
-  const legsCount = db.prepare(`
-    SELECT COUNT(*) AS n FROM (
-      SELECT 1 FROM turns t JOIN games g ON g.id = t.game_id
-      WHERE t.player_id = ? ${X01_ONLY} ${mf}
-      GROUP BY t.game_id, t.set_no, t.leg_no HAVING SUM(t.checkout) > 0
-    )
-  `).get(p.id)?.n ?? 0;
-  if (legsCount >= COACHING_MIN_LEGS_FOR_FORM) {
-    const pb = getPersonalBests(playerName, mode);
-    if (pb && pb.recentFormAvg != null && pb.lifetimeAvg != null) {
-      const delta = pb.recentFormAvg - pb.lifetimeAvg;
-      if (Math.abs(delta) >= 5) {
-        insights.push({
-          type: 'form_trend', tone: delta >= 0 ? 'strength' : 'weakness',
-          text: delta >= 0
-            ? `Your average is up ${delta.toFixed(1)} over your last 10 legs vs. your lifetime average — good form.`
-            : `Your average is down ${Math.abs(delta).toFixed(1)} over your last 10 legs vs. your lifetime average — a sign of fatigue, or just a rough patch?`,
-        });
-      }
-    }
-  }
-
-  return insights;
-}
-
+/* ---------- coaching insights ----------
+   Moved to backend/coaching.js (2026-07); wired in the leaf-modules block above. */
 /* ---------- Dead Man Walking — round generation ----------
    Deliberately NOT beside the mode's stats (their own section further up): the
    two functions here are placed against Coaching Insights immediately above
@@ -8603,365 +8467,9 @@ function getAroundTheWorldProgress(playerName) {
   return { hit: rows, count: rows.length, total: 63 };
 }
 
-/* ---------- tournament mode ----------
-   Moved to backend/tournaments.js (2026-07), the first leaf lifted out of this
-   file. It is wired here rather than required at the top because the factory
-   needs functions this file defines above; see that file's header for why a
-   factory rather than a circular require. */
-const _tournaments = require('./tournaments.js')({
-  db, httpError, getPlayer, ensurePlayer, createGame, completeGame,
-  awardBadge, onGameCompleted, registerDeletePlayerGuard, MAX_LEGS_OR_SETS,
-});
-const { createTournament, listTournaments, getTournament, getTournamentStats,
-        startTournamentMatch, recordWalkover } = _tournaments;
 
-/* ---------- league mode (docs/archive/league-mode-roadmap.md, X01 or Cricket) ----------
-   A season over which regular casual H2H matches accumulate into a standings table —
-   deliberately lighter-weight than tournament mode: any two enrolled players can play
-   any casual match any time during the season (no bracket, no pre-determined
-   schedule), and every ordinary New-Game-created match that qualifies gets tagged
-   automatically via the onGameCreated hook below — no extra step in New Game for the
-   common case. A player may be enrolled in multiple concurrent leagues. Standings are
-   always computed LIVE from games/game_players (see the schema comment above), never
-   from a maintained tally, so there is nothing to keep in sync and nothing that can
-   drift. */
-const LEAGUE_X01_CATEGORIES = ['501', '301', '170', '101']; // same 4 values as
-  // TOURNAMENT_X01_CATEGORIES, kept as its own local list rather than shared so a
-  // future Cricket-league extension can diverge from tournament mode's own category
-  // set independently.
-// Cricket league support: reuses the exact two-value games.category label a Cricket
-// H2H game is already tagged with at creation (frontend/index.html), rather than
-// inventing a parallel category vocabulary — 'Cricket (15-20, Bull)' for the classic
-// preset, 'Custom Cricket' for any custom target set (all custom-number games share
-// this one league category; a league doesn't fix the exact target numbers any more
-// than an X01 league fixes legs/sets — see docs/archive/league-mode-roadmap.md).
-const LEAGUE_CRICKET_CATEGORIES = ['Cricket (15-20, Bull)', 'Custom Cricket'];
-const LEAGUE_GAME_TYPES = ['x01', 'cricket'];
-function _leagueCategoriesFor(gameType) {
-  return gameType === 'cricket' ? LEAGUE_CRICKET_CATEGORIES : LEAGUE_X01_CATEGORIES;
-}
-const MAX_LEAGUE_NAME_LEN = 64;
-const LEAGUE_POINTS_MIN = -99, LEAGUE_POINTS_MAX = 99; // sane bound on an admin-set
-  // points formula, same "bound every accepted input" standing practice as
-  // createTournament()'s clampMatchFormat().
-
-function _todayDate() { return db.prepare("SELECT date('now') AS d").get().d; }
-
-function _validateLeagueDate(value, label) {
-  const s = String(value || '');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw httpError(400, `${label} must be YYYY-MM-DD`);
-  return s;
-}
-
-function _getLeagueOrThrow(id) {
-  const row = db.prepare('SELECT * FROM leagues WHERE id = ?').get(Number(id));
-  if (!row) throw httpError(404, 'League not found');
-  return row;
-}
-
-// Shared by the onGameCreated auto-tag hook below AND the public GET
-// /api/leagues/eligible read (getEligibleLeagues) — one place decides "is this
-// league a legal auto-tag target for these two players," so the two callers can
-// never drift into disagreeing about eligibility.
-function _findEligibleLeagues(category, playerIds, gameType) {
-  if (!Array.isArray(playerIds) || playerIds.length !== 2) return [];
-  const [a, b] = playerIds;
-  return db.prepare(`
-    SELECT l.id, l.name FROM leagues l
-    WHERE l.status = 'active' AND l.category = ? AND l.game_type = ?
-      AND date('now') >= l.starts_at AND (l.ends_at IS NULL OR date('now') <= l.ends_at)
-      AND EXISTS (SELECT 1 FROM league_players lp WHERE lp.league_id = l.id AND lp.player_id = ?)
-      AND EXISTS (SELECT 1 FROM league_players lp WHERE lp.league_id = l.id AND lp.player_id = ?)
-  `).all(String(category), gameType === 'cricket' ? 'cricket' : 'x01', a, b);
-}
-
-// Public read used by the New Game screen to decide whether to show a "log to which
-// league?" picker. Resolves names via getPlayer() — NOT ensurePlayer() — since this
-// is a read and must never silently create a player; fails soft to [] for anything
-// not fully resolvable (unknown name, missing second name, unknown category), since
-// the New Game screen calls this reactively while the admin is still mid-selection
-// (same defensive posture as the existing H2H-summary fetch it sits alongside).
-function getEligibleLeagues(playerName1, playerName2, category, gameType) {
-  const p1 = getPlayer(playerName1), p2 = getPlayer(playerName2);
-  if (!p1 || !p2 || !_leagueCategoriesFor(gameType).includes(String(category))) return [];
-  return _findEligibleLeagues(category, [p1.id, p2.id], gameType);
-}
-
-function createLeague({ name, gameType, category, startsAt, endsAt, pointsWin, pointsLoss, players }) {
-  name = String(name || '').trim();
-  if (!name) throw httpError(400, 'League name is required');
-  if (name.length > MAX_LEAGUE_NAME_LEN) throw httpError(400, `League name must be ${MAX_LEAGUE_NAME_LEN} characters or fewer`);
-  const resolvedGameType = (gameType === undefined || gameType === null || gameType === '') ? 'x01' : String(gameType);   // omitted -> 'x01', same default the pre-Cricket schema always had
-  if (!LEAGUE_GAME_TYPES.includes(resolvedGameType)) throw httpError(400, `gameType must be one of ${LEAGUE_GAME_TYPES.join(', ')}`);
-  const categories = _leagueCategoriesFor(resolvedGameType);
-  if (!categories.includes(String(category))) throw httpError(400, `category must be one of ${categories.join(', ')}`);
-  const starts = (startsAt !== undefined && startsAt !== null && startsAt !== '') ? _validateLeagueDate(startsAt, 'startsAt') : _todayDate();
-  const ends = (endsAt !== undefined && endsAt !== null && endsAt !== '') ? _validateLeagueDate(endsAt, 'endsAt') : null;
-  if (ends != null && ends < starts) throw httpError(400, 'endsAt must not be before startsAt');
-  const pw = (pointsWin !== undefined && pointsWin !== null && pointsWin !== '') ? Number(pointsWin) : 1;
-  const pl = (pointsLoss !== undefined && pointsLoss !== null && pointsLoss !== '') ? Number(pointsLoss) : 0;
-  if (!Number.isInteger(pw) || pw < LEAGUE_POINTS_MIN || pw > LEAGUE_POINTS_MAX) throw httpError(400, `pointsWin must be an integer between ${LEAGUE_POINTS_MIN} and ${LEAGUE_POINTS_MAX}`);
-  if (!Number.isInteger(pl) || pl < LEAGUE_POINTS_MIN || pl > LEAGUE_POINTS_MAX) throw httpError(400, `pointsLoss must be an integer between ${LEAGUE_POINTS_MIN} and ${LEAGUE_POINTS_MAX}`);
-  // Unlike tournament mode, a league needs no minimum player count at creation — an
-  // empty league (create first, enroll people over time) is a legitimate season-setup
-  // flow, since there's no bracket shape that structurally requires players up front.
-  const names = Array.isArray(players) ? players : [];
-  const uniqueNames = new Set(names.map(n => String(n).trim().toLowerCase()));
-  if (uniqueNames.size !== names.length) throw httpError(400, 'Duplicate players are not allowed');
-
-  const playerRows = names.map(n => ensurePlayer(n));
-  const info = db.prepare(`
-    INSERT INTO leagues (name, game_type, category, starts_at, ends_at, points_win, points_loss)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(name, resolvedGameType, String(category), starts, ends, pw, pl);
-  const leagueId = Number(info.lastInsertRowid);
-  const insertMember = db.prepare('INSERT OR IGNORE INTO league_players (league_id, player_id) VALUES (?, ?)');
-  playerRows.forEach(p => insertMember.run(leagueId, p.id));
-  _generateRoundRobinFixtures(leagueId, playerRows.map(p => p.id), []);
-  return { leagueId };
-}
-
-// Single round-robin fixture generation (docs/archive/league-mode-roadmap.md "League
-// fixtures / pending matches" — resolved: single, not double, round-robin for v1).
-// Creates exactly one league_fixtures row per unique pair drawn from newPlayerIds
-// paired against existingPlayerIds AND against each other (never a pair drawn
-// only from existingPlayerIds — those already got their fixture the first time
-// around). Called with the whole initial roster as newPlayerIds/[] existing at
-// league creation, and with just the one new id/the rest of the roster as
-// existing whenever a player joins an already-active league (enrollLeaguePlayer())
-// — so an existing pair's fixture (pending, in progress, or fulfilled) is never
-// touched or duplicated. player1_id/player2_id are stored in canonical (lower id
-// first) order so a lookup never has to try both orderings.
-function _generateRoundRobinFixtures(leagueId, newPlayerIds, existingPlayerIds) {
-  const insert = db.prepare('INSERT INTO league_fixtures (league_id, player1_id, player2_id) VALUES (?, ?, ?)');
-  newPlayerIds.forEach((a, i) => {
-    const opponents = [...existingPlayerIds, ...newPlayerIds.slice(i + 1)];
-    opponents.forEach(b => {
-      const [player1Id, player2Id] = a < b ? [a, b] : [b, a];
-      insert.run(leagueId, player1Id, player2Id);
-    });
-  });
-}
-
-function listLeagues() {
-  return db.prepare(`
-    SELECT l.id, l.name, l.game_type AS gameType, l.category, l.status, l.starts_at AS startsAt, l.ends_at AS endsAt,
-      l.points_win AS pointsWin, l.points_loss AS pointsLoss, l.created_at AS createdAt,
-      (SELECT COUNT(*) FROM league_players lp WHERE lp.league_id = l.id) AS playerCount
-    FROM leagues l
-    ORDER BY (l.status = 'ended'), l.created_at DESC
-  `).all();
-}
-
-// roster-then-merge, mirroring computeStats()'s own base-row-then-patch-in-aggregate
-// idiom: every enrolled player gets a row (played:0 if they haven't played any
-// league-tagged game yet), not just players who've already played (unlike e.g.
-// getHomeExtra()'s winLeaderboard, which only shows players with played>=1 — a
-// season standings table should show the whole roster). Only games with a decided
-// winner_id count as played — an abandoned league game completed with a null winner
-// (completeGame() allows this) is not a result and must not count either way.
-function _computeLeagueStandings(league) {
-  const roster = db.prepare(`
-    SELECT p.id, p.name FROM league_players lp JOIN players p ON p.id = lp.player_id
-    WHERE lp.league_id = ? ORDER BY p.name COLLATE NOCASE
-  `).all(league.id);
-  const results = db.prepare(`
-    SELECT gp.player_id AS pid, COUNT(*) AS played,
-      SUM(CASE WHEN g.winner_id = gp.player_id THEN 1 ELSE 0 END) AS won
-    FROM game_players gp JOIN games g ON g.id = gp.game_id
-    WHERE g.league_id = ? AND g.winner_id IS NOT NULL
-    GROUP BY gp.player_id
-  `).all(league.id);
-  const byId = {}; results.forEach(r => byId[r.pid] = r);
-  const table = roster.map(p => {
-    const r = byId[p.id] || { played: 0, won: 0 };
-    const lost = r.played - r.won;
-    const points = r.won * league.points_win + lost * league.points_loss;
-    return {
-      name: p.name, played: r.played, won: r.won, lost, points,
-      winPct: r.played > 0 ? +((r.won / r.played) * 100).toFixed(1) : null,
-    };
-  });
-  // Sort by points desc, then win% desc (a zero-played row's null win% sorts last
-  // among equal points via the ?? -1 fallback — a real 0% win rate is still >= -1,
-  // so it never gets confused with "hasn't played"), then name for a stable order.
-  table.sort((a, b) => b.points - a.points || (b.winPct ?? -1) - (a.winPct ?? -1) || a.name.localeCompare(b.name));
-  return table;
-}
-
-function getLeagueStandings(leagueId) {
-  return _computeLeagueStandings(_getLeagueOrThrow(leagueId));
-}
-
-// Fixture status is derived, never stored — same "compute from raw data"
-// precedent as tournament_matches' status in getTournament(): pending while
-// game_id IS NULL, in_progress once linked but the game isn't complete yet,
-// fulfilled once it is.
-function getLeagueFixtures(leagueId) {
-  return db.prepare(`
-    SELECT f.id, p1.name AS player1Name, p2.name AS player2Name, f.game_id AS gameId,
-           g.completed_at AS gameCompletedAt, f.created_at AS createdAt
-    FROM league_fixtures f
-    JOIN players p1 ON p1.id = f.player1_id
-    JOIN players p2 ON p2.id = f.player2_id
-    LEFT JOIN games g ON g.id = f.game_id
-    WHERE f.league_id = ?
-    ORDER BY (CASE WHEN f.game_id IS NULL THEN 0 WHEN g.completed_at IS NULL THEN 1 ELSE 2 END),
-      p1.name COLLATE NOCASE, p2.name COLLATE NOCASE
-  `).all(Number(leagueId)).map(f => ({
-    id: f.id, player1Name: f.player1Name, player2Name: f.player2Name, gameId: f.gameId,
-    status: f.gameId == null ? 'pending' : (f.gameCompletedAt == null ? 'in_progress' : 'fulfilled'),
-    createdAt: f.createdAt,
-  }));
-}
-
-// Public read the New Game screen calls right after Step 1 (opponent pair picked) —
-// see docs/archive/league-mode-roadmap.md's "New endpoint" section. Unlike getEligibleLeagues()
-// (which needs gameType/category, since it only ever runs after those are already
-// chosen), this needs neither: a fixture already carries them via its own league.
-// Order-independent on the pair, mirroring _findEligibleLeagues(); fails soft to []
-// for an unresolvable name, same defensive posture as getEligibleLeagues().
-function getPendingFixturesForPlayers(playerName1, playerName2) {
-  const p1 = getPlayer(playerName1), p2 = getPlayer(playerName2);
-  if (!p1 || !p2) return [];
-  const [a, b] = p1.id < p2.id ? [p1.id, p2.id] : [p2.id, p1.id];
-  return db.prepare(`
-    SELECT f.id AS fixtureId, l.id AS leagueId, l.name AS leagueName,
-           l.game_type AS gameType, l.category
-    FROM league_fixtures f JOIN leagues l ON l.id = f.league_id
-    WHERE f.player1_id = ? AND f.player2_id = ? AND f.game_id IS NULL
-      AND l.status = 'active' AND date('now') >= l.starts_at AND (l.ends_at IS NULL OR date('now') <= l.ends_at)
-    ORDER BY l.created_at DESC
-  `).all(a, b);
-}
-
-// Hook: a fixture whose game was abandoned goes back to being unplayed.
-//
-// getLeagueFixtures() derives status from the linked game (pending while game_id
-// IS NULL, in_progress until it completes, fulfilled after), and
-// getPendingFixturesForPlayers() only ever offers a fixture with game_id IS NULL.
-// An abandoned game gets dnf_at, never completed_at — so before this hook, a
-// fixture whose game was abandoned sat at "in progress" forever: it could never
-// reach fulfilled (no completed_at is ever coming), and it could never be picked
-// again from the New Game screen (its game_id is set), leaving that pairing
-// permanently unplayable for the rest of the season. An abandonment is not a
-// result — _computeLeagueStandings() already ignores it for exactly that reason —
-// so the honest state to return to is the one before the game was created.
-//
-// Registered as a hook rather than a line inside abandonGame() so every DNF path
-// gets it: today that's abandonGame() and forfeitPlayer()'s "nobody left standing"
-// branch, both of which fire this same event with a null winner.
-onGameCompleted(({ gameId }) => {
-  const g = db.prepare('SELECT dnf_at FROM games WHERE id = ?').get(gameId);
-  if (!g || g.dnf_at == null) return;
-  db.prepare('UPDATE league_fixtures SET game_id = NULL WHERE game_id = ?').run(gameId);
-});
-
-function getLeague(id) {
-  const league = db.prepare('SELECT * FROM leagues WHERE id = ?').get(Number(id));
-  if (!league) return null;
-  return {
-    id: league.id, name: league.name, gameType: league.game_type, category: league.category, status: league.status,
-    startsAt: league.starts_at, endsAt: league.ends_at,
-    pointsWin: league.points_win, pointsLoss: league.points_loss,
-    createdAt: league.created_at, endedAt: league.ended_at,
-    standings: _computeLeagueStandings(league),
-    fixtures: getLeagueFixtures(league.id),
-  };
-}
-
-function enrollLeaguePlayer(leagueId, playerName) {
-  const league = _getLeagueOrThrow(leagueId);
-  const p = ensurePlayer(playerName);
-  const existingIds = db.prepare('SELECT player_id FROM league_players WHERE league_id = ?').all(league.id).map(r => r.player_id);
-  const info = db.prepare('INSERT OR IGNORE INTO league_players (league_id, player_id) VALUES (?, ?)').run(league.id, p.id);
-  // Only generate fixtures for a genuinely NEW enrollment — re-enrolling an already-
-  // enrolled player (INSERT OR IGNORE no-ops) must never duplicate their existing pairs.
-  if (info.changes > 0) {
-    _generateRoundRobinFixtures(league.id, [p.id], existingIds);
-  }
-  return { ok: true };
-}
-
-function setLeagueStatus(leagueId, status) {
-  const league = _getLeagueOrThrow(leagueId);
-  if (status !== 'active' && status !== 'ended') throw httpError(400, "status must be 'active' or 'ended'");
-  if (status === 'ended') {
-    db.prepare("UPDATE leagues SET status = 'ended', ended_at = datetime('now') WHERE id = ?").run(league.id);
-  } else {
-    // Reopening is supported (a season ended by mistake shouldn't be a dead end) —
-    // ends_at still independently gates future auto-tagging regardless of status.
-    db.prepare("UPDATE leagues SET status = 'active', ended_at = NULL WHERE id = ?").run(league.id);
-  }
-  return { ok: true };
-}
-
-// Player Profile "Leagues" stat block: every league this player belongs to, plus
-// their current rank/points in each — mirrors getTournamentStats()'s role for
-// tournament mode, just across every league rather than a single aggregate.
-function getPlayerLeagueSummary(playerName) {
-  const p = getPlayer(playerName);
-  if (!p) return [];
-  const leagueIds = db.prepare('SELECT league_id FROM league_players WHERE player_id = ?').all(p.id).map(r => r.league_id);
-  return leagueIds.map(id => {
-    const league = db.prepare('SELECT * FROM leagues WHERE id = ?').get(id);
-    const standings = _computeLeagueStandings(league);
-    const idx = standings.findIndex(r => r.name === p.name); // names are unique (players.name COLLATE NOCASE UNIQUE)
-    const row = idx >= 0 ? standings[idx] : { played: 0, won: 0, lost: 0, points: 0 };
-    return {
-      leagueId: league.id, name: league.name, gameType: league.game_type, category: league.category, status: league.status,
-      rank: idx >= 0 ? idx + 1 : null, totalPlayers: standings.length,
-      played: row.played, won: row.won, lost: row.lost, points: row.points,
-    };
-  // Ended leagues sink to the bottom, then newest first. Written out rather than as
-  // `(a.status==='ended') - (b.status==='ended')`, which works only because JavaScript
-  // coerces false/true to 0/1 — correct, and a genuine puzzle to read.
-  }).sort((a, b) => {
-    const ended = (/** @type {{status: string}} */ r) => r.status === 'ended' ? 1 : 0;
-    return ended(a) - ended(b) || b.leagueId - a.leagueId;
-  });
-}
-
-// Hook: whenever a new game is created, check whether it should be tagged into a
-// league. See docs/archive/league-mode-roadmap.md and the game-lifecycle-hooks doc comment
-// above for the full payload shape and the "explicit choice is re-validated, not
-// trusted" reasoning. Fires synchronously inside createGame(), before its HTTP
-// response is sent — there's no race between this write and the client seeing the
-// new gameId.
-onGameCreated(({ gameType, practice, category, playerCount, playerIds, leagueId, gameId }) => {
-  // League mode is X01 or Cricket, non-practice, exactly 2 players (Doubles
-  // Practice/Chuckin/Checkout Trainer are structurally excluded regardless, being
-  // solo/no-winner formats — see docs/archive/league-mode-roadmap.md).
-  if ((gameType !== 'x01' && gameType !== 'cricket') || practice || playerCount !== 2 || !Array.isArray(playerIds) || playerIds.length !== 2) return;
-  // A fixture-originated game (docs/archive/league-mode-roadmap.md "League fixtures / pending
-  // matches") already had games.league_id set DIRECTLY by createGame(), before this
-  // hook fired — that's an explicit, already-resolved choice, so re-running the fuzzy
-  // eligibility match here would be redundant at best and could pick a DIFFERENT
-  // league at worst if the pair happens to share more than one active league.
-  if (db.prepare('SELECT league_id FROM games WHERE id = ?').get(gameId).league_id != null) return;
-  let targetLeagueId = null;
-  if (leagueId != null && leagueId !== '') {
-    // Client-supplied choice (from the New Game "log to league?" picker, shown only
-    // when more than one league was eligible at picker-render time). A few seconds
-    // may have passed since the picker's own GET /api/leagues/eligible call, so
-    // re-validate rather than trust it — a stale/invalid choice must never fail game
-    // creation, just fall through to auto-detection below.
-    const candidates = _findEligibleLeagues(category, playerIds, gameType);
-    if (candidates.some(c => c.id === Number(leagueId))) targetLeagueId = Number(leagueId);
-  }
-  if (targetLeagueId == null) {
-    const candidates = _findEligibleLeagues(category, playerIds, gameType);
-    // Exactly one candidate: auto-tag silently — the common case, no picker was ever
-    // shown. Zero or more than one: leave untagged. The New Game picker is meant to
-    // have already resolved a >1 ambiguity; a non-frontend API caller that doesn't
-    // supply a choice gets no guess.
-    if (candidates.length === 1) targetLeagueId = candidates[0].id;
-  }
-  if (targetLeagueId != null) {
-    db.prepare('UPDATE games SET league_id = ? WHERE id = ?').run(targetLeagueId, gameId);
-  }
-});
-
+/* ---------- league mode ----------
+   Moved to backend/leagues.js (2026-07); wired in the leaf-modules block above. */
 /* ---------- dart builder / loadouts (docs/archive/dart-builder-roadmap.md) ----------
    dart_components is a player-owned catalog of parts; loadouts combine exactly one
    component per type plus a tip texture. Every enum field is a closed list for v1
@@ -9292,180 +8800,8 @@ function getLoadoutStats(playerName, loadoutId) {
    none of them know or care what time it is.
    ========================================================================= */
 /* ---------- Marathon mode ----------
-   A game mode, not part of the dart builder above — it shares that section only
-   because a marathon session is configured from a loadout. Its own leg/session
-   lifecycle, stat bubbles, personal bests and leaderboard all live here. */
-function _createMarathonLegGame(playerName) {
-  // Deliberately bypasses the New Game setup screen's own config — every leg
-  // is always a straight solo practice 501, no exceptions, so this calls
-  // createGame() directly rather than routing through any client-supplied
-  // shape. Never accepts a client-supplied game_id anywhere in this feature —
-  // see marathon_session_legs' own schema comment for why that means the
-  // roadmap doc's "validate a linked game_id belongs to this player" worry
-  // never actually applies here.
-  return createGame({
-    category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1,
-    gameType: 'x01', config: { startingScore: 501 },
-    players: [{ name: playerName }],
-  }).gameId;
-}
-function _getMarathonSession(sessionId) {
-  const s = db.prepare('SELECT * FROM marathon_sessions WHERE id = ?').get(Number(sessionId));
-  if (!s) throw httpError(404, 'Marathon session not found');
-  return s;
-}
-function startMarathonSession(playerName, durationMinutes) {
-  const p = getPlayer(playerName);
-  if (!p) throw httpError(404, 'Player not found');
-  const duration = durationMinutes != null ? Number(durationMinutes) : 45;
-  if (!Number.isInteger(duration) || duration < 5 || duration > 240) {
-    throw httpError(400, 'durationMinutes must be an integer between 5 and 240');
-  }
-  const info = db.prepare('INSERT INTO marathon_sessions (player_id, duration_minutes) VALUES (?, ?)').run(p.id, duration);
-  const sessionId = Number(info.lastInsertRowid);
-  const gameId = _createMarathonLegGame(playerName);
-  db.prepare('INSERT INTO marathon_session_legs (session_id, game_id, leg_order) VALUES (?, ?, 1)').run(sessionId, gameId);
-  const row = db.prepare('SELECT started_at FROM marathon_sessions WHERE id = ?').get(sessionId);
-  return { sessionId, gameId, legOrder: 1, startedAt: row.started_at, durationMinutes: duration };
-}
-// Called once the CURRENT leg's own game has already completed (normal X01
-// win) — creates the NEXT leg's game and links it. Rejects once the session
-// has ended (`ended_at` already set) — the roadmap doc's own flagged linkage
-// guard — and rejects a player mismatch, since a session belongs to exactly
-// one player throughout.
-function startNextMarathonLeg(sessionId, playerName) {
-  const s = _getMarathonSession(sessionId);
-  if (s.ended_at != null) throw httpError(409, 'This marathon session has already ended');
-  const p = getPlayer(playerName);
-  if (!p || p.id !== s.player_id) throw httpError(403, 'Player does not match this marathon session');
-  const maxLeg = db.prepare('SELECT MAX(leg_order) AS n FROM marathon_session_legs WHERE session_id = ?').get(s.id).n || 0;
-  const gameId = _createMarathonLegGame(playerName);
-  const legOrder = maxLeg + 1;
-  db.prepare('INSERT INTO marathon_session_legs (session_id, game_id, leg_order) VALUES (?, ?, ?)').run(s.id, gameId, legOrder);
-  return { gameId, legOrder };
-}
-// Idempotent — ending an already-ended session just returns its existing
-// (unchanged) detail rather than erroring, so a client retry after a dropped
-// response can't double-process anything.
-function endMarathonSession(sessionId) {
-  const s = _getMarathonSession(sessionId);
-  if (s.ended_at == null) {
-    db.prepare("UPDATE marathon_sessions SET ended_at = datetime('now') WHERE id = ?").run(s.id);
-  }
-  return getMarathonSessionDetail(s.id);
-}
-// Full session detail, including the two analysis functions (frontend/scoring.js)
-// run over this session's own completed legs' dart counts. A leg still
-// in-progress (no completed_at on its game) is listed but excluded from the
-// dart-count series the analysis reads — an unfinished leg has no final dart
-// count to compare against the others yet.
-function getMarathonSessionDetail(sessionId) {
-  const s = _getMarathonSession(sessionId);
-  const player = db.prepare('SELECT name FROM players WHERE id = ?').get(s.player_id);
-  const legs = db.prepare(`
-    SELECT msl.leg_order AS legOrder, msl.game_id AS gameId, g.completed_at AS completedAt,
-      (SELECT COUNT(*) FROM darts d JOIN turns t ON t.id = d.turn_id WHERE t.game_id = msl.game_id) AS dartCount,
-      (SELECT ${CHECKOUT_POINTS} FROM turns t JOIN games g ON g.id = t.game_id
-        WHERE t.game_id = msl.game_id AND t.checkout = 1 LIMIT 1) AS checkoutPoints,
-      (SELECT COUNT(*) FROM turns t WHERE t.game_id = msl.game_id AND t.bust = 1) AS busts
-    FROM marathon_session_legs msl JOIN games g ON g.id = msl.game_id
-    WHERE msl.session_id = ?
-    ORDER BY msl.leg_order ASC
-  `).all(s.id);
-  const completedLegs = legs.filter(l => l.completedAt != null);
-  const dartCounts = completedLegs.map(l => l.dartCount);
-  const fatigue = computeFatigueSplit(dartCounts);
-  const trend = classifyMarathonTrend(dartCounts);
-  return {
-    sessionId: s.id, player: player.name, durationMinutes: s.duration_minutes,
-    startedAt: s.started_at, endedAt: s.ended_at,
-    legs, legsCompleted: completedLegs.length,
-    fatigueSplit: fatigue.split, fatigueTier: fatigue.tier, trend,
-  };
-}
-
-// Every Marathon leg's underlying game is always practice=1 — an 'h2h' mode
-// request reaches the same "zero sessions" answer a SQL-side _scope() join
-// would, just without the extra join, since there is never an H2H marathon
-// session to find.
-function getMarathonStatBubbles(playerName, mode) {
-  const p = getPlayer(playerName);
-  if (!p) return null;
-  const empty = { sessionsCompleted: 0, avgLegsPerSession: null, avgFatigueSplit: null,
-    trendBreakdown: { cliff: 0, warmMachine: 0, flatLine: 0, inconclusive: 0 },
-    cliffSessions: 0, warmMachineSessions: 0, flatLineSessions: 0 };
-  if (mode === 'h2h') return empty;
-  const sessions = db.prepare('SELECT id FROM marathon_sessions WHERE player_id = ? AND ended_at IS NOT NULL').all(p.id);
-  if (!sessions.length) return empty;
-  let totalLegs = 0, totalSplit = 0, splitSessions = 0;
-  const trendBreakdown = { cliff: 0, warmMachine: 0, flatLine: 0, inconclusive: 0 };
-  sessions.forEach(row => {
-    const d = getMarathonSessionDetail(row.id);
-    totalLegs += d.legsCompleted;
-    // fatigueSplit is null for a 0-1-leg session ("no second half to compare
-    // against" — computeFatigueSplit's own contract), so only measured
-    // sessions enter the average.
-    if (d.fatigueSplit != null) { totalSplit += d.fatigueSplit; splitSessions++; }
-    if (d.trend === 'The Cliff') trendBreakdown.cliff++;
-    else if (d.trend === 'The Warm Machine') trendBreakdown.warmMachine++;
-    else if (d.trend === 'Flat Line') trendBreakdown.flatLine++;
-    else trendBreakdown.inconclusive++;
-  });
-  return {
-    sessionsCompleted: sessions.length,
-    avgLegsPerSession: +(totalLegs / sessions.length).toFixed(1),
-    avgFatigueSplit: splitSessions ? +(totalSplit / splitSessions).toFixed(1) : null,
-    trendBreakdown,
-    // Lifetime total (not the average above) -- feeds the "lifetime legs
-    // completed inside Marathon sessions" milestone ladder, which needs an
-    // exact running total, not a derived-from-average approximation.
-    totalLegsCompleted: totalLegs,
-    // Flat convenience fields for the Player Profile's own flat stat-bubble
-    // lookup (renderStatBubbles() reads data[bubbleKeyMap[key]], no nested-path
-    // support) — same values as trendBreakdown above, just unnested.
-    cliffSessions: trendBreakdown.cliff, warmMachineSessions: trendBreakdown.warmMachine, flatLineSessions: trendBreakdown.flatLine,
-  };
-}
-// Personal Bests: lowest fatigue split ever (ascending-is-better, the same
-// polarity The Gauntlet's Scar count uses) and most legs completed in a
-// single session (a stamina/throughput metric). A session with zero
-// completed legs (ended immediately) contributes to neither.
-function getMarathonPersonalBests(playerName, mode) {
-  const p = getPlayer(playerName);
-  if (!p) return null;
-  const empty = { lowestFatigueSplit: null, mostLegsInASession: null };
-  if (mode === 'h2h') return empty;
-  const sessions = db.prepare('SELECT id FROM marathon_sessions WHERE player_id = ? AND ended_at IS NOT NULL').all(p.id);
-  if (!sessions.length) return empty;
-  let lowestSplit = null, mostLegs = null;
-  sessions.forEach(row => {
-    const d = getMarathonSessionDetail(row.id);
-    if (d.legsCompleted === 0) return;
-    // fatigueSplit is null for a 1-leg session (unmeasurable, per
-    // computeFatigueSplit's own contract) — without the null check, a one-leg
-    // quit would record the mathematically unbeatable minimum and pin this PB
-    // (and top the ascending-sorted fatigue leaderboard) forever.
-    if (d.fatigueSplit != null && (lowestSplit == null || d.fatigueSplit < lowestSplit)) lowestSplit = d.fatigueSplit;
-    if (mostLegs == null || d.legsCompleted > mostLegs) mostLegs = d.legsCompleted;
-  });
-  return { lowestFatigueSplit: lowestSplit, mostLegsInASession: mostLegs };
-}
-// Home leaderboard: one row per player, their own single best (lowest)
-// fatigue split ever — same peak-value, no-minimum-floor shape every other
-// single-best-run board in this app already uses, sorted ascending (lower is
-// better) like The Gauntlet's own leaderboard.
-function getMarathonLeaderboard() {
-  const players = db.prepare(`
-    SELECT DISTINCT p.id, p.name FROM marathon_sessions ms JOIN players p ON p.id = ms.player_id
-    WHERE ms.ended_at IS NOT NULL
-  `).all();
-  return players.map(p => {
-    const pb = getMarathonPersonalBests(p.name, null);
-    return { name: p.name, lowestFatigueSplit: pb.lowestFatigueSplit, mostLegsInASession: pb.mostLegsInASession };
-  }).filter(r => r.lowestFatigueSplit != null)
-    .sort((a, b) => a.lowestFatigueSplit - b.lowestFatigueSplit);
-}
-
+   Moved to backend/marathon.js (2026-07); wired in the leaf-modules block above,
+   which it must be — GAME_TYPE_REGISTRY names its two stat functions. */
 /* ---------- helpers ---------- */
 /**
  * An Error carrying the HTTP status the route layer should send. The status is a
@@ -9531,6 +8867,59 @@ function migrateKillerConfigsToIdKeys() {
   }
 }
 migrateKillerConfigsToIdKeys();
+
+/* ---------- leaf modules ----------
+   Sections lifted out of this file (2026-07). Each is a FACTORY that db.js calls
+   here with exactly what it needs; see backend/tournaments.js's header for why a
+   factory rather than a circular require, and for what the argument list is for.
+
+   WHY ALL THE WIRING IS IN ONE PLACE, AT THE BOTTOM. Load order is the whole
+   constraint. Everything injected below has to be bound by the time the factory
+   runs, and while a `function` declaration is hoisted and available from anywhere,
+   a `const` is not: X01_ONLY, CHECKOUT_POINTS and their neighbours are plain
+   `const`s computed part-way down this file, and several leaves need them.
+
+   Wiring each leaf where its section used to live made that a landmine — every
+   extraction had to work out whether its dependencies existed YET, and two of them
+   didn't, failing at require time with a bare "X is not defined". Down here,
+   everything in the file is initialised, so the question never comes up again and
+   adding the next leaf is a matter of listing what it needs.
+
+   The one cost: GAME_TYPE_REGISTRY is built far above this, and its `marathon`
+   entry needs two functions that now live in a leaf. `const {...} = require(...)()`
+   is not hoisted, so naming them there throws on load. That entry alone reaches
+   them through a thunk, resolved when a stat is actually asked for rather than when
+   the literal is built — see the comment at the entry itself.
+
+   Order matters within the block only where one leaf uses another: leagues can
+   schedule a tournament, so tournaments is built first and passed in. */
+const _tournaments = require('./tournaments.js')({
+  db, httpError, getPlayer, ensurePlayer, createGame, completeGame,
+  awardBadge, onGameCompleted, registerDeletePlayerGuard, MAX_LEGS_OR_SETS,
+});
+const { createTournament, listTournaments, getTournament, getTournamentStats,
+        startTournamentMatch, recordWalkover } = _tournaments;
+
+const _marathon = require('./marathon.js')({ db, httpError, getPlayer, createGame, _scope, CHECKOUT_POINTS });
+const { startMarathonSession, startNextMarathonLeg, endMarathonSession, getMarathonSessionDetail,
+        getMarathonStatBubbles, getMarathonPersonalBests, getMarathonLeaderboard } = _marathon;
+
+const _leagues = require('./leagues.js')({
+  db, httpError, getPlayer, ensurePlayer, createGame, completeGame, abandonGame, forfeitPlayer,
+  onGameCompleted, onGameCreated, clampMatchFormat, computeStats, getHomeExtra,
+  createTournament, getTournament, getTournamentStats,
+});
+const { createLeague, listLeagues, getLeague, getLeagueStandings, getLeagueFixtures,
+        getPendingFixturesForPlayers, enrollLeaguePlayer, setLeagueStatus,
+        getPlayerLeagueSummary, getEligibleLeagues } = _leagues;
+
+const _coaching = require('./coaching.js')({
+  db, getPlayer, _mf, getPersonalBests, getDartAnalytics, getCheckoutRoutes,
+  CHECKOUT_POINTS, X01_ONLY,
+});
+const { getCoachingInsights } = _coaching;
+
+
 
 module.exports = {
   listPlayers, addPlayer, renamePlayer, setOut, setDartWeight, deletePlayer, registerDeletePlayerGuard,

@@ -67,7 +67,14 @@ convention in `CLAUDE.md`.
 oche/
 ├── backend/
 │   ├── server.js    Dependency-free HTTP server (Node built-ins only)
-│   ├── db.js         SQLite schema, migrations, and all stat/business-logic queries
+│   ├── db.js         SQLite schema, migrations, and all stat/business-logic queries.
+│   │                 Also the public entry point: the leaf modules below are wired
+│   │                 in at the bottom of it and re-exported, so `require('./db.js')`
+│   │                 still reaches everything
+│   ├── tournaments.js  Single/double-elimination brackets       ─┐ leaf modules cut
+│   ├── leagues.js      Round-robin seasons, standings, fixtures  │ out of db.js; each
+│   ├── marathon.js     Marathon sessions and their stats         │ is a factory db.js
+│   ├── coaching.js     The "what to practise" insight list      ─┘ calls with its deps
 │   ├── auth.js        Password/PIN hashing (scrypt), session tokens, cookie helpers
 │   ├── netguard.js    Outbound-request egress guard (SSRF/DNS-rebinding protection)
 │   └── backup.js       Stand-alone WAL-safe backup script
