@@ -9,7 +9,7 @@
     "check": "node check.js",
     "scan": "node scan-secrets.js",
     "test": "node --test",
-    "test:coverage": "node --test --experimental-test-coverage",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-exclude='test/**'",
     "seed": "node seed-dev-db.js"
   },
   "engines": {

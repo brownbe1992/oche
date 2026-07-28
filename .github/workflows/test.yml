@@ -60,13 +60,33 @@ jobs:
         working-directory: backend
       # Printed, never enforced. A coverage threshold turns "add a test" into "the
       # build is red", which trains people to delete assertions instead of writing
-      # them; a number in the log is enough to notice a section going unmeasured.
+      # them; a visible number is enough to notice a section going unmeasured.
       # `if: always()` so it still prints when a test failed — that is exactly when
       # knowing what is covered is most useful.
+      #
+      # Written to the run's SUMMARY PAGE, not just the log. The first version of this
+      # step piped the report to `tail -40` and the visible rows were almost entirely
+      # the TEST FILES' own coverage (100% each, by construction) — the source files
+      # had scrolled off the top, so the one number a reader would take away meant
+      # nothing. `--test-coverage-exclude` (in the npm script) is what fixes the
+      # headline figure at its source rather than by filtering the output afterwards.
       - name: Coverage report (informational)
         if: always()
-        run: npm run test:coverage 2>&1 | tail -40
         working-directory: backend
+        run: |
+          npm run test:coverage 2>&1 | sed -n '/^# file /,/^# end of coverage/p' | sed 's/^# //' > /tmp/coverage.txt || true
+          cat /tmp/coverage.txt
+          {
+            echo '### Coverage — informational, never enforced'
+            echo ''
+            echo '```'
+            cat /tmp/coverage.txt
+            echo '```'
+            echo ''
+            echo '`server.js` is absent on purpose, not by oversight: the server tests spawn it'
+            echo 'as a child process (so they exercise the real HTTP surface), and coverage only'
+            echo 'sees code loaded in the test process itself.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Minutes. The only layer that sees a rendered screen, and therefore the only one
   # that catches a handler that silently stopped resolving, a focus ring nobody can

@@ -9880,9 +9880,26 @@ own download, which is what lets the same script run unchanged locally and in CI
 
 **Coverage is printed, never enforced.** A coverage threshold turns "add a test"
 into "the build is red", which trains people to delete assertions instead of
-writing them. A number in the log is enough to notice a section going unmeasured.
-It runs under `if: always()` so it still prints when a test failed — exactly when
-knowing what is covered is most useful.
+writing them. A visible number is enough to notice a section going unmeasured. It
+runs under `if: always()` so it still prints when a test failed — exactly when
+knowing what is covered is most useful, and it is written to the run's **summary
+page** rather than only into the log.
+
+Two things about that number are deliberate, and both were wrong in the first
+version of this step:
+
+- **The test files are excluded** (`--test-coverage-exclude='test/**'`, in the
+  `test:coverage` script). Including them reported "all files 99.54%", which is
+  almost entirely 110 test files scoring 100% on themselves — a headline that
+  moves only when tests are added and cannot fall when source goes unmeasured.
+  Excluding them gives 98.84% line / 89.84% branch over real source. Fixed at the
+  source rather than by filtering the printed table, so `npm run test:coverage`
+  says the same thing locally as it does in CI.
+- **`server.js` does not appear at all**, and that is not an oversight. The server
+  tests `spawn()` it as a child process so they exercise the real HTTP surface;
+  coverage only instruments code loaded in the test process itself. The summary
+  says so in place, because a reader who notices the absence will otherwise assume
+  the file is untested.
 
 **No install step anywhere except the browser job**, because there is nothing to
 install: no dependencies, no `package-lock.json`, no `node_modules`.
