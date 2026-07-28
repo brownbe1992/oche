@@ -72,8 +72,10 @@ oche/
 │   ├── netguard.js    Outbound-request egress guard (SSRF/DNS-rebinding protection)
 │   └── backup.js       Stand-alone WAL-safe backup script
 ├── frontend/
-│   ├── index.html    The app's markup, CSS, and the core controller (turn loop,
+│   ├── index.html    The app's markup and the core controller (turn loop,
 │   │                 game/setup/stats state, every screen not listed below)
+│   ├── app.css       Every style in the app. Inline in index.html until 2026-07;
+│   │                 display.html deliberately keeps its own
 │   ├── scoring.js    Pure scoring logic (evaluateVisit/evaluateVisitCricket/
 │   │                 evaluateVisitBaseball/checkout math), extracted from
 │   │                 index.html so it's unit-testable
@@ -99,6 +101,16 @@ oche/
   offline/local-storage fallback, so stats never split across two unsynced stores.
   `frontend/display.html` is a much smaller read-only client, driven entirely by
   Server-Sent Events.
+
+  The CSS is `frontend/app.css`, one file, linked from `index.html`'s `<head>`. It
+  was inline until 2026-07, when it was 1,464 of that file's 19,160 lines; it is the
+  one part of `index.html` that splits with nothing to get wrong, since CSS has no
+  shared-scope or load-order hazard. `check.js`'s `missing-stylesheet` rule and one
+  verify-ui assertion both guard the link, because a wrong `href` fails **silently**:
+  `serveStatic()` falls back to `index.html` for any unknown non-API path, so the
+  browser receives a whole HTML page in answer to a CSS request, discards it without
+  a console error, and renders every screen unstyled while every behavioural test
+  still passes.
 
   The JavaScript is spread over `index.html`'s inline `<script>` plus eight
   `<script src>` files (`scoring.js` and the six in `js/`), and **all of them share

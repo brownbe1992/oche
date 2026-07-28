@@ -52,7 +52,7 @@ const CHECKS = {
   'keyboard':              { path: './checks/keyboard',              assertions: 14 },
   'live-scoreboard':       { path: './checks/live-scoreboard',       assertions: 11 },
   'live-shell':            { path: './checks/live-shell',            assertions: 66 },
-  'home-settings':         { path: './checks/home-settings',         assertions: 15 },
+  'home-settings':         { path: './checks/home-settings',         assertions: 16 },
   'home-leaderboards':     { path: './checks/home-leaderboards',     assertions: 6 },
 };
 

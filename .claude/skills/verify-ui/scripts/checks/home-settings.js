@@ -101,6 +101,30 @@ module.exports = async function run() {
   const rep = L.makeReporter('home-settings');
 
   await L.withPage(L.PORTRAIT, async (page, pageErrors) => {
+    /* The stylesheet actually loaded and applied.
+     *
+     * `frontend/app.css` was inline in index.html's <head> until 2026-07. Once it
+     * became a separate file it acquired a silent failure mode: server.js's static
+     * handler falls back to index.html for any unknown non-API path, so a typo'd
+     * href returns a whole HTML page in answer to a CSS request. The browser
+     * discards it without a console error and renders every screen unstyled — and
+     * every behavioural assertion in this suite still passes, because the DOM and
+     * the handlers are all exactly where they should be. `check.js`'s
+     * missing-stylesheet rule catches the typo statically; this catches the case
+     * where the file exists and is served but isn't reaching the page.
+     *
+     * Two independent signals, because either alone is weaker than it looks:
+     * `--board` proves the file parsed, and body padding proves a rule actually
+     * matched and applied. An unstyled body has padding 0. Deliberately NOT
+     * body backgroundColor — the page background is a `fixed` radial-gradient, so
+     * backgroundColor is legitimately transparent even when fully styled. */
+    const styled = await page.evaluate(() => ({
+      pad: getComputedStyle(document.body).padding,
+      board: getComputedStyle(document.documentElement).getPropertyValue('--board').trim(),
+    }));
+    rep.ok('app.css is loaded and applied', styled.pad === '18px' && styled.board === '#0e0f0d',
+      `body padding "${styled.pad}", --board "${styled.board}"`);
+
     // NOTE for anyone extending this: `homeData` is a top-level `let`, which in
     // a classic script is NOT a property of window. Assigning window.homeData
     // creates an unrelated property and the function under test keeps reading

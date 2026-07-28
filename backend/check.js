@@ -20,7 +20,7 @@
  * It does not parse JavaScript. Writing a parser to find every undeclared
  * variable would be a large, subtly-wrong program whose false positives would
  * defeat the rule above. `node --check` (already in the SessionStart hook)
- * covers syntax; this covers the seven things `node --check` cannot see.
+ * covers syntax; this covers the eight things `node --check` cannot see.
  *
  * THE CHECKS. (Named once in CHECK_NAMES below, which report() validates against —
  * this list is prose, that one is the source of truth.)
@@ -39,11 +39,15 @@
  *   4. `getElementById('x')` for an id that appears nowhere else in the file.
  *   5. A `<script src>` pointing at a file that isn't there — a whole section of
  *      the app silently not loading, which the browser reports only in its console.
- *   6. A top-level initialiser in a split `frontend/js/` file that reads a name the
+ *   6. A `<link rel=stylesheet>` pointing at a file that isn't there. Worse than a
+ *      missing script: server.js's static handler falls back to index.html for any
+ *      unknown non-API path, so the browser gets a whole HTML page where it asked for
+ *      CSS, discards it, and renders every screen unstyled with a clean console.
+ *   7. A top-level initialiser in a split `frontend/js/` file that reads a name the
  *      main script declares. Split files load FIRST, so such a line throws
  *      ReferenceError and aborts the entire file, taking every function in it with
  *      it. One such line killed all 15 league functions at once.
- *   7. scoring.js's hand-maintained CommonJS export list against what it
+ *   8. scoring.js's hand-maintained CommonJS export list against what it
  *      actually defines. The file is dual browser/CommonJS: the browser gets
  *      every top-level name free via <script src>, Node gets only what the
  *      literal names — so a drifted name is missing in exactly one environment.
@@ -65,7 +69,7 @@ const QUIET = process.argv.includes('--quiet');
 // check without registering it fails immediately instead of silently.
 const CHECK_NAMES = [
   'duplicate-function', 'unused-function', 'missing-handler', 'missing-id',
-  'missing-script', 'load-order', 'scoring-exports', 'ts-check-placement',
+  'missing-script', 'missing-stylesheet', 'load-order', 'scoring-exports', 'ts-check-placement',
 ];
 
 const findings = [];
@@ -136,6 +140,23 @@ const PAGES = [['frontend/index.html', INDEX_SCOPE], ['frontend/display.html', D
 for (const [file, scope] of PAGES) {
   for (const m of scope.missing) {
     report('missing-script', file, `<script src> points at ${path.relative(ROOT, m)}, which does not exist`);
+  }
+}
+
+// The same failure for a stylesheet, which is WORSE, because server.js's static
+// handler falls back to index.html for any unknown non-API path: a typo'd href
+// doesn't 404, it returns the whole HTML page with a text/css request. The browser
+// discards it silently and renders every screen unstyled, with a clean console.
+// Added when the 1,464-line inline <style> block moved out to frontend/app.css.
+const STYLESHEETS = [['frontend/index.html', INDEX_HTML], ['frontend/display.html', DISPLAY_HTML]];
+for (const [file, html] of STYLESHEETS) {
+  for (const m of html.matchAll(/<link\b[^>]*\brel=["']stylesheet["'][^>]*>/g)) {
+    const href = (m[0].match(/\bhref=["']([^"']+)["']/) || [])[1];
+    if (!href || /^(https?:)?\/\//.test(href)) continue;   // a CDN/font host isn't ours to check
+    const abs = path.join(ROOT, 'frontend', href);
+    if (!fs.existsSync(abs)) {
+      report('missing-stylesheet', file, `<link rel=stylesheet> points at ${href}, which does not exist`);
+    }
   }
 }
 

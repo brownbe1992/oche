@@ -1923,7 +1923,14 @@ function abandonGame(gameId) {
   return { ok: true };
 }
 
-/* ---------- Saved games / pause & resume (docs/archive/saved-games-roadmap.md) ----------
+/* ---------- game-type registry + per-type dispatch ----------
+   GAME_TYPE_REGISTRY below is the backend's half of the same registry discipline
+   frontend/index.html's GAME_TYPES follows: per-type behaviour is a member on the
+   entry, never a parallel hand-list somewhere else. SAVABLE_GAME_TYPES and
+   CHECKOUT_SCORING_TYPES are both derived from it rather than hand-kept.
+   The saved-games machinery this banner used to name lives further down, under
+   its own heading — this section only supplies the `savable` flag it reads.
+   (docs/archive/saved-games-roadmap.md)
    "This game is paused" is the only new fact (saved_games.game_id) — everything
    needed to actually resume is DERIVED from the turns/darts already recorded
    live, via the pure rebuild functions in frontend/scoring.js (required in at
@@ -2112,6 +2119,9 @@ const CHECKOUT_SCORING_TYPES = Object.keys(GAME_TYPE_REGISTRY)
 const CHECKOUT_POINTS = `(CASE WHEN t.checkout = 1 AND g.game_type IN (${
   CHECKOUT_SCORING_TYPES.map(k => `'${k}'`).join(', ')}) THEN t.scored END)`;
 
+/* ---------- Saved games / pause & resume (docs/archive/saved-games-roadmap.md) ----------
+   The machinery. WHICH types may be saved, and why each excluded one is excluded,
+   is explained where the flag itself lives — the game-type registry section above. */
 function _savedGameRow(gameId) {
   return db.prepare('SELECT * FROM saved_games WHERE game_id = ?').get(Number(gameId));
 }
@@ -2669,6 +2679,11 @@ const _killerReplayStmts = {
     FROM turns t JOIN darts d ON d.turn_id=t.id
     WHERE t.game_id=? ORDER BY t.set_no, t.leg_no, t.id`),
 };
+/* ---------- per-leg replay helpers shared by the stats sections below ----------
+   Neither of these belongs to the Daily Challenge above; they are the two generic
+   "walk a leg's recorded turns and decide who won it" helpers several per-mode stat
+   sections call. Kept here, above the first of those callers, rather than beside any
+   one mode that happens to use them. */
 function _replayKillerLegs(gameId, cfg) {
   const participants = _killerReplayStmts.participants.all(gameId);
   const idToName = new Map(participants.map(pp => [pp.id, pp.name]));
@@ -5813,6 +5828,10 @@ function getKillerWinLeaderboard() { return _winLeaderboard('killer'); }
 // wedge+depth) into separate rows instead of one undifferentiated bucket — a hit row
 // only ever has `zone` populated, a miss row (sector=0) only ever has miss_zone/
 // miss_depth populated, so a given row's fields are always unambiguous.
+/* ---------- dart heatmaps + bounce-outs ----------
+   Board-position aggregates, not a game mode — they read the per-dart `darts` rows
+   across whichever game type is asked for. They sat under the Killer banner above
+   purely because that is where they were written. */
 function getDartHeatmap(playerName, gameType, mode) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -5999,6 +6018,11 @@ function getAroundTheWorldLeaderboard() {
     .sort((a, b) => b.progress - a.progress);
 }
 
+/* ---------- stat history + the two scope helpers every section above uses ----------
+   getMetricHistory() powers the Player Profile charts for EVERY metric, and `_mf`
+   (mode filter) / `_scope` (game-type + mode filter) are called from most sections in
+   this file. All three sat at the tail of the Around the Clock section, which made
+   three of the most widely-shared things here look mode-specific. */
 // Wrapped for the shared per-turn dart aggregate (item 44) — see withDartAgg().
 // The body is unchanged; this only decides when the temp table is (re)built.
 function getMetricHistory(playerName, metric, period, opts = {}) { return withDartAgg(() => _getMetricHistory(playerName, metric, period, opts)); }
@@ -6723,6 +6747,7 @@ function getServerErrors(limit = 100) {
   return q.recentServerErrors.all(n);
 }
 
+/* ---------- top finishes + On This Day ---------- */
 function getTopFinishes(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -6793,6 +6818,9 @@ function getOnThisDay(playerName, tz) {
   return null;
 }
 
+/* ---------- destructive per-player / per-turn edits ----------
+   Both delete recorded play. Grouped together deliberately: anything that removes
+   history should be findable in one place rather than scattered among the readers. */
 function clearPlayerStats(playerName, mode) {
   const p = getPlayer(playerName);
   if (!p) throw httpError(404, 'Player not found');
@@ -6862,6 +6890,7 @@ function deleteLastTurn(gameId, turnId) {
   return { ok: true };
 }
 
+/* ---------- checkout routes + dart analytics ---------- */
 function getCheckoutRoutes(playerName, score, mode) {
   const p = getPlayer(playerName);
   if (!p) return [];
@@ -7086,7 +7115,12 @@ function getCoachingInsights(playerName, mode) {
   return insights;
 }
 
-/* ---------- Dead Man Walking (docs/archive/dead-man-walking-roadmap.md) ----------
+/* ---------- Dead Man Walking — round generation ----------
+   Deliberately NOT beside the mode's stats (their own section further up): the
+   two functions here are placed against Coaching Insights immediately above
+   because they reuse its remaining-score reconstruction, and the comment below
+   leans on that adjacency. Same mode, two homes, each for a reason.
+   (docs/archive/dead-man-walking-roadmap.md)
    getWeakestCheckouts() reuses Coaching Insight #3's own remaining-score
    reconstruction technique directly above (the same window-function trick,
    the same "starting score minus running prior-scored sum, per leg" formula)
@@ -7175,6 +7209,11 @@ function _buildDeadManWalkingRounds(playerName, difficulty) {
   return targets.map(target => ({ target, par: deadManWalkingParForTarget(target, difficulty) }));
 }
 
+/* ---------- data export / import / wipe ----------
+   The whole take-your-data-elsewhere surface: full-database export, per-player JSON
+   and CSV export, the import that reads them back, and the two destructive resets.
+   ~600 lines that lived under the Dead Man Walking banner above with nothing
+   announcing them. */
 function resetStats() {
   // docs/bug-roadmap.md BUG-7: this deletes every game, which is what tournament
   // matches link to — so leaving the tournament rows behind would strand every
@@ -8496,6 +8535,9 @@ async function fireHaWebhook(event, payload) {
 // each took a loss, which is exactly right for a win rate.
 const H2H_PAIR_ONLY = `AND g.player_count = 2`;
 
+/* ---------- head-to-head records ----------
+   Player-versus-player summaries. Nothing to do with the Home Assistant webhook
+   proxy above; they were simply written after it. */
 function getH2HRecord(name1, name2) {
   if(!name1 || !name2) return null;
   // COLLATE NOCASE to match players.name's case-insensitive uniqueness and every
@@ -9754,6 +9796,10 @@ function getLoadoutStats(playerName, loadoutId) {
    boundaries only — these functions just create/link/end sessions and legs;
    none of them know or care what time it is.
    ========================================================================= */
+/* ---------- Marathon mode ----------
+   A game mode, not part of the dart builder above — it shares that section only
+   because a marathon session is configured from a loadout. Its own leg/session
+   lifecycle, stat bubbles, personal bests and leaderboard all live here. */
 function _createMarathonLegGame(playerName) {
   // Deliberately bypasses the New Game setup screen's own config — every leg
   // is always a straight solo practice 501, no exceptions, so this calls

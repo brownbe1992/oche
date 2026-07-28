@@ -1976,7 +1976,8 @@ oche/
 │   ├── seed-dev-db.js  Deterministic test-data seeder (see Development)
 │   └── test/        node:test suite (`npm test`)
 ├── frontend/
-│   ├── index.html    Markup, CSS, and the core app (turn loop, game state, screens)
+│   ├── index.html    Markup and the core app (turn loop, game state, screens)
+│   ├── app.css       Every style in the app
 │   ├── scoring.js    Pure scoring maths, shared with the backend's test suite
 │   ├── js/          Six feature areas split out of index.html — daily-challenge,
 │   │                dart-builder, tournaments, moments, leagues, session-recap
