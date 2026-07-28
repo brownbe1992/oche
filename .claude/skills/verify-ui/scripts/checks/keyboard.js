@@ -88,8 +88,18 @@ module.exports = async function run() {
     }
     rep.ok('keyboard: Pad mode exposes the scoring buttons', modes.pad.scoring >= 20,
       `${modes.pad.scoring} scoring buttons`);
-    rep.ok('keyboard: the board is the pointer-only input, as documented', modes.board.scoring === 0,
-      `${modes.board.scoring} scoring buttons in board mode`);
+    // This assertion pins a LIMITATION, not a fix, so its failure means the opposite of
+    // every other one here: if it fails because the board grew focusable segments, that
+    // is the feature landing (defect 4 above) and the right response is to delete this
+    // assertion and write real board-keyboard coverage — not to "restore" anything. The
+    // message has to say so, because a bare "0 expected, got 20" reads as a regression
+    // and the obvious reaction to a regression is to undo the change that caused it.
+    rep.ok('keyboard: the board is still the pointer-only input, as documented',
+      modes.board.scoring === 0,
+      modes.board.scoring === 0 ? '' :
+        `${modes.board.scoring} focusable scoring controls found in board mode. If the ` +
+        'dartboard has been made keyboard-operable, that is the fix for defect 4 in this ' +
+        "file's header — retire this assertion and assert the new behaviour instead.");
     const toggle = await page.evaluate(`(() => {
       const p = document.getElementById('imt-pad'), b = document.getElementById('imt-board');
       return { padReachable: !!p && p.offsetParent !== null && p.tabIndex >= 0,
