@@ -43,7 +43,7 @@ const CHECKS = {
   'turn-loop':             { path: './checks/turn-loop',             assertions: 47 },
   'save-resume':           { path: './checks/save-resume',           assertions: 6 },
   'leg-reset':             { path: './checks/leg-reset',             assertions: 12 },
-  'resume-fidelity':       { path: './checks/resume-fidelity',       assertions: 14 },
+  'resume-fidelity':       { path: './checks/resume-fidelity',       assertions: 18 },
   'pad-reuse':             { path: './checks/pad-reuse',             assertions: 19 },
   'profile-a11y':          { path: './checks/profile-a11y',          assertions: 10 },
   'route-recall':          { path: './checks/route-recall',          assertions: 16 },

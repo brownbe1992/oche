@@ -150,6 +150,81 @@ module.exports = async function run() {
       await page.waitForTimeout(120);
     }
 
+    /* A bowed-out player must stay out across the resume.
+     *
+     * The sweep above never bows anyone out, and for a long time nothing did:
+     * `game_players.dnf` was written at forfeit time and then never read back, so a
+     * resumed match quietly re-seated the departed player. The visible half of that
+     * (a name back in the rotation) is bad enough; the silent half is worse. The
+     * four fixed-round modes decide when a round ticks over by walking to the next
+     * ACTIVE player, so with the departed player counted as active the whole match
+     * came back on the wrong inning — a completely normal-looking game that is not
+     * the game the players paused.
+     *
+     * Baseball with three players is the smallest case that shows it: bow out the
+     * LAST player in rotation and the inning boundary moves from their seat to the
+     * one before it. */
+    const bowNames = Array.from({ length: 3 }, (_, i) => L.uniqueName(`RFDNF_${i}`));
+    const bowed = await page.evaluate(async (names) => {
+      const visit = () => { for (let d = 0; d < 3; d++) { setMult(1); throwDart(1 + d); } enterTurn(); };
+      try {
+        for (const n of names) await DB.addPlayer(n);
+        roster.push(...names);
+        setMode('h2h');
+        setup.gameType = 'baseball';
+        setup.slots = names;
+        await startGame();
+        await new Promise(r => setTimeout(r, 350));
+
+        visit(); visit(); visit();                       // inning 1: all three throw
+        await new Promise(r => setTimeout(r, 150));
+        const res = await DB.forfeitPlayer(names[2]);    // the last seat leaves
+        applyBowOut(names[2], res);
+        await new Promise(r => setTimeout(r, 150));
+        visit(); visit();                                // inning 2: the two who remain
+        await new Promise(r => setTimeout(r, 250));
+
+        const gameId = DB.gameId;
+        const inning = game.baseballInning;
+        const dnfBefore = game.players.map(p => !!p.dnf);
+        const saved = await DB.saveGame(gameId).catch(e => ({ error: String(e && e.message || e) }));
+        return { ok: true, gameId, inning, dnfBefore, saved, done: !!game.done };
+      } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+    }, bowNames);
+
+    if (!bowed.ok || bowed.done || (bowed.saved && bowed.saved.error)) {
+      const why = bowed.error || (bowed.done ? 'match ended early' : bowed.saved.error);
+      rep.ok('bow-out: three-player Baseball plays, forfeits and saves', false, why);
+    } else {
+      rep.ok('bow-out: three-player Baseball plays, forfeits and saves', true);
+      rep.ok('bow-out: the departed player is flagged and the two who remain carry the inning',
+        bowed.inning === 3 && JSON.stringify(bowed.dnfBefore) === '[false,false,true]',
+        `inning ${bowed.inning}, dnf ${JSON.stringify(bowed.dnfBefore)}`);
+
+      const before = await page.evaluate(FINGERPRINT);
+      const back = await page.evaluate(async (gameId) => {
+        try {
+          game = null;
+          await resumeGame(gameId);
+          await new Promise(r => setTimeout(r, 250));
+          return { ok: true, inning: game.baseballInning, dnf: game.players.map(p => !!p.dnf) };
+        } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+      }, bowed.gameId);
+
+      if (!back.ok) {
+        rep.ok('bow-out: resumes without throwing', false, back.error);
+        rep.ok('bow-out: the resumed game is the game that was paused', false, 'resume threw');
+      } else {
+        rep.ok('bow-out: the bowed-out player comes back bowed out',
+          JSON.stringify(back.dnf) === '[false,false,true]', JSON.stringify(back.dnf));
+        const after = await page.evaluate(FINGERPRINT);
+        rep.ok('bow-out: the resumed game is the game that was paused', after === before,
+          after === before ? '' : firstDiff(before, after));
+      }
+      await page.evaluate(() => { try { game = null; } catch {} show('home'); });
+      await page.waitForTimeout(120);
+    }
+
     rep.ok('resume-fidelity: no uncaught page errors', pageErrors.length === 0, pageErrors.slice(0, 3).join('; '));
   });
 

@@ -80,7 +80,13 @@ describe('saveGame — eligibility and the one-per-matchup constraint', () => {
     assert.throws(() => db.saveGame(gameId), /already ended/);
   });
 
-  test('rejects a game with a bowed-out participant', () => {
+  // This used to reject (409, "bowed out"): the replay could not represent a
+  // departed player, so pausing such a match was blocked rather than resumed into
+  // a desynced state. The rebuilds now take a `dnfs` array and skip them
+  // (REFERENCE.md §13, backend/test/scoring.resume-dnf.test.js), so the block is
+  // gone — and the resume payload must carry the flag through, which is the half
+  // a caller can actually observe.
+  test('accepts a game with a bowed-out participant, and resumes them as bowed out', () => {
     const [a, b, c] = [uniqueName('sg_bo_a'), uniqueName('sg_bo_b'), uniqueName('sg_bo_c')];
     db.addPlayer(a); db.addPlayer(b); db.addPlayer(c);
     const { gameId } = db.createGame({
@@ -88,7 +94,9 @@ describe('saveGame — eligibility and the one-per-matchup constraint', () => {
       players: [{ name: a }, { name: b }, { name: c }],
     });
     db.forfeitPlayer(gameId, a);
-    assert.throws(() => db.saveGame(gameId), /bowed out/);
+    assert.deepEqual(db.saveGame(gameId), { ok: true, alreadySaved: false });
+    const state = db.getResumeState(gameId);
+    assert.deepEqual(state.players.map(p => [p.name, !!p.dnf]), [[a, true], [b, false], [c, false]]);
   });
 
   test('rejects an ineligible game type (Doubles Practice)', () => {

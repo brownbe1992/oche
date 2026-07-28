@@ -1966,19 +1966,19 @@ const GAME_TYPE_REGISTRY = {
     // frontend counterpart reconstructs); `position(game, r)` trims that down
     // to the one-line saved-games-list summary. Both members exist ONLY on
     // savable types — see _savedGamePosition()'s generic dispatch below.
-    rebuild: (game, participants, turns) => rebuildX01State({ names: participants.map(p => p.name),
+    rebuild: (game, participants, turns) => rebuildX01State({ names: participants.map(p => p.name), dnfs: participants.map(p => !!p.dnf),
       outModes: participants.map(p => p.outMode), startScore: Number(game.category) || 501,
       startScores: participants.map(p => p.startScore ?? null),
       practice: !!game.practice, legsPerSet: game.legs_per_set, turns }),
     position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo,
       players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, score: p.score })) }) },
   cricket:          { savable: true,  statBubbles: getCricketStatBubbles,           personalBests: getCricketPersonalBests,
-    rebuild: (game, participants, turns) => rebuildCricketState({ names: participants.map(p => p.name),
+    rebuild: (game, participants, turns) => rebuildCricketState({ names: participants.map(p => p.name), dnfs: participants.map(p => !!p.dnf),
       config: game.config ? JSON.parse(game.config) : null, practice: !!game.practice, legsPerSet: game.legs_per_set, turns }),
     position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo,
       players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, points: p.points })) }) },
   baseball:         { savable: true,  statBubbles: getBaseballStatBubbles,          personalBests: getBaseballPersonalBests,
-    rebuild: (game, participants, turns) => rebuildBaseballState({ names: participants.map(p => p.name),
+    rebuild: (game, participants, turns) => rebuildBaseballState({ names: participants.map(p => p.name), dnfs: participants.map(p => !!p.dnf),
       legsPerSet: game.legs_per_set, turns }),
     position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo, baseballInning: r.baseballInning,
       players: r.players.map(p => ({ name: p.name, legsWon: p.legsWon, setsWon: p.setsWon, totalRuns: p.totalRuns })) }) },
@@ -2010,7 +2010,7 @@ const GAME_TYPE_REGISTRY = {
   shanghai:         { savable: true,  statBubbles: getShanghaiStatBubbles,          personalBests: getShanghaiPersonalBests,
     rebuild: (game, participants, turns) => {
       const config = game.config ? JSON.parse(game.config) : null;
-      return rebuildShanghaiState({ names: participants.map(p => p.name), legsPerSet: game.legs_per_set,
+      return rebuildShanghaiState({ names: participants.map(p => p.name), dnfs: participants.map(p => !!p.dnf), legsPerSet: game.legs_per_set,
         maxRounds: (config && config.rounds) || 7, turns });
     },
     position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo, shanghaiRound: r.shanghaiRound,
@@ -2018,7 +2018,7 @@ const GAME_TYPE_REGISTRY = {
   halve_it:         { savable: true,  statBubbles: getHalveItStatBubbles,           personalBests: getHalveItPersonalBests,
     rebuild: (game, participants, turns) => {
       const config = game.config ? JSON.parse(game.config) : null;
-      return rebuildHalveItState({ names: participants.map(p => p.name), legsPerSet: game.legs_per_set,
+      return rebuildHalveItState({ names: participants.map(p => p.name), dnfs: participants.map(p => !!p.dnf), legsPerSet: game.legs_per_set,
         targets: (config && config.targets) || HALVE_IT_DEFAULT_TARGETS, turns });
     },
     position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo, halveItRound: r.halveItRound,
@@ -2043,7 +2043,8 @@ const GAME_TYPE_REGISTRY = {
     statBubbles: getPressureChamberStatBubbles,   personalBests: getPressureChamberPersonalBests,
     rebuild: (game, participants, turns) => {
       const config = game.config ? JSON.parse(game.config) : null;
-      return rebuildPressureChamberState({ gameId: game.id, names: participants.map(p => p.name), legsPerSet: game.legs_per_set,
+      return rebuildPressureChamberState({ gameId: game.id, names: participants.map(p => p.name),
+        dnfs: participants.map(p => !!p.dnf), legsPerSet: game.legs_per_set,
         maxRounds: (config && config.rounds) || PRESSURE_ROUNDS, turns });
     },
     position: (game, r) => ({ setNo: r.setNo, legNo: r.legNo, pressureChamberRound: r.pressureChamberRound,
@@ -2171,15 +2172,15 @@ function saveGame(gameId) {
   if (game.config && JSON.parse(game.config).ghost) {
     throw httpError(400, "A Ghost race can't be saved for later");
   }
-  // A bowed-out participant's DNF status isn't threaded through the pure
-  // rebuild/replay functions the resume path uses below (Known limitation,
-  // REFERENCE.md §13 "Forfeiting a game / DNF") — resuming would silently
-  // reinstate them as an active player, desyncing from what the server still
-  // correctly knows. Block saving outright rather than half-support a resume
-  // that can't currently represent this state.
-  if (db.prepare('SELECT 1 FROM game_players WHERE game_id = ? AND dnf = 1').get(game.id)) {
-    throw httpError(409, "This game has a player who bowed out — it can't be saved for later");
-  }
+  // A game with a bowed-out participant used to be rejected here (409, "This game
+  // has a player who bowed out"), because the replay had no way to represent one:
+  // the rebuild*State() functions built players from names alone and advanced with
+  // a plain (index + 1) % length, so a resume silently reinstated the departed
+  // player AND — since isRoundComplete() finds a fixed-round mode's boundary by
+  // walking to the next ACTIVE player — came back on the wrong round. That gap is
+  // closed: the resume payload now carries gp.dnf, and every multi-player rebuild
+  // takes a `dnfs` array and skips departed players when advancing (scoring.js's
+  // _dnfTracker/nextActivePlayerIndex). Nothing left to block.
   // Idempotent-safe: saving an already-saved game id is a no-op 200 (double-tap
   // protection), not an error — see the roadmap doc's "Saving" section.
   if (_savedGameRow(game.id)) return { ok: true, alreadySaved: true };
@@ -2206,8 +2207,18 @@ function abandonSavedGame(gameId) {
 // "submission order" once players() no longer preserves array position),
 // which is the same order createGame() itself inserted them in.
 function _resumeStateTurns(gameId) {
+  // gp.dnf is selected because a bowed-out player must STAY bowed out across a
+  // pause/resume. It was omitted until 2026-07, and the omission was not cosmetic:
+  // the replay rebuilds players from names alone, so a resumed game handed the
+  // departed player their turn back — and, worse, the round-based modes advance
+  // their round by walking to the next ACTIVE player, so a replay that believes
+  // everyone is active advances rounds at different moments than the live game did.
+  // A 3-player Baseball whose LAST-in-rotation player left came back on the wrong
+  // inning, with no error anywhere. See rebuildX01State()/_replayVisits() in
+  // frontend/scoring.js.
   const participants = db.prepare(`
-    SELECT p.id AS playerId, p.name AS name, gp.out_mode AS outMode, gp.start_score AS startScore
+    SELECT p.id AS playerId, p.name AS name, gp.out_mode AS outMode,
+           gp.start_score AS startScore, gp.dnf AS dnf
     FROM game_players gp JOIN players p ON p.id = gp.player_id
     WHERE gp.game_id = ? ORDER BY gp.rowid
   `).all(Number(gameId));
@@ -2300,7 +2311,8 @@ function getResumeState(gameId) {
     gameId: game.id, category: game.category, gameType: game.game_type,
     config: game.config ? JSON.parse(game.config) : null,
     legsPerSet: game.legs_per_set, setsPerGame: game.sets_per_game, practice: !!game.practice,
-    players: participants.map(p => ({ name: p.name, outMode: p.outMode, startScore: p.startScore ?? null })),
+    players: participants.map(p => ({ name: p.name, outMode: p.outMode, startScore: p.startScore ?? null,
+      dnf: !!p.dnf })),
     turns,
     // Tournament/league-fixture linkage restore (docs/archive/saved-games-roadmap.md
     // "Tournament matches and league fixture games... are savable [decided

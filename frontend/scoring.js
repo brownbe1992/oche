@@ -1237,6 +1237,54 @@ function cricketComebackAchieved(worstPointsDeficit){
 // The four fixed-round rebuilds (Baseball/Shanghai/Halve-It/Pressure Chamber)
 // pass setsGateOpen=true unconditionally — their practice variants are forced
 // to 1 leg/1 set at creation, so the gate is a no-op for them either way.
+/* The next player to throw after `from`, skipping anyone who has bowed out — the
+ * replay's counterpart to index.html's advanceToNextActivePlayer().
+ *
+ * The rebuilds used to advance with a plain `(index + 1) % length`, which is only
+ * correct while everybody is still in. A bowed-out player (`dnf`) throws no further
+ * turns, so live play skips them; a replay that does not skip them lands `current` on
+ * someone who has left, and — because isRoundComplete() decides a fixed-round mode's
+ * round boundary by walking to the next ACTIVE player — advances the round at different
+ * moments than the live game did. A 3-player Baseball whose LAST-in-rotation player
+ * bowed out came back from a resume on the wrong inning, with nothing reporting an
+ * error. Falls back to `from` if literally nobody is active, which cannot happen in a
+ * resumable game (the last player standing wins by forfeit) but must not loop forever.
+ */
+function nextActivePlayerIndex(players, from){
+  for(let step=1; step<=players.length; step++){
+    const idx = (from + step) % players.length;
+    if(!players[idx].dnf) return idx;
+  }
+  return from;
+}
+
+/* When, during the replay, each bowed-out player actually left.
+ *
+ * `game_players.dnf` is a terminal flag with no timestamp — all a resume knows is
+ * "this player is out NOW". Marking them out from the first turn is wrong in the
+ * other direction: they took part in the rotation up to the moment they bowed out,
+ * and back-dating that makes the round boundaries land too early instead of too
+ * late. The moment IS derivable, though, and exactly: a player who has bowed out
+ * throws no further turns, so their LAST recorded turn is the last one before they
+ * left. So this returns, per player, the turn index after which they go dnf — or
+ * -1 for someone who bowed out without ever throwing, and null for anyone still in.
+ *
+ * Applied by the `markDnfAfter(turnIndex)` closure below, called just before each
+ * turn's advance, which is where live play would have skipped them from then on.
+ */
+function _dnfTracker(players, turns, dnfs){
+  const leavesAfter = players.map((_, i) => {
+    if(!(dnfs && dnfs[i])) return null;
+    let last = -1;
+    for(let t = 0; t < turns.length; t++) if(turns[t].playerIndex === i) last = t;
+    return last;
+  });
+  players.forEach((p, i) => { p.dnf = leavesAfter[i] === -1; });
+  return (turnIndex) => {
+    players.forEach((p, i) => { if(leavesAfter[i] === turnIndex) p.dnf = true; });
+  };
+}
+
 function _applyLegWin(players, winnerIndex, legsPerSet, setsGateOpen){
   const w = players[winnerIndex];
   w.legsWon += 1;
@@ -1260,25 +1308,29 @@ function _applyLegWin(players, winnerIndex, legsPerSet, setsGateOpen){
 // (index.html: `p.score = p.startScore`), so the replay must too — rebuilding a
 // handicapped player from the game-wide score would inflate their remaining and
 // mis-replay legitimate checkouts/busts as neither.
-function rebuildX01State({ names, outModes, startScore, startScores, practice, legsPerSet, turns }){
+function rebuildX01State({ names, outModes, startScore, startScores, practice, legsPerSet, turns, dnfs }){
   const startFor = i => (startScores && startScores[i] != null) ? startScores[i] : startScore;
   const players = names.map((name, i) => ({
     name, score: startFor(i), doubleOut: (outModes[i] !== 'single'),
+    // Set by _dnfTracker() below, at the point in the replay where they left.
+    dnf: false,
     legPoints:0, legVisits:0, legDarts:0, legAvgDarts:0,
     setDarts:0, gameDarts:0, gamePoints:0, gameVisits:0, gameAvgDarts:0,
     legsWon:0, setsWon:0,
   }));
   const setsGateOpen = !practice;
+  const markDnfAfter = _dnfTracker(players, turns, dnfs);
   let current = 0, starter = 0, setNo = 1, legNo = 1, seenFirst = false;
   let pendingNewLeg = false, pendingNewSet = false;
-  for(const t of turns){
+  for(let ti = 0; ti < turns.length; ti++){
+    const t = turns[ti];
     // A new (set,leg) pair began — apply the same starter-rotation + leg reset
     // startNextLeg() applies live, whether it's this iteration's own turn
     // starting a fresh leg (the common case) or, via pendingNewLeg below, a
     // trailing leg win with no next-leg turn recorded yet (saved mid-transition,
     // on the "leg won — Next leg?" screen, before that button was ever tapped).
     if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
-      starter = (starter + 1) % players.length;
+      starter = nextActivePlayerIndex(players, starter);
       current = starter;
       const newSet = t.setNo !== setNo;
       players.forEach((p, i) => { p.score = startFor(i); p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; if(newSet) p.setDarts=0; });
@@ -1295,12 +1347,13 @@ function rebuildX01State({ names, outModes, startScore, startScores, practice, l
     p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length; p.gameAvgDarts += adj;
     p.gamePoints += ev.scored; p.gameVisits += 1;
     if(!ev.bust) p.score = ev.newScore;
+    markDnfAfter(ti);
     if(ev.win){
       pendingNewSet = _applyLegWin(players, t.playerIndex, legsPerSet, setsGateOpen);
       pendingNewLeg = true;
       current = t.playerIndex; // provisional — overwritten above if a further turn follows
     } else {
-      current = (t.playerIndex + 1) % players.length;
+      current = nextActivePlayerIndex(players, t.playerIndex);
     }
   }
   // Trailing leg win, no next-leg turn recorded yet — land exactly where
@@ -1308,7 +1361,7 @@ function rebuildX01State({ names, outModes, startScore, startScores, practice, l
   // starter and reset every player's leg-scoped fields, one leg/set ahead of
   // the last one actually recorded.
   if(pendingNewLeg){
-    starter = (starter + 1) % players.length;
+    starter = nextActivePlayerIndex(players, starter);
     current = starter;
     players.forEach((p, i) => { p.score = startFor(i); p.legPoints=0; p.legVisits=0; p.legDarts=0; p.legAvgDarts=0; if(pendingNewSet) p.setDarts=0; });
     if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
@@ -1330,12 +1383,12 @@ function rebuildX01State({ names, outModes, startScore, startScores, practice, l
 // NOT rebuilt here — same "cosmetic/session bookkeeping already accepted as
 // lost on resume" precedent as every other game type's own trackers (see this
 // section's own header comment above).
-function rebuildCricketState({ names, config, practice, legsPerSet, turns }){
+function rebuildCricketState({ names, config, practice, legsPerSet, turns, dnfs }){
   const numbers = (config && config.numbers) || CRICKET_STANDARD_NUMBERS;
   const variant = (config && config.variant) === 'cutthroat' ? 'cutthroat' : 'standard';
   const freshMarks = () => { const marks = {}; numbers.forEach(n => { marks[n] = 0; }); return marks; };
   return _replayVisits({
-    names, turns, legsPerSet,
+    names, turns, legsPerSet, dnfs,
     // The one mode with a real set gate: a practice Cricket run must never take
     // a set. The round-based modes pass the default `true`, which is moot for
     // them — they are forced to 1 leg/1 set at creation (BUG-22).
@@ -1404,14 +1457,16 @@ function rebuildCricketState({ names, config, practice, legsPerSet, turns }){
  * these hooks into a configuration language and leave every reader worse off
  * than the duplication did.
  */
-function _replayVisits({ names, turns, legsPerSet, setsGateOpen = true, roundKey = null,
+function _replayVisits({ names, turns, legsPerSet, setsGateOpen = true, roundKey = null, dnfs,
                          newPlayer, resetLeg, context, evaluateVisit, applyResult, winnerOf }){
-  const players = names.map(newPlayer);
+  const players = names.map((name, i) => newPlayer(name, i));
+  const markDnfAfter = _dnfTracker(players, turns, dnfs);
   let current = 0, starter = 0, setNo = 1, legNo = 1, round = 1, seenFirst = false;
   let pendingNewLeg = false, pendingNewSet = false;
-  for(const t of turns){
+  for(let ti = 0; ti < turns.length; ti++){
+    const t = turns[ti];
     if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
-      starter = (starter + 1) % players.length;
+      starter = nextActivePlayerIndex(players, starter);
       current = starter;
       const newSet = t.setNo !== setNo;
       players.forEach(p => resetLeg(p, newSet));
@@ -1427,6 +1482,7 @@ function _replayVisits({ names, turns, legsPerSet, setsGateOpen = true, roundKey
     const ev = evaluateVisit(p, dartsCore, ctx);
     applyResult(p, ev, ctx);
     p.legDarts += dartsCore.length; p.setDarts += dartsCore.length; p.gameDarts += dartsCore.length;
+    markDnfAfter(ti);
     const winner = winnerOf(ev, t);
     if(winner >= 0){
       pendingNewSet = _applyLegWin(players, winner, legsPerSet, setsGateOpen);
@@ -1434,14 +1490,14 @@ function _replayVisits({ names, turns, legsPerSet, setsGateOpen = true, roundKey
       current = winner;
     } else {
       if(ev.roundComplete) round += 1;
-      current = (t.playerIndex + 1) % players.length;
+      current = nextActivePlayerIndex(players, t.playerIndex);
     }
   }
   // A leg won by the very last recorded turn has no next-leg turns to advance
   // the counters, so the transition is applied here instead — the same trailer
   // all five hand-written loops carried.
   if(pendingNewLeg){
-    starter = (starter + 1) % players.length;
+    starter = nextActivePlayerIndex(players, starter);
     current = starter;
     players.forEach(p => resetLeg(p, pendingNewSet));
     if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
@@ -1462,9 +1518,9 @@ function _replayVisits({ names, turns, legsPerSet, setsGateOpen = true, roundKey
 // unconditional `if(w.legsWon >= game.legsPerSet)` — docs/bug-roadmap.md BUG-22:
 // practice Baseball is forced to exactly 1 leg/1 set at creation, so the gate
 // would be a no-op here even if applied).
-function rebuildBaseballState({ names, legsPerSet, turns }){
+function rebuildBaseballState({ names, legsPerSet, turns, dnfs }){
   return _replayVisits({
-    names, turns, legsPerSet, roundKey: 'baseballInning',
+    names, turns, legsPerSet, dnfs, roundKey: 'baseballInning',
     newPlayer: name => ({ name, totalRuns:0, inningRuns:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }),
     resetLeg: (p, newSet) => { p.totalRuns = 0; p.inningRuns = {}; p.legDarts = 0; if(newSet) p.setDarts = 0; },
     context: ({ round }) => ({ baseballInning: round }),
@@ -1478,9 +1534,9 @@ function rebuildBaseballState({ names, legsPerSet, turns }){
 // with the round target parameterized by maxRounds (config.rounds) instead
 // of a hardcoded 9, and a Shanghai ending the match instantly instead of
 // needing the final round to complete.
-function rebuildShanghaiState({ names, legsPerSet, maxRounds, turns }){
+function rebuildShanghaiState({ names, legsPerSet, maxRounds, turns, dnfs }){
   return _replayVisits({
-    names, turns, legsPerSet, roundKey: 'shanghaiRound',
+    names, turns, legsPerSet, dnfs, roundKey: 'shanghaiRound',
     newPlayer: name => ({ name, totalPoints:0, roundPoints:{}, legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }),
     resetLeg: (p, newSet) => { p.totalPoints = 0; p.roundPoints = {}; p.legDarts = 0; if(newSet) p.setDarts = 0; },
     context: ({ round }) => ({ shanghaiRound: round, config:{ rounds:maxRounds } }),
@@ -1554,13 +1610,13 @@ function evaluateVisitHalveIt(player, darts, game){
 // rebuildBaseballState()/rebuildShanghaiState() with the round target keyed
 // off config.targets instead of a hardcoded/parameterized number, and no
 // instant-win branch to special-case (Halve-It never ends early).
-function rebuildHalveItState({ names, legsPerSet, targets, turns }){
+function rebuildHalveItState({ names, legsPerSet, targets, turns, dnfs }){
   // everHalved/lastVisitHalved: per-leg tracking the live UI reads to award
   // 🛡️ No Half Measures / 🪓 Halved at the Death — reconstructed here too so a
   // resumed leg's badge check still sees the leg's FULL halving history, not
   // just turns recorded after the resume.
   return _replayVisits({
-    names, turns, legsPerSet, roundKey: 'halveItRound',
+    names, turns, legsPerSet, dnfs, roundKey: 'halveItRound',
     newPlayer: name => ({ name, total:0, roundTotals:{}, roundHalved:{}, legsWon:0, setsWon:0,
       legDarts:0, setDarts:0, gameDarts:0, everHalved:false, lastVisitHalved:false }),
     // roundHalved is per-LEG, exactly like roundTotals beside it —
@@ -1917,9 +1973,9 @@ function evaluateVisitPressureChamber(player, darts, game){
 // rebuildBaseballState()/rebuildShanghaiState()/rebuildHalveItState() with the
 // round target parameterized by maxRounds (config.rounds) and gameId (the
 // generatePressureCard() seed) instead of a hardcoded/parameterized number.
-function rebuildPressureChamberState({ gameId, names, legsPerSet, maxRounds, turns }){
+function rebuildPressureChamberState({ gameId, names, legsPerSet, maxRounds, turns, dnfs }){
   return _replayVisits({
-    names, turns, legsPerSet, roundKey: 'pressureChamberRound',
+    names, turns, legsPerSet, dnfs, roundKey: 'pressureChamberRound',
     newPlayer: name => ({ name, totalCp:0, misses:0, fullHits:0,
       currentFullHitStreak:0, bestFullHitStreak:0, roundResults:{},
       legsWon:0, setsWon:0, legDarts:0, setDarts:0, gameDarts:0 }),
@@ -1985,17 +2041,19 @@ function rebuildAroundTheClockState({ turns }){
 // throwDartAroundTheClock() enforces live. A dart that completes a clock ends
 // the leg immediately, which is why the visit counter resets there rather than
 // carrying into the next leg's first visit.
-function rebuildAroundTheClockRaceState({ names, legsPerSet, dartsPerVisit = 3, turns }){
-  const players = names.map(name => ({ name, hitSet:new Set(), roundDarts:0,
+function rebuildAroundTheClockRaceState({ names, legsPerSet, dartsPerVisit = 3, turns, dnfs }){
+  const players = names.map(name => ({ name, dnf:false, hitSet:new Set(), roundDarts:0,
     roundTrebles:0, roundDoubles:0, roundMisses:0, legsWon:0, setsWon:0 }));
+  const markDnfAfter = _dnfTracker(players, turns, dnfs);
   let current = 0, starter = 0, setNo = 1, legNo = 1, visitDarts = 0, seenFirst = false;
   let pendingNewLeg = false, pendingNewSet = false;
   const resetLeg = () => players.forEach(p => {
     p.hitSet = new Set(); p.roundDarts = 0; p.roundTrebles = 0; p.roundDoubles = 0; p.roundMisses = 0;
   });
-  for(const t of turns){
+  for(let ti = 0; ti < turns.length; ti++){
+    const t = turns[ti];
     if(seenFirst && (t.setNo !== setNo || t.legNo !== legNo)){
-      starter = (starter + 1) % players.length;
+      starter = nextActivePlayerIndex(players, starter);
       current = starter; visitDarts = 0;
       resetLeg();
       setNo = t.setNo; legNo = t.legNo;
@@ -2011,6 +2069,7 @@ function rebuildAroundTheClockRaceState({ names, legsPerSet, dartsPerVisit = 3, 
     else if(dart.isTreble) p.roundTrebles += 1;
     else if(dart.isDouble) p.roundDoubles += 1;
     if(ev.isNewHit) p.hitSet.add(dart.sector);
+    markDnfAfter(ti);
     if(ev.completed){
       pendingNewSet = _applyLegWin(players, t.playerIndex, legsPerSet, true);
       pendingNewLeg = true;
@@ -2019,12 +2078,12 @@ function rebuildAroundTheClockRaceState({ names, legsPerSet, dartsPerVisit = 3, 
       visitDarts += 1;
       if(visitDarts >= dartsPerVisit){
         visitDarts = 0;
-        current = (t.playerIndex + 1) % players.length;
+        current = nextActivePlayerIndex(players, t.playerIndex);
       }
     }
   }
   if(pendingNewLeg){
-    starter = (starter + 1) % players.length;
+    starter = nextActivePlayerIndex(players, starter);
     current = starter; visitDarts = 0;
     resetLeg();
     if(pendingNewSet){ setNo += 1; legNo = 1; } else { legNo += 1; }
@@ -2720,6 +2779,7 @@ if (typeof module !== 'undefined' && module.exports) {
     resolveBoardColors, BOARD_LABEL_LIGHT, BOARD_LABEL_DARK,
     evaluateVisit, evaluateVisitCricket, CRICKET_STANDARD_NUMBERS, CRICKET_ALL_NUMBERS,
     evaluateVisitBaseball, baseballInningTarget, isBaseballCycle, parseSqliteTimestamp,
+    isRoundComplete,
     evaluateDartDoublesPractice, evaluateDartAroundTheClock, isStaircaseFinish,
     isBedAndBreakfast, isMadhouseFinish, isShanghaiVisit,
     isHatTrick, isBullseyeGauntlet, isDoubleTrouble, isWhereDidItGo, isSoCloseShot,

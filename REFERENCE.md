@@ -4902,16 +4902,31 @@ any existing stat query.
   ended early, count as a DNF instead of silently staying an invisible, uncounted
   in-progress row forever (the pre-existing behavior — `askEndGame()` never called any
   completion endpoint at all).
-- **Known limitation, actively blocked rather than silently allowed**: `dnf` is a
-  live-session-only signal — a save/resume cycle (`docs/archive/saved-games-roadmap.md`)
-  replays purely from recorded `turns`/`darts` via `rebuildX01State()`/
-  `rebuildCricketState()`/etc., which have no knowledge of an in-session bow-out, so
-  resuming a game after someone bowed out would silently rebuild that player as still
-  active. Rather than half-support this, `saveGame()` rejects outright (409, "This
-  game has a player who bowed out — it can't be saved for later") whenever any
-  `game_players.dnf = 1` row exists for the game — pausing a still-in-progress bow-out
-  match just isn't offered, instead of quietly resuming into a desynced state.
-  `saveGame()`/`getResumeState()` also both check `dnf_at` (not just `completed_at`)
+- **`dnf` survives a save/resume** (2026-07; this was a blocked limitation until then).
+  A save/resume cycle (`docs/archive/saved-games-roadmap.md`) replays purely from
+  recorded `turns`/`darts`, and the rebuilds had no knowledge of an in-session
+  bow-out, so `saveGame()` rejected any game with a `dnf = 1` participant outright
+  (409, "This game has a player who bowed out — it can't be saved for later") rather
+  than resume into a desynced state. Two things went wrong without that guard: the
+  departed player was reinstated as active, and — because `isRoundComplete()` finds a
+  fixed-round mode's boundary by walking to the next **active** player — Baseball /
+  Shanghai / Halve-It / Pressure Chamber resumed on the **wrong round**, silently.
+  Now: `getResumeState()` returns `gp.dnf` per participant, `resumeGame()` applies it,
+  and every multi-player rebuild (`rebuildX01State`, `rebuildCricketState`,
+  `rebuildBaseballState`, `rebuildShanghaiState`, `rebuildHalveItState`,
+  `rebuildPressureChamberState`, `rebuildAroundTheClockRaceState`) takes a `dnfs`
+  array and advances via `nextActivePlayerIndex()`, which skips them. The solo-only
+  rebuilds take no `dnfs` — one seat can't bow out of its own drill.
+  **When they left matters, and is derived, not stored.** `game_players.dnf` is a
+  terminal flag with no timestamp, and applying it from the first turn is as wrong as
+  ignoring it — it back-dates the departure over rounds the player genuinely threw in,
+  landing the replay a round *ahead* instead of behind. `scoring.js`'s `_dnfTracker()`
+  recovers the moment exactly: a bowed-out player throws no further turns, so their
+  **last recorded turn** is the last one before they left, and they are marked `dnf`
+  from immediately after it (or from the start, if they never threw). Committed
+  test: `backend/test/scoring.resume-dnf.test.js`, which pins all three numbers —
+  the pre-fix answer, the back-dated answer, and the live one between them.
+  `saveGame()`/`getResumeState()` still both check `dnf_at` (not just `completed_at`)
   for the same reason — an abandoned match must be exactly as unsavable/unresumable
   as a completed one.
 - Both endpoints are `requireWrite` (same tier as recording a turn — bowing out or

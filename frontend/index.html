@@ -10611,6 +10611,10 @@ async function resumeGame(gameId){
     entry.ctorArg === 'config' ? config
       : gameType === 'x01' ? (state.players[i].startScore ?? startScore)
       : startScore));
+  // A player who bowed out before the save stays bowed out. Without this the resumed
+  // game hands them their turn back, and every rotation/round-boundary rule that walks
+  // past dnf players silently disagrees with the game that was actually played.
+  state.players.forEach((sp, i) => { if(sp.dnf) players[i].dnf = true; });
 
   const { overlay, statusMsg } = entry.resume({ names, outModes, startScore, config, players, state, gameId });
   const starter = overlay.starter ?? 0;
@@ -14046,7 +14050,7 @@ const GAME_TYPES = {
     resume: (ctx) => {
       const { names, outModes, startScore, players, state } = ctx;
       const startScores = state.players.map(p => p.startScore ?? null);
-      const r = rebuildX01State({ names, outModes, startScore, startScores, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
+      const r = rebuildX01State({ dnfs: state.players.map(p => !!p.dnf), names, outModes, startScore, startScores, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
       players.forEach((p,i) => {
         const rp = r.players[i];
         Object.assign(p, { score:rp.score, doubleOut:rp.doubleOut, legsWon:rp.legsWon, setsWon:rp.setsWon,
@@ -14153,7 +14157,7 @@ const GAME_TYPES = {
     liveModeState: game => ({ cricketVariant: game.config.variant || 'standard' }),
     resume: (ctx) => {
       const { names, config, players, state } = ctx;
-      const r = rebuildCricketState({ names, config, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
+      const r = rebuildCricketState({ dnfs: state.players.map(p => !!p.dnf), names, config, practice: !!state.practice, legsPerSet: state.legsPerSet, turns: state.turns });
       players.forEach((p,i) => {
         const rp = r.players[i];
         Object.assign(p, { marks:rp.marks, points:rp.points, legsWon:rp.legsWon, setsWon:rp.setsWon,
@@ -14228,7 +14232,7 @@ const GAME_TYPES = {
     liveModeState: game => ({ baseballInning: game.baseballInning || 1 }),
     resume: (ctx) => {
       const { names, players, state } = ctx;
-      const r = rebuildBaseballState({ names, legsPerSet: state.legsPerSet, turns: state.turns });
+      const r = rebuildBaseballState({ dnfs: state.players.map(p => !!p.dnf), names, legsPerSet: state.legsPerSet, turns: state.turns });
       players.forEach((p,i) => {
         const rp = r.players[i];
         Object.assign(p, { totalRuns:rp.totalRuns, inningRuns:rp.inningRuns, legsWon:rp.legsWon, setsWon:rp.setsWon,
@@ -14279,7 +14283,7 @@ const GAME_TYPES = {
     resume: (ctx) => {
       const { config, players, state } = ctx;
       const maxRounds = config.rounds || 7;
-      const r = rebuildShanghaiState({ names: players.map(p=>p.name), legsPerSet: state.legsPerSet, maxRounds, turns: state.turns });
+      const r = rebuildShanghaiState({ dnfs: state.players.map(p => !!p.dnf), names: players.map(p=>p.name), legsPerSet: state.legsPerSet, maxRounds, turns: state.turns });
       players.forEach((p,i) => {
         const rp = r.players[i];
         Object.assign(p, { totalPoints:rp.totalPoints, roundPoints:rp.roundPoints, legsWon:rp.legsWon, setsWon:rp.setsWon,
@@ -14340,7 +14344,7 @@ const GAME_TYPES = {
     resume: (ctx) => {
       const { config, players, state } = ctx;
       const targets = (config && config.targets) || HALVE_IT_DEFAULT_TARGETS;
-      const r = rebuildHalveItState({ names: players.map(p=>p.name), legsPerSet: state.legsPerSet, targets, turns: state.turns });
+      const r = rebuildHalveItState({ dnfs: state.players.map(p => !!p.dnf), names: players.map(p=>p.name), legsPerSet: state.legsPerSet, targets, turns: state.turns });
       players.forEach((p,i) => {
         const rp = r.players[i];
         Object.assign(p, { total:rp.total, roundTotals:rp.roundTotals, roundHalved:rp.roundHalved,
@@ -14408,7 +14412,7 @@ const GAME_TYPES = {
     resume: (ctx) => {
       const { config, players, state, gameId } = ctx;
       const maxRounds = (config && config.rounds) || PRESSURE_ROUNDS;
-      const r = rebuildPressureChamberState({ gameId, names: players.map(p=>p.name), legsPerSet: state.legsPerSet, maxRounds, turns: state.turns });
+      const r = rebuildPressureChamberState({ dnfs: state.players.map(p => !!p.dnf), gameId, names: players.map(p=>p.name), legsPerSet: state.legsPerSet, maxRounds, turns: state.turns });
       players.forEach((p,i) => {
         const rp = r.players[i];
         Object.assign(p, { totalCp:rp.totalCp, misses:rp.misses, fullHits:rp.fullHits,
@@ -14665,7 +14669,7 @@ const GAME_TYPES = {
       // own darts, but the leg/set tree — which resets everyone's clock, and
       // whose turn it is on the resumed visit — is a property of the match.
       if(players.length > 1){
-        const r = rebuildAroundTheClockRaceState({ names: players.map(p=>p.name),
+        const r = rebuildAroundTheClockRaceState({ dnfs: state.players.map(p => !!p.dnf), names: players.map(p=>p.name),
           legsPerSet: state.legsPerSet, dartsPerVisit: ATC_DARTS_PER_VISIT, turns: state.turns });
         players.forEach((p,i)=> Object.assign(p, r.players[i], { name: p.name }));
         return {
