@@ -24,8 +24,9 @@ const fs = require('fs');
 const path = require('path');
 
 const S = require('../../frontend/scoring.js');
-const INDEX = path.join(__dirname, '..', '..', 'frontend', 'index.html');
-const src = () => fs.readFileSync(INDEX, 'utf8');
+// The whole page scope — a per-game-type function can live in index.html or in
+// any frontend/js/ file it loads. See frontend-source.js.
+const { pageSource: src } = require('./frontend-source.js');
 
 // One 1-dart turn, the shape rebuildAroundTheWorldState() replays.
 const turn = (sector, mult) => ({ legNo: 1, darts: [{ sector, mult }] });

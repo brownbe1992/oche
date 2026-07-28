@@ -21,8 +21,9 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const INDEX = path.join(__dirname, '..', '..', 'frontend', 'index.html');
-const src = fs.readFileSync(INDEX, 'utf8');
+// The whole page scope — a per-game-type function can live in index.html or in
+// any frontend/js/ file it loads. See frontend-source.js.
+const src = require('./frontend-source.js').pageSource();
 
 /* Lift `buildConfig` and `restoreSetup` out of each registry entry by brace-matching —
  * index.html has no module boundary, the same reason completion-panels.test.js does it

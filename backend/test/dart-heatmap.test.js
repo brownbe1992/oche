@@ -26,7 +26,7 @@ const vm = require('vm');
 const INDEX_HTML_PATH = path.join(__dirname, '..', '..', 'frontend', 'index.html');
 
 function loadBuildDartHeatmap() {
-  const src = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  const src = require('./frontend-source.js').pageSource();
   const dbSectorsMatch = src.match(/^const DB_SECTORS = \[[^\]]*\];/m);
   // BOARD_GEOM: the shared CX/CY/R/xy/annulus geometry kernel buildDartHeatmap()
   // destructures from (also used by buildDartboard()) — extracted the same "real
