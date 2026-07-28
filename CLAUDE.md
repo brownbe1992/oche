@@ -3,6 +3,38 @@
 These are binding conventions for this codebase, adopted deliberately and meant to
 persist across every session — not just suggestions to reconsider each time.
 
+## The standing goal: this code is being written for a human who hasn't arrived yet
+
+Every line of this app has been written by Claude. The owner is not a professional
+developer, and **expects that a human will eventually work on this code by hand.**
+That person is the audience. They will arrive with no context, no memory of any
+session, and no one to ask.
+
+So the goal is not "code that works" — that is the floor. The goal is **code a
+newcomer can learn from and safely change.** In practice that means:
+
+- **Continuous small tidy-ups are real work, not filler.** Splitting an oversized
+  file, naming a confusing thing better, deleting a dead branch, replacing three
+  copies with one helper — do these steadily and proactively, as their own
+  deliverable, not only when something else forces the issue. A session that leaves
+  the codebase tidier than it found it has done its job.
+- **Explain the "why", especially the non-obvious.** A comment saying what the code
+  does is usually noise; a comment saying why it is this way — what was tried, what
+  broke, what would look reasonable but is wrong — is what a newcomer cannot
+  reconstruct and cannot get anywhere else. Much of this codebase's commenting
+  already works this way. Keep it that way.
+- **Prefer boring and obvious over clever and short.** If a newcomer would have to
+  work out what a line does, it is the wrong line, even when it is elegant.
+- **One way to do a thing.** Where the codebase has a helper, a registry, or an
+  established pattern, use it rather than adding a second convention that does the
+  same job — two ways to do one thing is the tax a newcomer pays forever.
+- **Leave the map current.** `REFERENCE.md`, the roadmap docs and the trackers are
+  how that person finds their way; the conventions below on keeping them accurate
+  exist for their benefit, not for tidiness' sake.
+
+When a change is a genuine trade between "ships faster" and "reads more clearly",
+the default is clearly — and say so in the reply, rather than deciding silently.
+
 ## Architecture conventions
 
 ### New game "contexts" link into `games` via their own table — never a new boolean column on `games`
