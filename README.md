@@ -1976,7 +1976,10 @@ oche/
 │   ├── seed-dev-db.js  Deterministic test-data seeder (see Development)
 │   └── test/        node:test suite (`npm test`)
 ├── frontend/
-│   ├── index.html    The entire app — one self-contained HTML file
+│   ├── index.html    Markup, CSS, and the core app (turn loop, game state, screens)
+│   ├── scoring.js    Pure scoring maths, shared with the backend's test suite
+│   ├── js/          Six feature areas split out of index.html — daily-challenge,
+│   │                dart-builder, tournaments, moments, leagues, session-recap
 │   └── display.html  Read-only live scoreboard for a second screen
 ├── docker-compose.yml
 ├── docker-compose.dev.yml         Dev instance on port 8056

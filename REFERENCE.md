@@ -72,10 +72,18 @@ oche/
 │   ├── netguard.js    Outbound-request egress guard (SSRF/DNS-rebinding protection)
 │   └── backup.js       Stand-alone WAL-safe backup script
 ├── frontend/
-│   ├── index.html    The entire app — one self-contained HTML file (the controller)
+│   ├── index.html    The app's markup, CSS, and the core controller (turn loop,
+│   │                 game/setup/stats state, every screen not listed below)
 │   ├── scoring.js    Pure scoring logic (evaluateVisit/evaluateVisitCricket/
 │   │                 evaluateVisitBaseball/checkout math), extracted from
 │   │                 index.html so it's unit-testable
+│   ├── js/           Six leaf feature areas, split out of index.html
+│   │   ├── daily-challenge.js  format registry, attempt state, every DC surface
+│   │   ├── dart-builder.js     loadouts and the component editor
+│   │   ├── tournaments.js      bracket setup, seeding, match progression
+│   │   ├── moments.js          shareable cards + badge awarding
+│   │   ├── leagues.js          list, setup, standings, fixtures
+│   │   └── session-recap.js    the end-of-night digest
 │   └── display.html  Read-only live scoreboard for a second screen
 ```
 
@@ -86,19 +94,36 @@ oche/
   keys enabled. All statistics are computed from raw `turns`/`darts` data at
   query time — nothing is pre-aggregated, so a new metric never needs a
   migration or a backfill, and stats are always internally consistent.
-- **Frontend**: `frontend/index.html` is a single file — HTML, CSS, and vanilla
-  JavaScript in one `<script>` block, no build step, no framework. It requires a
-  reachable backend at the same origin; there is no offline/local-storage
-  fallback, so stats never split across two unsynced stores. `frontend/display.html`
-  is a much smaller read-only client, driven entirely by Server-Sent Events.
-  `frontend/scoring.js` is the one exception to "everything lives in the inline
-  `<script>`" — `evaluateVisit()`, `evaluateVisitCricket()`, and the checkout
-  route calculator were extracted there (docs/testing-and-observability-roadmap.md
-  Part B) so they're reachable from a `node:test` file. It's still loaded the same
-  no-build-step way, via a plain `<script src="scoring.js">` before the main
-  script, and every name it defines is still a plain global exactly as before the
-  extraction — a dual-mode CommonJS export block at the bottom only activates
-  under Node (`typeof module !== 'undefined'`), so nothing changes in the browser.
+- **Frontend**: HTML, CSS and vanilla JavaScript, **no build step, no framework, no
+  bundler**. It requires a reachable backend at the same origin; there is no
+  offline/local-storage fallback, so stats never split across two unsynced stores.
+  `frontend/display.html` is a much smaller read-only client, driven entirely by
+  Server-Sent Events.
+
+  The JavaScript is spread over `index.html`'s inline `<script>` plus eight
+  `<script src>` files (`scoring.js` and the six in `js/`), and **all of them share
+  one global scope**. That is the whole reason they are classic scripts rather than
+  ES modules: an inline `on*=` handler resolves its names against `window` at click
+  time, and a module's exports are not on `window` — moving those functions into
+  modules would break all ~335 handler attributes at once, silently, with nothing
+  thrown. The 87 mutable top-level bindings compound it: an exported `let` cannot be
+  assigned by an importer, and `game` alone is assigned from dozens of places.
+  `docs/frontend-module-split-roadmap.md` has the measurements and the browser
+  reproductions behind that decision.
+
+  Practically this means a split file is **not** an encapsulation boundary — it is a
+  filing decision. Any file can still call and assign anything in any other. The one
+  hard rule the split imposes is load order: `js/*.js` files load *before* the inline
+  script, so nothing at a split file's **top level** may read a name the inline script
+  declares. Reading it from inside a function is fine, because by then everything has
+  loaded. One violation aborts the entire file it appears in, taking every function
+  with it; `backend/check.js`'s `load-order` check exists because that happened.
+
+  `frontend/scoring.js` is the odd one out among them: it is loaded first and is
+  **dual-mode**, with a CommonJS export block at the bottom that only activates under
+  Node (`typeof module !== 'undefined'`), so `node:test` can import the pure scoring
+  math (docs/testing-and-observability-roadmap.md Part B) while the browser still gets
+  every name as a plain global.
 - **Client-server sync**: the controller's `Backend` object wraps `fetch()` calls
   to the API; `DB` (in `index.html`) wraps the specific game/turn/badge/challenge
   endpoints and owns a small internal promise queue (`DB._queue`) so that
@@ -9729,7 +9754,7 @@ written out and went stale two checks ago.
 
 | Check | What it catches | Why nothing else does |
 |---|---|---|
-| `duplicate-function` | The same top-level `function name()` declared twice | Legal JavaScript. The later one silently wins and the earlier definition is simply gone — in `index.html`'s single ~18,600-line scope holding 679 functions, with no error anywhere |
+| `duplicate-function` | The same top-level `function name()` declared twice | Legal JavaScript. The later one silently wins and the earlier definition is simply gone — in the single global scope `index.html` shares with its six `frontend/js/` scripts, with no error anywhere |
 | `unused-function` | A top-level function nothing references | Counted across all frontend scripts, the backend, the whole test suite, **and the raw HTML** (an inline handler is markup, so it is invisible in the extracted script text) |
 | `missing-handler` | An inline `on*=` handler naming a function that does not exist | These resolve against the global object at **click time**, so a broken one throws nothing at load. Invisible to `node --check`, to the backend suite, and to any test that doesn't happen to click that control |
 | `missing-id` | `getElementById('x')` where `x` appears nowhere else in the file | A missing element returns `null` and usually fails silently inside a render path |

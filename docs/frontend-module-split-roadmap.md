@@ -1,19 +1,35 @@
 # Frontend module split — feasibility, and the shape it should take
 
-> **Status: in progress (2026-07). Step 1 done, step 2 partly done.** This document
+> **Status: steps 1 and 2 done (2026-07). Steps 3 and 4 remain.** This document
 > exists because the measurement changed the plan: the item was filed as "split
 > `index.html`'s JS into ES modules", and measuring the file says **ES modules are the
 > wrong target**. The owner chose the classic-script split described below.
 >
-> **Shipped so far** — four leaf areas extracted, ~1,360 lines, `index.html` 21,172 →
-> 19,812:
+> **Shipped** — all six leaf areas extracted, ~2,330 lines, `index.html` 21,172 →
+> 19,080:
 >
 > | File | Lines | |
 > |---|---|---|
-> | `frontend/js/tournaments.js` | 453 | bracket setup, seeding, match progression |
+> | `frontend/js/daily-challenge.js` | 606 | format registry, attempt state, every challenge surface |
 > | `frontend/js/dart-builder.js` | 535 | loadouts and the component editor |
+> | `frontend/js/tournaments.js` | 453 | bracket setup, seeding, match progression |
 > | `frontend/js/moments.js` | 287 | shareable cards + badge awarding |
 > | `frontend/js/leagues.js` | 264 | list, setup, standings, fixtures |
+> | `frontend/js/session-recap.js` | 183 | the end-of-night digest |
+>
+> **The last two extractions confirmed that a section banner is the wrong boundary,
+> for the third time.** The "DAILY CHALLENGE" banner's region also contained
+> `X01_CATEGORIES` (read by the New Game flavor select, tournament setup and
+> `leagues.js`) and the `sessionBadgesShown` / `earnedBadgeCache` badge state — none of
+> it challenge code. A banner marks where a topic *starts*, not where it ends. Both
+> files were therefore cut **per declaration**, with the boundaries asserted in the
+> extraction script rather than eyeballed, and the two intruders left where they were.
+>
+> Daily Challenge also had eight functions scattered across other screens' sections
+> (Settings' reset control, both New Game setup steps, the profile history panel, the
+> results panel). Those moved too. Splitting by screen would have left the feature with
+> two homes and a newcomer asking "where does the Daily Challenge live?" needing both
+> answers; the file is the answer instead.
 >
 > **What went wrong, and what it cost.** One line — `const LEAGUE_X01_CATEGORIES =
 > X01_CATEGORIES;` in the extracted league code — is a *top-level initialiser*, so it
@@ -139,9 +155,13 @@ the next step to be worth doing.
    assert that every one of the 180 handler-called names is declared in *some* loaded
    file, and that the `<script src>` list in `index.html` matches the files on disk. This
    is what makes the rest safe to do at all.
-2. **Extract the leaf areas** — the ones with the lowest fan-in to the rest: Dart
-   Builder / Loadouts, Shareable Moments, Tournament Mode, Session Recap. Each already
-   has its own section banner in the file.
+2. ✅ **Done.** **Extract the leaf areas** — the ones with the lowest fan-in to the
+   rest: Dart Builder / Loadouts, Shareable Moments, Tournament Mode, Leagues, Session
+   Recap, Daily Challenge. ~~Each already has its own section banner in the file.~~
+   **That last sentence was wrong, and it is the one thing to carry into step 3**: a
+   banner marks where a topic starts, not where it ends. Three of the six extractions
+   found unrelated declarations inside the banner's region. Cut per declaration, and
+   assert the boundaries in the script that does the cutting.
 3. **Extract the per-mode game logic**, one file per game type, driven by the
    `GAME_TYPES` registry that already isolates them behind a common interface.
 4. **What is left is the core**: `game`/`setup`/`stats` and the turn loop. Leave it as
