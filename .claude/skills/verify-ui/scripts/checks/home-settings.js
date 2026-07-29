@@ -94,6 +94,24 @@ async function boardColors(rep) {
 
     rep.ok('board-colours: no uncaught page errors', pageErrors.length === 0, pageErrors.join('; '));
     await rep.captureIfFailed(page, 'board-colors');
+
+    // Put the scheme back. This check asserts that red_black is the DEFAULT and
+    // then persists green_white over it, so without this it only passes against a
+    // never-touched database — run it twice against the same one (which happens
+    // whenever the runner reuses an already-listening server, its documented
+    // behaviour) and three assertions fail with "green_white", looking exactly
+    // like a real regression in code that was never touched. Deliberately no
+    // assertion here: this is cleanup, and adding one would change the check's
+    // assertion count in run.js for something that isn't a property of the app.
+    // The admin session logged in at the top of this check is still valid, which
+    // is what makes the admin-only PUT below work.
+    await page.evaluate(async () => {
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ board_sector20_scheme: 'red_black' }),
+      });
+    });
   });
 }
 

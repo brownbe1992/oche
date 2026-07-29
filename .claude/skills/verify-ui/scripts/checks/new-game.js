@@ -44,6 +44,7 @@ async function step1DefaultState(rep) {
         hasContinue: !!document.getElementById('setup-step1-continue'),
         optionsVisible: pool ? pool.offsetParent !== null : false,
         categories: document.querySelectorAll('.setup-cat-head').length,
+        firstCategory: (document.querySelector('.setup-cat-head .setup-cat-title') || {}).textContent || null,
       };
     });
     rep.ok('step 1: opens with no game selected', fresh.key === '', `key=${JSON.stringify(fresh.key)}`);
@@ -58,6 +59,10 @@ async function step1DefaultState(rep) {
     // must not read as "empty screen".
     rep.ok('step 1: every category header is still offered', fresh.categories >= 5,
       `${fresh.categories} headers`);
+    // Ordering is a deliberate placement (owner request), and it is only ever
+    // visible here — on a collapsed screen the header order IS the screen.
+    rep.ok('step 1: Minigames leads the category list', fresh.firstCategory === 'Minigames',
+      `first header=${JSON.stringify(fresh.firstCategory)}`);
 
     rep.ok('new-game: no uncaught page errors (default state)', pageErrors.length === 0,
       pageErrors.join('; '));

@@ -40,7 +40,7 @@ series, on purpose (see Rate limiting below).
 
 ## What it covers
 
-506 assertions across nineteen checks.
+510 assertions across nineteen checks.
 
 **Each check's assertion count is recorded in `scripts/run.js`'s `CHECKS` table, and
 running fewer than that fails the suite.** That is the check on the checks: a suite
@@ -180,6 +180,21 @@ server, so the limiter is out of the picture entirely. Keep fixtures small
 make the suite faster and easier to reason about. If you point the suite at a
 server you started yourself, it keeps the normal 300/60s limit and the old trap
 is back.
+
+**A check that writes a global setting must put it back.** The runner reuses an
+already-listening server on 8146 rather than starting its own, so consecutive runs
+can share one database — and a check that asserts a **default** and then persists
+something else over it passes the first time and fails every time after. That is
+not hypothetical either: `home-settings` asserted `red_black` was the default
+board scheme and then saved `green_white`, so a second run against the same server
+reported three failures reading `green_white`, in code nothing had touched. It
+looks exactly like a real regression and sends you diffing the app instead of the
+suite. That check now restores the scheme in a teardown step with no assertion of
+its own (an assertion there would change its count in `run.js` for something that
+isn't a property of the app). If a check you write mutates anything
+household-wide — a setting, an admin password, a roster the other checks read —
+reset it, and prove it by running that check twice in a row against the same
+server.
 
 **Top-level `let` is not on `window`.** `homeData`, `setup`, `roster` and
 friends are top-level `let`/`const` in a classic script, so `window.homeData = x`

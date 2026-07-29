@@ -40,26 +40,33 @@ function extract(name) {
   throw new Error(`unbalanced braces in ${name}()`);
 }
 
-// The real category table, read out of the source rather than restated here — a
-// test carrying its own copy of the game list would keep passing after someone
-// added a category the app forgot to wire up.
-function extractArrayConst(name) {
-  const start = src.indexOf(`const ${name} = [`);
+// The real tables, read out of the source rather than restated here — a test
+// carrying its own copy of the game list would keep passing after someone added a
+// category the app forgot to wire up. `open` is '[' for an array const, '{' for an
+// object one.
+function extractConst(name, open) {
+  const close = open === '[' ? ']' : '}';
+  const start = src.indexOf(`const ${name} = ${open}`);
   assert.ok(start > -1, `${name} not found in index.html`);
   let depth = 0;
-  for (let i = src.indexOf('[', start); i < src.length; i++) {
-    if (src[i] === '[') depth++;
-    else if (src[i] === ']' && --depth === 0) return src.slice(start, i + 1) + ';';
+  for (let i = src.indexOf(open, start); i < src.length; i++) {
+    if (src[i] === open) depth++;
+    else if (src[i] === close && --depth === 0) return src.slice(start, i + 1) + ';';
   }
-  throw new Error(`unbalanced brackets in ${name}`);
+  throw new Error(`unbalanced ${open}${close} in ${name}`);
 }
 
 const ctx = vm.createContext({ setup: {} });
 vm.runInContext([
-  extractArrayConst('GAME_LEDGER_CATEGORIES'),
+  extractConst('GAME_LEDGER_CATEGORIES', '['),
+  extractConst('GAME_LEDGER_NAMES', '{'),
+  extractConst('GAME_LEDGER_TEASERS', '{'),
   // `const` inside a vm script is a lexical binding, not a property of the
-  // context — hand it out explicitly so the assertions below can read it.
+  // context — hand them out explicitly so the assertions below can read them.
   'globalThis.GAME_LEDGER_CATEGORIES = GAME_LEDGER_CATEGORIES;',
+  'globalThis.GAME_LEDGER_NAMES = GAME_LEDGER_NAMES;',
+  'globalThis.GAME_LEDGER_TEASERS = GAME_LEDGER_TEASERS;',
+  extract('ledgerCategoryIcon'),
   extract('currentSetupOptionKey'),
   extract('setupLedgerRowKey'),
   extract('setupOpenCategoryKey'),
@@ -119,10 +126,63 @@ describe('every game in every category behaves the same way', () => {
       assert.ok(!seen.has(key), `'${key}' is listed in more than one category`);
       seen.add(key);
     }
-    assert.ok(CATEGORIES.length >= 5, 'expected the five ledger categories at least');
+    assert.ok(CATEGORIES.length >= 5, `expected at least 5 ledger categories, got ${CATEGORIES.length}`);
     for (const cat of CATEGORIES) {
       assert.ok(cat.keys.length > 0, `category '${cat.key}' has no games in it`);
     }
+  });
+
+  test('every category renders a real icon', () => {
+    // ledgerCategoryIcon() looks its glyph up by category key and falls back to
+    // an EMPTY string, so a category added without a glyph gets a blank 20x20
+    // SVG — a hole in the row that no other assertion here would notice.
+    for (const cat of CATEGORIES) {
+      const svg = ctx.ledgerCategoryIcon(cat.key, cat.accent);
+      assert.match(svg, /^<svg /, `category '${cat.key}' produced no svg`);
+      assert.ok(/<(circle|rect|line|path|polyline)/.test(svg),
+        `category '${cat.key}' has no glyph in ledgerCategoryIcon() — it renders an empty icon`);
+    }
+  });
+
+  test('every game has a display name and a teaser', () => {
+    // Both maps are keyed by game, not category, so moving a game between
+    // categories can't break them — but a NEW game arriving in a new category
+    // can, and `GAME_LEDGER_NAMES[k]||k` would silently print a raw snake_case
+    // key on the row.
+    for (const key of ALL_KEYS) {
+      assert.ok(ctx.GAME_LEDGER_NAMES[key], `'${key}' has no GAME_LEDGER_NAMES entry`);
+      assert.ok(ctx.GAME_LEDGER_TEASERS[key], `'${key}' has no GAME_LEDGER_TEASERS entry`);
+    }
+  });
+});
+
+describe('Minigames is first, and owns Checkout Trainer', () => {
+  // Both are deliberate placements from an owner request, and both are the kind of
+  // thing an unrelated edit to the category table could undo without any other
+  // assertion here noticing — the ledger would still be perfectly coherent.
+  test('Minigames is the first category on the screen', () => {
+    assert.equal(CATEGORIES[0].key, 'minigames',
+      `first category is '${CATEGORIES[0].key}' — Minigames is meant to lead, before Traditional`);
+  });
+
+  test('Traditional still follows it', () => {
+    assert.equal(CATEGORIES[1].key, 'traditional');
+  });
+
+  test('Checkout Trainer lives in Minigames and nowhere else', () => {
+    const owner = CATEGORIES.find(c => c.keys.includes('checkout_trainer'));
+    assert.ok(owner, 'checkout_trainer is not in any category at all');
+    assert.equal(owner.key, 'minigames', `checkout_trainer is under '${owner.key}'`);
+    // It used to sit in Practice & Drills; the move is the point, so assert the
+    // old home is actually clear rather than trusting the dedupe check above.
+    const training = CATEGORIES.find(c => c.key === 'training');
+    assert.ok(training, 'the training category has been renamed or removed');
+    assert.ok(!training.keys.includes('checkout_trainer'),
+      'checkout_trainer is still listed under Practice & Drills too');
+  });
+
+  test('selecting Checkout Trainer opens Minigames', () => {
+    assert.equal(openFor(setupStateFor('checkout_trainer')), 'minigames');
   });
 
   test('choosing any game selects that row and expands exactly its own category', () => {

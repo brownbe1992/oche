@@ -6793,8 +6793,14 @@ Two pieces sit above the categorized picker itself:
   showing "selected" from an earlier pick.
 - **`renderSetupGameLedger()`** (`#setup-game-categories`): `NEW_GAME_MODE_OPTIONS`
   (unchanged shape/contents — still the canonical `{ key, label, blurb,
-  apply() }` list) is grouped into `GAME_LEDGER_CATEGORIES` (Traditional /
-  Practice & Drills / Solo Challenges / Head-to-Head Only / Special Modes),
+  apply() }` list) is grouped into `GAME_LEDGER_CATEGORIES` (**Minigames** /
+  Traditional / Practice & Drills / Solo Challenges / Head-to-Head Only / Special
+  Modes — array order *is* on-screen order, and Minigames leading is a deliberate
+  placement rather than an accident of editing: a short, self-contained game is the
+  lowest-commitment thing on the screen, so it reads as the easy way in before the
+  full matches below it. **Checkout Trainer lives here**, moved out of Practice &
+  Drills in 2026-07 — it is the one entry that isn't a throwing drill at all, since
+  it needs no dartboard and no darts),
   each with its own accent color and a monoline SVG glyph
   (`ledgerCategoryIcon()`, one icon per *category*, not per game — avoids the
   old inconsistent one-emoji-per-game clutter). At most one category is expanded

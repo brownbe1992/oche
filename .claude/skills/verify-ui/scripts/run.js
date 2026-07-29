@@ -36,7 +36,7 @@ const L = require('./lib');
  */
 const CHECKS = {
   'results-takeover':      { path: './checks/results-takeover',      assertions: 29 },
-  'new-game':              { path: './checks/new-game',              assertions: 43 },
+  'new-game':              { path: './checks/new-game',              assertions: 47 },
   'ghost-picker':          { path: './checks/ghost-picker',          assertions: 11 },
   'scoring-modes':         { path: './checks/scoring-modes',         assertions: 32 },
   'all-game-types':        { path: './checks/all-game-types',        assertions: 82 },

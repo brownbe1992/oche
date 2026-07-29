@@ -4685,15 +4685,32 @@ function onSetupFlavorSelect(value){
 // the recap box below the ledger once a game is picked). Presentation-only —
 // kept separate from NEW_GAME_MODE_OPTIONS itself since neither is validated
 // or sent to the server. Grouping matches how the games actually differ in
-// nature: traditional games playable solo or head-to-head, pure practice
-// drills, single-player games deliberately framed with stakes/tension, the
-// one game that structurally needs an opponent, and X01 variants layered on
-// top of it.
+// nature: short self-contained minigames, traditional games playable solo or
+// head-to-head, pure practice drills, single-player games deliberately framed
+// with stakes/tension, the one game that structurally needs an opponent, and
+// X01 variants layered on top of it.
+//
+// ARRAY ORDER IS SCREEN ORDER. Reordering this list reorders the New Game page,
+// so treat the sequence as a design decision rather than a list to append to.
 const GAME_LEDGER_CATEGORIES = [
+  // Minigames sits first on purpose (owner request): a short, self-contained game
+  // is the lowest-commitment thing on the screen, so it reads as the easy way in
+  // before the full matches below it. Checkout Trainer moved here out of Practice
+  // & Drills — it is the one entry that isn't a throwing drill at all (no
+  // dartboard, no darts, pure recall), which is what made it sit oddly among the
+  // rest of that list.
+  //
+  // Accent is a literal rather than a CSS var because no existing var is free —
+  // the same reason h2h_only carries one. 8.4:1 against --surface, comfortably
+  // past the 4.5:1 text minimum (docs/accessibility-roadmap.md contrast audit);
+  // and since each category is named in text and carries its own glyph, the color
+  // is reinforcement rather than a color-only signal.
+  { key:'minigames', label:'Minigames', accent:'#4ec9b0', sub:'Short games you can finish in a few minutes',
+    keys:['checkout_trainer'] },
   { key:'traditional', label:'Traditional', accent:'var(--gold)', sub:'The games you know and love (or hate)',
     keys:['x01','cricket','baseball','shanghai','halve_it'] },
   { key:'training', label:'Practice & Drills', accent:'var(--green)', sub:'Throw for fun or train your skills',
-    keys:['doubles_practice','chuckin','checkout_trainer','around_the_clock','around_the_world','bobs_27','checkout_ladder'] },
+    keys:['doubles_practice','chuckin','around_the_clock','around_the_world','bobs_27','checkout_ladder'] },
   { key:'solo_stakes', label:'Solo Challenges', accent:'var(--red-text)', sub:'Test your skills under pressure',
     keys:['pressure_chamber','gauntlet','dead_man_walking'] },
   { key:'h2h_only', label:'Head-to-Head Only', accent:'#8a6fd1', sub:'Find a friend… or five',
@@ -4739,6 +4756,9 @@ function ledgerCategoryIcon(catKey, color){
   const s = 20;
   const stroke = `stroke="${color}" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
   const glyphs = {
+    // A die showing three — the one glyph here that says "a game" rather than "a
+    // board", which is what sets a minigame apart from everything below it.
+    minigames: `<rect x="${s*0.14}" y="${s*0.14}" width="${s*0.72}" height="${s*0.72}" rx="${s*0.18}" ${stroke}/><circle cx="${s*0.33}" cy="${s*0.33}" r="1.5" fill="${color}"/><circle cx="${s*0.5}" cy="${s*0.5}" r="1.5" fill="${color}"/><circle cx="${s*0.67}" cy="${s*0.67}" r="1.5" fill="${color}"/>`,
     traditional: `<circle cx="${s/2}" cy="${s/2}" r="${s*0.42}" ${stroke}/><circle cx="${s/2}" cy="${s/2}" r="${s*0.22}" ${stroke}/><circle cx="${s/2}" cy="${s/2}" r="${s*0.06}" fill="${color}"/>`,
     training: `<circle cx="${s/2}" cy="${s/2}" r="${s*0.4}" ${stroke}/><line x1="${s*0.5}" y1="${s*0.12}" x2="${s*0.5}" y2="${s*0.34}" ${stroke}/><line x1="${s*0.5}" y1="${s*0.66}" x2="${s*0.5}" y2="${s*0.88}" ${stroke}/><line x1="${s*0.12}" y1="${s*0.5}" x2="${s*0.34}" y2="${s*0.5}" ${stroke}/><line x1="${s*0.66}" y1="${s*0.5}" x2="${s*0.88}" y2="${s*0.5}" ${stroke}/>`,
     solo_stakes: `<path d="M${s*0.5},${s*0.1} C${s*0.3},${s*0.35} ${s*0.25},${s*0.5} ${s*0.35},${s*0.65} C${s*0.3},${s*0.5} ${s*0.42},${s*0.45} ${s*0.42},${s*0.55} C${s*0.42},${s*0.7} ${s*0.5},${s*0.75} ${s*0.5},${s*0.75} C${s*0.5},${s*0.75} ${s*0.58},${s*0.7} ${s*0.58},${s*0.55} C${s*0.58},${s*0.45} ${s*0.7},${s*0.5} ${s*0.65},${s*0.65} C${s*0.75},${s*0.5} ${s*0.7},${s*0.35} ${s*0.5},${s*0.1} Z" ${stroke}/>`,

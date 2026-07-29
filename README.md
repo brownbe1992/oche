@@ -195,8 +195,9 @@ A **"View full stats glossary"** link opens a shared reference explaining every 
 
 ### New Game
 
-A 2-step wizard: **choose a game** first (a categorized picker — Traditional,
-Practice & Drills, Solo Challenges, Head-to-Head Only, Special Modes — plus a
+A 2-step wizard: **choose a game** first (a categorized picker — Minigames,
+Traditional, Practice & Drills, Solo Challenges, Head-to-Head Only, Special
+Modes — plus a
 Daily Challenge section on top showing who's already completed today's
 challenge), **then** who's playing. It opens with **nothing selected and every
 category collapsed**, so the whole list of games fits on one screen and the
