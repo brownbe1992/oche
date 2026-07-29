@@ -42,8 +42,12 @@ const GLOBAL_MAX = (() => {
 
 // Enough of the app for the two setup functions to run: the registry reduced to
 // the solo/h2h flags they actually read, and a mutable `setup` to drive.
+// gameChosen: true throughout — every assertion below is about the ceiling for a
+// game the player has ALREADY picked. currentSetupOptionKey() reports '' while
+// that flag is down (Step 1's no-selection state), which is a different question
+// and is pinned by frontend.new-game-no-default-selection.test.js instead.
 const ctx = vm.createContext({
-  setup: { mode: 'h2h', gameType: 'x01', leagueFixtureId: null },
+  setup: { mode: 'h2h', gameType: 'x01', leagueFixtureId: null, gameChosen: true },
   GAME_TYPES: {
     x01: {}, cricket: {}, baseball: {}, shanghai: {}, halve_it: {}, pressure_chamber: {},
     killer: { h2hOnly: true },

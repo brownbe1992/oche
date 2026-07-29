@@ -6721,6 +6721,50 @@ shown.
 
 ### Step 1 — "Choose a game"
 
+**Step 1 opens with nothing selected and every category collapsed**
+(`setup.gameChosen`, below). Until the player picks a game there is no settings
+panel and no Continue button anywhere on the screen except the Daily Challenge
+card's, and a game's settings are only ever shown *inside that game's own row* —
+so they are visible exactly when the row is: category expanded **and** a game
+selected in it.
+
+This replaced an earlier arrangement where X01 was pre-selected inside an
+auto-expanded Traditional category, and a **second copy** of the selected game's
+settings panel was rendered below the whole ledger whenever the selection's own
+category was collapsed. That fallback existed to keep Continue reachable
+(`renderSetupGameLedger()`'s per-row Continue disappears with its row), but what
+it produced on screen was a bare "starting score / format / Continue" block
+floating at the bottom of the page underneath five collapsed category headers,
+with nothing naming the game it configured. Collapsing a category now
+deliberately takes the panel and its Continue off screen along with the row;
+re-expanding restores both with the selection intact. Collapsing never *clears*
+the selection — only picking something else does.
+
+- **`setup.gameChosen`** (default `false`): the "has a game been picked yet?"
+  flag. `setup.mode`/`setup.gameType` cannot express this on their own — they
+  always hold a concrete value, because `startGame()` reads them directly — which
+  is precisely why the screen used to open on whatever they happened to be.
+  `setMode()` raises it (every selection path runs through there, including the
+  preset entry points below, so a new entry point cannot forget it);
+  `show('setup')` lowers it on every fresh visit, along with resetting
+  `setupExpandedCategory`/`setupRulesOpen`, so a visit never inherits the last
+  game's pick or its expanded options.
+- **`currentSetupOptionKey()`** returns `''` while that flag is down. Its
+  downstream callers (`maxPlayersForSetup()`, `resyncSetupModeForPlayerCount()`,
+  `renderSetupFlavorAndBlurb()`) all treat an unrecognised key as "no special
+  handling", and all of them live on Step 2 or on controls that only exist inside
+  a selected row, so none can be reached while it is `''`.
+- **`setupLedgerRowKey()`** is what the ledger highlights: the same value, except
+  that `'league_game'` resolves to the underlying `setup.gameType` the fixture
+  pinned. A league fixture is a Step 2 opt-in layered on a game already chosen in
+  Step 1 and has no row of its own, so without this, going Back to Step 1 with a
+  fixture toggled on would show a fully collapsed ledger with nothing selected
+  and no way forward — the exact dead end the removed fallback panel used to
+  paper over.
+- **`setupOpenCategoryKey()`** returns `''` when there is no selection to derive
+  a category from. It previously hard-coded `'traditional'` as its fallback,
+  which is what made the screen open with that category expanded.
+
 Two pieces sit above the categorized picker itself:
 
 - **`renderSetupDailyChallengeSection()`** (`#setup-dc-section`): a
@@ -6753,10 +6797,13 @@ Two pieces sit above the categorized picker itself:
   Practice & Drills / Solo Challenges / Head-to-Head Only / Special Modes),
   each with its own accent color and a monoline SVG glyph
   (`ledgerCategoryIcon()`, one icon per *category*, not per game — avoids the
-  old inconsistent one-emoji-per-game clutter). One category is expanded at a
-  time — an accordion, not a flat list — defaulting to whichever category
-  contains the currently-selected game (`setupOpenCategoryKey()`); clicking a
-  category header overrides that via `setupExpandedCategory`. Each row inside
+  old inconsistent one-emoji-per-game clutter). At most one category is expanded
+  at a time — an accordion, not a flat list — defaulting to whichever category
+  contains the currently-selected game, or **none at all** when nothing is
+  selected (`setupOpenCategoryKey()`); clicking a category header overrides that
+  via `setupExpandedCategory`, whose `'none'` value (set by clicking the open
+  category shut) also collapses everything. A collapsed category renders no rows,
+  so with nothing expanded there is nothing selectable and no panel. Each row inside
   an open category shows the game's clean display name
   (`GAME_LEDGER_NAMES`) and a one-line teaser (`GAME_LEDGER_TEASERS`), with a
   gold check mark on the selected row. Selecting a row (`selectSetupGame(key)`)
@@ -6767,11 +6814,14 @@ Two pieces sit above the categorized picker itself:
   `#setup-flavor-section` as a starting-score `<select>` (501/301/170/101,
   `onSetupFlavorSelect()` sets `setup.start`), now mounted inline inside the
   X01 row itself rather than as a standalone section below the categories.
-- **`#setup-step1-continue`** (`setupGoToStep2()` — no validation needed, a
-  game is always pre-selected) advances to Step 2. Rendered inline inside
-  whichever row (or the Daily Challenge card) is currently selected, right
-  after its Rules disclosure — not a separate always-visible element, since
-  only one row/card is ever expanded at a time. A first pass used a
+- **`#setup-step1-continue`** (`setupGoToStep2()`) advances to Step 2. Rendered
+  inline inside whichever row (or the Daily Challenge card) is currently
+  selected, right after its Rules disclosure — not a separate always-visible
+  element, since only one row/card is ever expanded at a time, and it therefore
+  does not exist at all until a game is picked. `setupGoToStep2()` returns early
+  on an empty `currentSetupOptionKey()`: the button's placement already makes
+  that unreachable, and the guard keeps "a game is selected" a checked invariant
+  rather than a property of the layout. A first pass used a
   `position:fixed` bar pinned to the bottom of the viewport instead (fixing
   the complaint that a long category list pushed Continue off the bottom of
   the screen); a follow-up request replaced that with this inline placement
@@ -6885,7 +6935,8 @@ up chosen.
   the global cap (6) for every other dual-capable type (Cricket, Baseball,
   Shanghai, Halve-It, Pressure Chamber) and for the one H2H-only type (Killer,
   which additionally still enforces its own existing "at least 2" floor in
-  `setupGoToStep3()`, unchanged from before the reorder).
+  `setupFinishAndStart()` — same check as before the reorder, moved along with the
+  Start action when `setupGoToStep3()` was deleted; see "Retired" below).
 - **`selectSetupGame(key)`** truncates `setup.slots` down to the new max the
   moment a game is chosen (switching from a 3-player Cricket pick to X01, for
   example, drops the third slot); `addExistingPlayer()`/`addNewPlayer()`
@@ -7005,13 +7056,24 @@ step being returned to — nothing in `setup` is cleared by navigating
 backward, only by a genuinely fresh entry into the screen.
 
 `show('setup')` resets `setup.slots`/`loadoutByName`/`leagueFixtureId`/
-`pendingFixtures` and starts at Step 1 on every normal entry (nav click, a
-post-game "Try Again"/"New Game" button, etc.), calling
+`pendingFixtures`/`gameChosen` and starts at Step 1 on every normal entry (nav
+click, a post-game "Try Again"/"New Game" button, etc.), calling
 `renderSetupDailyChallengeSection()`/`renderSetupGameLedger()`/
 `renderSetupFlavorAndBlurb()` up front so Step 1 is fully populated the
 instant it's shown — **except** for two preset entry points, each of which
 jumps straight to whichever step actually holds *its* pre-configured option
-now that Step 3 no longer exists as a shared landing spot for both:
+now that Step 3 no longer exists as a shared landing spot for both.
+
+`setupExpandedCategory`/`setupRulesOpen` are reset for **every** entry, preset
+included, and so sit above that branch rather than inside the fresh-visit arm.
+`''` means "derive the open category from the current selection", which is the
+only correct state on arrival — and it is load-bearing for the preset entries
+specifically: a stale `'none'` left from an earlier visit would render the preset
+game's row collapsed, and since a game's options and Continue now render only
+inside their own row, there would be nothing on screen to show and nothing for
+`drillCheckout()`'s focus call to find. `setup.gameChosen` is the one reset that
+stays inside the fresh-visit arm, because keeping the selection is exactly what
+makes a preset entry a preset entry.
 
 - **`raceLeg()`** (Player Profile's "Race this leg" entry point) presets
   `setup.slots` to the one player being raced, calls `setMode('ghost')`, and
@@ -7631,8 +7693,9 @@ category's own value minus 50, plus a "No handicap" default), keyed by
 every call from current setup state (mirroring `renderPlayers()`'s own "just
 re-render" convention) rather than patched incrementally, and re-derived
 whenever the mode/game type/starting category changes
-(`renderSetupFlavorAndBlurb()`) or Step 3 is entered
-(`setupGoToStep3()`, in case Step 1's slots changed since).
+(`renderSetupFlavorAndBlurb()`) or the player list changes on Step 2
+(`renderPlayers()`, which is where it now lives — it needs the chosen player
+identities, so it could not follow the other options into Step 1).
 
 ### Engine
 

@@ -198,10 +198,15 @@ A **"View full stats glossary"** link opens a shared reference explaining every 
 A 2-step wizard: **choose a game** first (a categorized picker — Traditional,
 Practice & Drills, Solo Challenges, Head-to-Head Only, Special Modes — plus a
 Daily Challenge section on top showing who's already completed today's
-challenge), **then** who's playing. Picking a game expands its row in place to
-show that mode's own options (starting score, targets/variant, format, and so
-on) right there, plus a collapsed "How to play & win" disclosure — there's no
-separate options page to click through to. How many players you can pick is
+challenge), **then** who's playing. It opens with **nothing selected and every
+category collapsed**, so the whole list of games fits on one screen and the
+wizard doesn't pick for you. Tap a category to see what's in it, then tap a game:
+that row expands in place to show that mode's own options (starting score,
+targets/variant, format, and so on) right there, plus a collapsed "How to play &
+win" disclosure and the Continue button — there's no separate options page to
+click through to. Everything a game configures stays inside that game's own row,
+so collapsing the category tucks it all away again (your choice is remembered —
+re-open the category and it's still selected). How many players you can pick is
 decided by the game you chose: solo-only modes allow exactly one, X01
 head-to-head allows two to four, and every other head-to-head-capable game
 (Cricket, Baseball, Shanghai, Halve-It, Pressure Chamber, Killer) allows up to

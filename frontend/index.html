@@ -1497,6 +1497,14 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   doublesTargets:[], loadoutByName:{}, leagueFixtureId:null, pendingFixtures:[],
   checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false, routeRecallCeiling:2,
   checkoutTrainerPin:null,
+  // Has the player actually PICKED a game on Step 1 yet? `mode`/`gameType`
+  // above always hold some concrete value (they have to — startGame() reads
+  // them directly), so neither can express "nothing chosen yet", and Step 1
+  // consequently opened with X01 pre-selected and its whole options panel
+  // already expanded. This flag is the missing third state: setMode() raises it
+  // (every selection path goes through there), show('setup') lowers it on a
+  // fresh visit, and currentSetupOptionKey() reports '' while it's down.
+  gameChosen:false,
   // Killer (docs/game-modes-roadmap.md "Killer"): how many lives it takes
   // to become a killer — the only thing this mode's own setup step configures
   // (player numbers are randomly assigned server-side, not chosen here).
@@ -1818,6 +1826,17 @@ function show(name){
   }
   if(name==='setup'){
     refreshSavedGamesList();
+    // Accordion state is reset on EVERY entry, preset or not: '' means "derive the
+    // open category from the current selection", which is the only correct answer
+    // on arrival. It matters most for the preset entries below — a stale 'none'
+    // (or another category) left over from a previous visit would render the
+    // ledger with the preset game's row collapsed, and since a game's options and
+    // Continue now render only inside their own row, there would be nothing to
+    // show and nothing to focus. `setup.gameChosen` is deliberately NOT reset
+    // here — see the fresh-visit branch below, which is the only one that clears
+    // the selection itself.
+    setupExpandedCategory = '';
+    setupRulesOpen = false;
     // raceLeg() (Player Profile's "Race this leg" entry point) presets setup.slots
     // to the one player being raced, calls setMode('ghost'), and sets
     // _enteringSetupFromRaceLeg right before this — consumed here, synchronously,
@@ -1853,6 +1872,12 @@ function show(name){
       DB.refreshStats().then(()=>{ sanitizeSlots(); renderPlayers(); }).catch(logErr);
     } else {
       setup.slots=[]; setup.loadoutByName={}; setup.leagueFixtureId=null; setup.pendingFixtures=[];
+      // A fresh visit starts with NO game chosen — the wizard should not decide
+      // for the player, and it should not carry last game's pick into this one.
+      // Combined with the accordion reset above, that means every category opens
+      // collapsed. The two preset entry points above deliberately skip this line,
+      // which is how they keep the selection they just made.
+      setup.gameChosen = false;
       sanitizeSlots(); renderPlayers(); updateFormatLine();
       renderSetupDailyChallengeSection();
       renderSetupGameLedger();
@@ -2368,7 +2393,14 @@ function pocketCheck(){
   renderPocketCard();
 }
 function pocketNext(){ pocketNewTarget(); renderPocketCard(); }
-function pocketPlayFullSession(){ setMode('checkout_trainer'); show('setup'); }
+// Home's Pocket Card -> a full Checkout Trainer session. show('setup') FIRST,
+// then select: a fresh visit deliberately clears any game choice (see its
+// setup.gameChosen reset), so a setMode() beforehand would simply be wiped out
+// and the wizard would open with nothing chosen. Selecting afterward also goes
+// through selectSetupGame(), the ledger's own entry point, so the row, its
+// expanded options and the open category all end up in the same state as a real
+// tap on Checkout Trainer.
+function pocketPlayFullSession(){ show('setup'); selectSetupGame('checkout_trainer'); }
 
 function renderPocketCard(){
   const el = document.getElementById('home-pocket-card');
@@ -3043,6 +3075,15 @@ const SPECIAL_MODE_START_LABELS = {
 function setMode(mode){
   setup.mode = mode;
   setup.practice = (mode !== 'h2h');
+  // Establishing a mode IS choosing a game, so this is the one place that has to
+  // raise the flag — every path that picks a game runs through here (each
+  // NEW_GAME_MODE_OPTIONS.apply(), plus the preset entry points raceLeg() /
+  // drillCheckout() / pocketPlayFullSession() that call setMode() directly).
+  // Putting it here rather than in selectSetupGame() means a future entry point
+  // cannot forget it. Calls from outside Step 1 (resumeSavedGame()'s practice
+  // restore, resyncSetupModeForPlayerCount()) set it harmlessly: show('setup')
+  // lowers it again on the next fresh visit to the wizard.
+  setup.gameChosen = true;
   // Format's visibility is handled in mountSetupInlineOptions() instead of
   // here — it depends on whether the chosen KEY can ever be played
   // head-to-head, not on setup.mode (mode is 'practice' the moment a dual
@@ -4575,12 +4616,32 @@ const NEW_GAME_MODE_OPTIONS = [
 // duplicated list. Only challenge/ghost keep an explicit array: both play as
 // plain x01 underneath (setMode('challenge'|'ghost')), so there's no
 // GAME_TYPES entry of their own to derive from.
-// The ledger's current value: 'league_game' if a fixture is selected, otherwise
-// whatever gameType/mode setMode()/setGameType() last landed on.
+// The ledger's current value: '' if the player hasn't chosen a game yet,
+// 'league_game' if a fixture is selected, otherwise whatever gameType/mode
+// setMode()/setGameType() last landed on.
+//
+// The '' case is load-bearing, not a curiosity: Step 1 must be able to render
+// with nothing selected at all (see setup.gameChosen). Every caller downstream
+// of a real choice — maxPlayersForSetup(), resyncSetupModeForPlayerCount(),
+// renderSetupFlavorAndBlurb() — already treats an unrecognised key as "no
+// special handling", and they all live on Step 2 or on controls that only exist
+// inside a selected row, so none of them can be reached while this returns ''.
 function currentSetupOptionKey(){
   if(setup.leagueFixtureId != null) return 'league_game';
+  if(!setup.gameChosen) return '';
   if(setup.mode==='h2h' || setup.mode==='practice') return setup.gameType;
   return setup.mode;
+}
+// Which ledger ROW is highlighted — almost always the same as the key above, but
+// a league fixture is a Step 2 opt-in layered on top of a game already picked in
+// Step 1 (applyLeagueGameSelection() pins x01 or cricket from the fixture), so
+// 'league_game' is a player-count-and-label distinction rather than a game of
+// its own and has no row of its own to highlight. Going Back to Step 1 with a
+// fixture toggled on therefore keeps showing that underlying row selected,
+// instead of leaving the ledger with nothing lit up and no way forward.
+function setupLedgerRowKey(){
+  const key = currentSetupOptionKey();
+  return key === 'league_game' ? setup.gameType : key;
 }
 
 // League Game (docs/archive/league-mode-roadmap.md "League fixtures / pending matches"):
@@ -4646,10 +4707,10 @@ const GAME_LEDGER_NAMES = {
   around_the_clock:'Around the Clock', around_the_world:'Around the World', bobs_27:"Bob's 27", checkout_ladder:'121 Checkout Ladder',
   pressure_chamber:'The Pressure Chamber', gauntlet:'The Gauntlet', dead_man_walking:'Dead Man Walking',
   killer:'Killer', ghost:'Ghost Mode', marathon:'Marathon Mode',
-  // Not a ledger row (no category lists it) — currentSetupOptionKey() returns
-  // it once a league fixture is picked, and the fallback Continue below needs
-  // a human-readable name for it.
-  league_game:'League Game',
+  // Deliberately no 'league_game' entry: it is not a ledger row (no category
+  // lists it) and nothing renders a name for it any more. The removed fallback
+  // panel was the one thing that did; setupLedgerRowKey() now resolves a league
+  // fixture to the underlying x01/cricket row instead, which has its own name.
 };
 const GAME_LEDGER_TEASERS = {
   x01:'Count down to zero, finish on a double.',
@@ -4686,27 +4747,36 @@ function ledgerCategoryIcon(catKey, color){
   };
   return `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" aria-hidden="true">${glyphs[catKey]||''}</svg>`;
 }
+// Which category the accordion opens on its own, before anyone clicks a header:
+// the one holding the current selection, or NOTHING at all when there is no
+// selection to derive it from. It used to fall back to 'traditional', which is
+// what made Step 1 open with the Traditional category expanded and X01 selected
+// inside it; '' is what lets the screen open fully collapsed.
 function setupOpenCategoryKey(){
-  const key = currentSetupOptionKey();
+  const key = setupLedgerRowKey();
+  if(!key) return '';
   const found = GAME_LEDGER_CATEGORIES.find(c=>c.keys.includes(key));
-  return found ? found.key : 'traditional';
+  return found ? found.key : '';
 }
 // The selected game's options panel on Step 1 — the ONE definition of what that
-// panel contains. Three places render it (the selected ledger row, the fallback
-// block shown when that row's category is collapsed, and the Daily Challenge
-// spotlight card), and each previously spelled it out in its own template
-// string. Two ids in here are hard contracts with code elsewhere —
-// #setup-inline-options-anchor is the only thing mountSetupInlineOptions() will
-// move the real options pool into, and #setup-step1-continue is what
-// show('setup') enables/disables — so a hand-copied instance that omitted one
-// silently broke that contract (the fallback shipped without the anchor once,
-// leaving every per-game option unreachable). Only placement legitimately
-// differs between the three sites; content does not.
+// panel contains. Two places render it (the selected ledger row and the Daily
+// Challenge spotlight card), and each previously spelled it out in its own
+// template string. #setup-inline-options-anchor in here is a hard contract with
+// code elsewhere: it is the only thing mountSetupInlineOptions() will move the
+// real options pool into, so a hand-copied instance that omitted it silently
+// broke that contract, leaving every per-game option unreachable. Only
+// placement legitimately differs between the two sites; content does not.
+//
+// A third caller used to exist — a copy of this panel rendered BELOW the whole
+// ledger whenever the selected row's own category was collapsed, so that Step 1
+// still had a reachable Continue. That is exactly the bug it looks like: a bare
+// X01 settings block with a Continue button, stranded at the bottom of the page
+// under five collapsed category headers, with nothing on screen explaining what
+// it belonged to. It is gone; a selection's panel now renders only where the
+// selection itself is visible.
 //   withAnchor: false for the Daily Challenge, which has no per-mode options
-//   heading:    shown only by the fallback, which sits outside the named row
-function setupGamePanelHtml({ rulesText = '', withAnchor = true, heading = '', style = '' } = {}){
+function setupGamePanelHtml({ rulesText = '', withAnchor = true, style = '' } = {}){
   return `<div class="setup-ledger-options"${style ? ` style="${style}"` : ''}>
-      ${heading ? `<div class="setup-ledger-name" style="margin-bottom:4px">${escapeHtml(heading)}</div>` : ''}
       ${withAnchor ? `<div id="setup-inline-options-anchor"></div>` : ''}
       ${rulesText ? `<button type="button" class="setup-ledger-rules-toggle" aria-expanded="${setupRulesOpen}" onclick="event.stopPropagation();toggleSetupRules()">
         <span class="chev">▸</span> How to play &amp; win</button>
@@ -4730,19 +4800,30 @@ function containerKeyActivate(event, fn){
   event.preventDefault();
   fn();
 }
-let setupExpandedCategory = ''; // '' = derive from the currently selected game
+// Which category is expanded. Three possible values, and the third is easy to
+// miss: '' = derive it from the currently selected game (and so, with nothing
+// selected, expand nothing); a category key = that one, chosen by a click;
+// 'none' = expand nothing even though something IS selected, which is what
+// clicking the open category shut produces. show('setup') resets this to '' on
+// every entry into the wizard.
+let setupExpandedCategory = '';
 function toggleSetupCategory(catKey){
   setupExpandedCategory = ((setupExpandedCategory || setupOpenCategoryKey()) === catKey) ? 'none' : catKey;
   renderSetupGameLedger();
 }
-// Collapsed by default every time a different game is selected — re-opening
-// the same game (e.g. going Back from Step 2) keeps whatever the player last
-// had it set to, since setupRulesOpen isn't reset anywhere else.
+// Collapsed by default every time a different game is selected, and reset by
+// show('setup')'s own entry handling. Navigating Back from Step 2 within the
+// wizard (setupBackTo(1)) does NOT go through show(), so that keeps whatever the
+// player last had it set to.
 let setupRulesOpen = false;
 function renderSetupGameLedger(){
   const el = document.getElementById('setup-game-categories');
   if(!el) return;
-  const currentKey = currentSetupOptionKey();
+  const currentKey = setupLedgerRowKey();
+  // '' (nothing selected, nothing clicked) and 'none' (the open one was clicked
+  // shut) both mean no category is expanded — and with no category expanded
+  // there are no rows on screen, so nothing is selectable and no options panel
+  // renders. That is the intended resting state of a freshly-opened Step 1.
   const openKey = setupExpandedCategory || setupOpenCategoryKey();
   // #setup-inline-options-pool physically relocates into whichever row is
   // selected below (mountSetupInlineOptions()) — park it back in its holding
@@ -4788,40 +4869,19 @@ function renderSetupGameLedger(){
       ${isOpen ? `<div class="setup-cat-rows">${rows}</div>` : ''}
     </div>`;
   }).join('');
-  // Fallback Continue. The per-row Continue above is rendered INSIDE the
-  // selected row, so it only exists when that row is actually on screen —
-  // which it isn't whenever the selection's category is collapsed
-  // (toggleSetupCategory() can set 'none', and opening another category
-  // collapses this one), leaving Step 1 with no way to advance at all.
+  // A game's settings panel is rendered ONLY inside its own row, so collapsing
+  // the category that holds the selection takes the panel (and its Continue)
+  // off screen with it — deliberately. Re-opening the category brings both back
+  // with the selection intact; the selection itself is never cleared by
+  // collapsing, only by choosing something else.
   //
-  // Keyed on "was the selected row actually rendered?" rather than on
-  // comparing category keys: 'league_game' (currentSetupOptionKey()'s value
-  // once a fixture is picked) belongs to NO ledger category, so
-  // setupOpenCategoryKey() falls back to 'traditional' for it and a key
-  // comparison wrongly concludes its row is visible when no such row exists.
-  // The Daily Challenge is the one genuine exception — its spotlight card is
-  // rendered separately by renderSetupDailyChallengeSection(), always on
-  // screen with its own Continue.
-  const selectedRowRendered = GAME_LEDGER_CATEGORIES
-    .some(c => c.key === openKey && c.keys.includes(currentKey));
-  // Same panel as the selected row's, just placed below the ledger instead of
-  // inside a row — so it goes through setupGamePanelHtml() rather than being
-  // written out again, which is how it previously ended up missing the options
-  // anchor. Only the heading is extra: outside the row, nothing else names
-  // which game the panel belongs to.
-  const fallbackHtml = (currentKey && currentKey !== 'challenge' && !selectedRowRendered)
-    ? setupGamePanelHtml({
-        rulesText: (NEW_GAME_MODE_OPTIONS.find(o=>o.key===currentKey) || {}).blurb || '',
-        heading: GAME_LEDGER_NAMES[currentKey] || 'Selected game',
-        style: 'margin-top:10px',
-      })
-    : '';
-  // One assignment for the whole ledger. `el.innerHTML += fallback` would
-  // serialise the categories back out and reparse them, rebuilding every row
-  // and SVG that was just created — and it sits one refactor away from a real
-  // bug, since the relocated #setup-inline-options-pool would be replaced by a
-  // parsed clone if it were ever inside `el` at that point.
-  el.innerHTML = categoriesHtml + fallbackHtml;
+  // There is no longer a fallback copy of the panel below the ledger for that
+  // state (see setupGamePanelHtml()'s own note on why it went). The Daily
+  // Challenge is the one selection that always keeps a visible Continue, because
+  // its spotlight card is rendered separately by
+  // renderSetupDailyChallengeSection() and is never inside a collapsible
+  // category in the first place.
+  el.innerHTML = categoriesHtml;
   mountSetupInlineOptions();
 }
 // Physically moves the real #setup-inline-options-pool element (with all its
@@ -5064,10 +5124,14 @@ function setHandicap(name, value){
   else setup.handicaps[name] = Number(value);
 }
 
-// Step 1 (Choose a game) -> Step 2 (Who's playing?). A game is always
-// selected (X01 by default), so there's nothing to validate here — just move
-// on and let renderPlayers() apply this game's own player-count cap.
+// Step 1 (Choose a game) -> Step 2 (Who's playing?). Step 1 no longer pre-selects
+// a game, so "a game is selected" is a real precondition now rather than
+// something that was always true. In practice the button enforces it structurally
+// — #setup-step1-continue only exists inside a selected row's panel or the
+// selected Daily Challenge card — and the guard is here so that stays a checked
+// invariant rather than a layout detail a future caller could quietly break.
 function setupGoToStep2(){
+  if(!currentSetupOptionKey()) return;
   showSetupStep(2);
   renderPlayers();
 }

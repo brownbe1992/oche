@@ -20,10 +20,14 @@
 > the `node:test` suite under `backend/test/` (all green as of this writing). This doc
 > tracks the correctness gaps that suite doesn't yet assert.
 >
-> **BUG-1 through BUG-58 are all fixed.** BUG-58 was opened by the 2026-07 tenth-pass
+> **BUG-1 through BUG-59 are all fixed.** BUG-58 was opened by the 2026-07 tenth-pass
 > audit (see `docs/security-audit-roadmap.md` Part 12, whose SEC-29/SEC-30 came from the
 > same pass) and fixed in the following change, with a committed regression test proven
-> to fail against the pre-fix source.
+> to fail against the pre-fix source. **BUG-59** was opened by a live user bug report
+> (2026-07) against the New Game wizard's default selection and its out-of-row settings
+> panel — notable because the browser suite's `new-game` check was asserting the very
+> behaviour being reported, so fixing it meant rewriting that check rather than extending
+> it.
 >
 > **BUG-1 … BUG-8 fixed.** BUG-1/BUG-2/BUG-3 (second pass); BUG-4/BUG-5/BUG-6/BUG-7
 > (fixed 2026-07 alongside `security-audit-roadmap.md` SEC-15/SEC-16), each with a
@@ -2979,6 +2983,83 @@ Keep the `|| []` at the loop, so the absent case still works without a second br
 500, and not a `TypeError`) for `playerBadges` given as an object, a string and a
 number, and still succeeds when it is absent or null. Assert the status code, not just
 that it throws — the whole point of this fix is which status comes back.
+
+### BUG-59 — New Game pre-selected X01 and, whenever the selection's category was collapsed, rendered its settings panel stranded at the bottom of the page  **(MED, user-facing / a control block with nothing on screen explaining what it configures)**
+
+**Status: ✅ Fixed (2026-07).** From a live user bug report with a screenshot, not an
+audit pass. Both halves fixed together, since they were the same decision seen from two
+ends: the wizard deciding a game for the player, and the wizard having to keep that
+decision reachable no matter what the accordion was doing.
+
+**Verification.** `backend/test/frontend.new-game-no-default-selection.test.js` (11
+cases) for the selection logic — including a sweep asserting that *every* game in *every*
+category selects its own row and expands only its own category — plus the browser suite's
+`new-game` check (grown from 9 to 43 assertions), which is the only thing that can see
+where a panel actually renders. That check previously asserted the **opposite** property
+("Continue survives the collapse"), so its rewrite is part of this fix rather than a
+consequence of it.
+
+**What actually goes wrong, in plain terms.** Two separate causes producing one screen.
+
+*The default selection.* `setup` initialises with `mode:'h2h', gameType:'x01'`, and
+`currentSetupOptionKey()` derives the ledger's selection from exactly those two fields.
+They can never both be empty — `startGame()` reads them directly — so there was no value
+either could hold that meant "the player hasn't chosen yet", and X01 was therefore always
+selected. `setupOpenCategoryKey()` then hard-coded `'traditional'` as its fallback, so
+Traditional was always expanded too. Nothing in `show('setup')` reset either, so the
+screen also inherited the *previous* game's pick on a later visit.
+
+*The stranded panel.* A selected row renders its own settings panel and its own Continue
+button inside itself, so collapsing that row's category took the only way forward off
+screen (the original BUG behind the `new-game` check). The fix at the time was to render
+a **second copy** of the whole panel below the entire ledger for that state. Functionally
+it worked. Visually it was the reported bug: a bare "STARTING SCORE / FORMAT / How to
+play / Continue" block floating under five collapsed category headers, with no heading
+near it and nothing on screen naming the game it belonged to. Because X01 was
+pre-selected and Traditional collapsible, a player could reach that state without ever
+picking anything.
+
+**Reproduced** (portrait, fresh visit to New Game):
+
+```
+arrive                      -> X01 selected, Traditional expanded, options panel open
+collapse Traditional        -> X01 settings + Continue rendered BELOW all 5 headers
+pick Halve-It, collapse     -> same, now Halve-It's settings, same detached position
+```
+
+**Fix.** Four parts.
+
+1. **`setup.gameChosen`** (default `false`) — the third state `mode`/`gameType` could not
+   express. `setMode()` raises it, so every selection path and every preset entry point
+   gets it for free; `show('setup')` lowers it on a fresh visit.
+   `currentSetupOptionKey()` returns `''` while it is down.
+2. **`setupOpenCategoryKey()` returns `''`** with no selection instead of falling back to
+   `'traditional'`, so the accordion opens fully collapsed.
+3. **Delete the fallback panel.** A selection's settings render only inside its own row.
+   Collapsing hides them and re-expanding restores them, selection intact.
+4. **`setupLedgerRowKey()`** — resolves `'league_game'` (a Step 2 opt-in with no ledger
+   row of its own) to the underlying `x01`/`cricket` row the fixture pinned. Without it,
+   deleting the fallback would turn "Back to Step 1 with a fixture toggled on" into a
+   genuine dead end, which is the case that fallback had been quietly covering.
+
+One trap worth recording: `show('setup')`'s two preset entry points (`raceLeg()`,
+`drillCheckout()`) deliberately skip the fresh-visit reset so they keep the selection they
+just made — but they still need the **accordion** reset, because a stale
+`setupExpandedCategory` of `'none'` left from an earlier visit would render their preset
+game's row collapsed, and with the fallback gone there would be no panel to show and no
+Continue to focus. So the accordion reset is hoisted above the branch while
+`gameChosen` stays inside it. `pocketPlayFullSession()` had the same shape of problem from
+the other direction — it called `setMode()` *before* `show('setup')`, which now wipes it —
+and is now `show('setup')` followed by `selectSetupGame()`, going through the ledger's own
+entry point.
+
+**Verify.** Structural assertions in `node:test` for the selection logic (nothing selected
+by default; no auto-expanded category; every game in every category selecting its own row
+and only its own category; a league fixture still resolving to a real row), plus browser
+assertions for placement — that a settings panel is always inside a `.setup-cat`, that
+collapsing removes it, and that re-expanding restores it along with a Continue that
+works. The placement half cannot be asserted without a browser, which is why the panel
+survived in that position for as long as it did.
 
 ## Standing practice
 
