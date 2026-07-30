@@ -229,6 +229,104 @@ describe('getCheckoutBlitzPersonalStats', () => {
 });
 
 describe('Checkout Trainer does not pollute physical-throwing stats (regression, mirrors the Doubles Practice/Chuckin isolation audit)', () => {
+  /* The whole-surface sweep, and the one that earns its keep here more than
+     anywhere else. Maths Trainer gets its isolation for free — its own table, no
+     `turns` and no `darts` rows, so a query written next year is safe without
+     anyone remembering anything. Checkout Trainer gets it the hard way: it writes
+     ordinary turns and darts, and roughly fifteen separate read queries each have
+     to remember `NOT_CHECKOUT_TRAINER`. That is a coverage question, and coverage
+     questions are answered by measuring, not by reading — which is exactly how
+     BUG-60 turned up two queries that had never been told.
+
+     Snapshot-shaped rather than a list of named assertions on purpose: a stat added
+     later is covered by this without anyone editing the test, which is the only way
+     the sixteenth query that forgets the exclusion gets caught. The named cases
+     below stay as they are — they say WHICH stat and WHY in a way a diff cannot. */
+  test('the whole read surface is byte-identical after a full Checkout Trainer session', () => {
+    const name = 'CT_Isolation_Sweep';
+    db.addPlayer(name);
+    // Real history first: an all-nulls surface would compare equal no matter how
+    // badly the exclusions were broken.
+    const x01Game = db.createGame({
+      category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'x01', config: { startingScore: 501 },
+      players: [{ name }],
+    });
+    db.addTurn(x01Game.gameId, {
+      player: name, set: 1, leg: 1, scored: 140, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 3 }, { dartNo: 2, sector: 20, multiplier: 3 }, { dartNo: 3, sector: 20, multiplier: 1 }],
+    });
+    db.addTurn(x01Game.gameId, {
+      player: name, set: 1, leg: 1, scored: 60, bust: false, checkout: true, checkoutPoints: 60,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 1 }, { dartNo: 2, sector: 20, multiplier: 1 }, { dartNo: 3, sector: 20, multiplier: 2 }],
+    });
+
+    /* Three things are deliberately NOT in the snapshot below. Listing them
+       explicitly, with the reason, is the point — a silent omission would make this
+       test look broader than it is:
+
+       `getPlayerCsvExport()`/`getPlayerExport()` — the raw per-player data dump.
+       Trainer games and turns are real rows and belong in an export of "everything
+       about this player"; the import round-trip test further down depends on them
+       being there. An export is not a statistic.
+
+       `getSessionRecap()`'s `soloActivity` — its "Also tonight" line reports
+       Checkout Trainer by name with a dart count, which REFERENCE.md §29 specifies
+       on purpose (`legs` omitted, darts kept). Note that the SAME recap's headline
+       `perPlayer.dartsThrown` applies NOT_CHECKOUT_TRAINER, so one screen can read
+       "Darts Thrown 6" above "Checkout Trainer: 14 darts". That tension is a
+       product question (drop the line, or report attempts instead of darts), not
+       something a test should quietly decide — flagged rather than asserted either
+       way. Everything else the recap returns is covered by the surfaces below.
+
+       `getHomeExtra().lastGame` — "the last completed game", with no game-type
+       filter at all, so a finished trainer session becomes Home's "won by …" line.
+       That is not a Checkout Trainer leak so much as a question about what
+       `lastGame` is for: every solo/practice mode lands there the same way. Left
+       alone and destructured out below; the rest of `getHomeExtra()` — including
+       `todayDarts`/`weekDarts`/`todayLegs`, the counters that DO matter here — is
+       asserted, and stays asserted for any key added to it later. */
+    const metrics = ['dartsthrown', 'avgdartsperday', 'x01dartsthrown', 'avg', '180s',
+      'treblelesspct', 'first3avg', 'first9avg', 'pace', 'avgdartsperleg'];
+    const homeExtraMinusLastGame = () => {
+      const { lastGame, ...rest } = db.getHomeExtra();
+      return rest;
+    };
+    const snapshot = () => JSON.stringify({
+      bubbles: db.getPlayerStatBubbles(name),
+      bests: db.getPersonalBests(name),
+      summary: db.getSummary(),
+      roster: db.computeStats(),
+      homeExtra: homeExtraMinusLastGame(),
+      routes: db.getCheckoutRoutes(name),
+      weakest: db.getWeakestCheckouts(name),
+      finishes: db.getTopFinishes(name),
+      heatmap: db.getDartHeatmap(name),
+      bounceOuts: db.getBounceOutCount(name),
+      analytics: db.getDartAnalytics(name),
+      coaching: db.getCoachingInsights(name),
+      atw: db.getAroundTheWorldProgress(name),
+      ghostLegs: db.getGhostCandidateLegsCount(name),
+      history: metrics.map(k => db.getMetricHistory(name, k)),
+    });
+    const before = snapshot();
+
+    // Everything the mode can write: all three outcomes, a 1-dart optimal answer
+    // (the shape that once won "Fewest Darts to Finish"), a trick-question
+    // declaration, a Blitz run, and a Route Recall hunt.
+    const gf = checkoutTrainerGame(name, 'freeform');
+    ctTurn(gf.gameId, name, 1, 1, 40, 'optimal');
+    ctTurn(gf.gameId, name, 1, 2, 100, 'legal');
+    ctTurn(gf.gameId, name, 1, 3, 170, 'illegal');
+    const gb = checkoutTrainerGame(name, 'blitz');
+    ctTurn(gb.gameId, name, 1, 1, 32, 'optimal');
+    db.completeGame(gf.gameId, name);
+
+    assert.equal(snapshot(), before,
+      'a Checkout Trainer session moved a pre-existing statistic — some query is missing NOT_CHECKOUT_TRAINER');
+  });
+
+
   test('an X01 player\'s 3-dart average is unaffected by a Checkout Trainer game', () => {
     const name = 'CT_Isolation';
     db.addPlayer(name);
@@ -321,6 +419,61 @@ describe('Checkout Trainer does not pollute physical-throwing stats (regression,
     const after = db.computeStats()[name];
     assert.equal(after.turns, before.turns, 'roster "turns" must not count a Checkout Trainer round');
     assert.equal(after.dartsThrown, before.dartsThrown, 'roster "darts thrown" must not count a Checkout Trainer dart');
+  });
+
+  /* docs/bug-roadmap.md BUG-60. These two were the ONLY holes the full-read-surface
+     audit found: getDartHeatmap()/getBounceOutCount() take an optional gameType, and
+     with it omitted ("every game type" — what the public
+     `GET /api/players/dart-heatmap?name=` serves) nothing excluded the trainer's pad
+     taps. The Player Profile happens never to ask that way, which is exactly why this
+     sat unnoticed: the client hid the section, so no screen ever showed the wrong
+     answer, and the query stayed wrong underneath. Asserted per game-type-argument
+     shape rather than just the unscoped one — the bug was in the ARGUMENT the caller
+     did not pass, so a test that only ever passes one shape cannot see it come back. */
+  test('NOT_CHECKOUT_TRAINER: the dart heatmap never plots Checkout Trainer taps, scoped or unscoped', () => {
+    const name = 'CT_Isolation_Heatmap';
+    db.addPlayer(name);
+    // One real X01 dart, so the heatmap has a row that legitimately belongs to it.
+    const x01Game = db.createGame({
+      category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'x01', config: { startingScore: 501 },
+      players: [{ name }],
+    });
+    db.addTurn(x01Game.gameId, {
+      player: name, set: 1, leg: 1, scored: 60, bust: false, checkout: false, checkoutPoints: null,
+      darts: [{ dartNo: 1, sector: 20, multiplier: 3 }],
+    });
+    const before = db.getDartHeatmap(name);
+    assert.equal(before.length, 1, 'the real X01 treble 20 is the only cell so far');
+
+    // ctTurn() taps double 20 — a cell the X01 dart above does NOT occupy, so a leak
+    // shows up as a brand-new row rather than a count nudged inside an existing one.
+    const g = checkoutTrainerGame(name, 'freeform');
+    ctTurn(g.gameId, name, 1, 1, 40, 'optimal');
+    ctTurn(g.gameId, name, 1, 2, 40, 'legal');
+
+    assert.deepEqual(db.getDartHeatmap(name), before,
+      'the unscoped "every game type" heatmap must not gain a cell from Checkout Trainer taps');
+    assert.deepEqual(db.getDartHeatmap(name, 'x01'), before,
+      'the X01-scoped heatmap must be unchanged too');
+    assert.deepEqual(db.getDartHeatmap(name, 'checkout_trainer'), [],
+      'asking for the trainer\'s own heatmap returns nothing — there is no such thing as where a pad tap landed');
+  });
+
+  test('NOT_CHECKOUT_TRAINER: a Checkout Trainer bounce-out does not reach the bounce-out count', () => {
+    const name = 'CT_Isolation_BounceOut';
+    db.addPlayer(name);
+    const g = checkoutTrainerGame(name, 'freeform');
+    // The Pad hides "Bounce Out" for this mode, so the shipped client cannot send
+    // this — written straight to the DB because the query must be right on its own,
+    // not only for as long as one client keeps choosing not to ask.
+    db.addTurn(g.gameId, {
+      player: name, set: 1, leg: 1, scored: 0, bust: true, checkout: false, checkoutPoints: null,
+      legWon: false, targetScore: 40,
+      darts: [{ dartNo: 1, sector: 0, multiplier: 1, bounced: true }],
+    });
+    assert.equal(db.getBounceOutCount(name), 0, 'nothing bounced off anything — there was no board');
+    assert.equal(db.getBounceOutCount(name, 'checkout_trainer'), 0, 'and asking for it by name does not resurrect it');
   });
 });
 

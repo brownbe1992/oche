@@ -20,14 +20,17 @@
 > the `node:test` suite under `backend/test/` (all green as of this writing). This doc
 > tracks the correctness gaps that suite doesn't yet assert.
 >
-> **BUG-1 through BUG-59 are all fixed.** BUG-58 was opened by the 2026-07 tenth-pass
+> **BUG-1 through BUG-60 are all fixed.** BUG-58 was opened by the 2026-07 tenth-pass
 > audit (see `docs/security-audit-roadmap.md` Part 12, whose SEC-29/SEC-30 came from the
 > same pass) and fixed in the following change, with a committed regression test proven
 > to fail against the pre-fix source. **BUG-59** was opened by a live user bug report
 > (2026-07) against the New Game wizard's default selection and its out-of-row settings
 > panel — notable because the browser suite's `new-game` check was asserting the very
 > behaviour being reported, so fixing it meant rewriting that check rather than extending
-> it.
+> it. **BUG-60** came from an audit the owner asked for directly — "does Checkout Trainer
+> also write nothing that counts as a real dart?" — answered by diffing every read
+> surface across a trainer session rather than by re-reading the queries. 42 of 43 held;
+> the dart heatmap and bounce-out count did not.
 >
 > **BUG-1 … BUG-8 fixed.** BUG-1/BUG-2/BUG-3 (second pass); BUG-4/BUG-5/BUG-6/BUG-7
 > (fixed 2026-07 alongside `security-audit-roadmap.md` SEC-15/SEC-16), each with a
@@ -2991,10 +2994,10 @@ audit pass. Both halves fixed together, since they were the same decision seen f
 ends: the wizard deciding a game for the player, and the wizard having to keep that
 decision reachable no matter what the accordion was doing.
 
-**Verification.** `backend/test/frontend.new-game-no-default-selection.test.js` (11
+**Verification.** `backend/test/frontend.new-game-no-default-selection.test.js` (17
 cases) for the selection logic — including a sweep asserting that *every* game in *every*
 category selects its own row and expands only its own category — plus the browser suite's
-`new-game` check (grown from 9 to 43 assertions), which is the only thing that can see
+`new-game` check (grown from 9 to 47 assertions), which is the only thing that can see
 where a panel actually renders. That check previously asserted the **opposite** property
 ("Continue survives the collapse"), so its rewrite is part of this fix rather than a
 consequence of it.
@@ -3060,6 +3063,88 @@ assertions for placement — that a settings panel is always inside a `.setup-ca
 collapsing removes it, and that re-expanding restores it along with a Continue that
 works. The placement half cannot be asserted without a browser, which is why the panel
 survived in that position for as long as it did.
+
+### BUG-60 — The dart heatmap and bounce-out count folded in Checkout Trainer pad taps whenever no `gameType` was asked for  **(LOW, correctness / a "where your darts land" picture containing darts that were never thrown)**
+
+**Status: ✅ Fixed (2026-07).** Found by a deliberate audit rather than a report: the
+owner asked whether Checkout Trainer, like the newly-built Maths Trainer, writes nothing
+that counts as a real dart. Maths Trainer answers that structurally — it has its own
+table and writes no `turns` or `darts` rows at all. Checkout Trainer does the opposite:
+it writes ordinary `turns` and `darts` rows and relies on ~15 read queries each
+remembering to exclude them (`NOT_CHECKOUT_TRAINER` / `NOT_HYPOTHETICAL_DARTS`). Whether
+that holds is a question about coverage, so it was answered by measurement, not by
+reading: snapshot every player-facing read surface, play a full trainer session (all
+three outcomes, a 1-dart optimal answer, a Blitz run, a Route Recall hunt), snapshot
+again, diff.
+
+**Five surfaces moved. Two were wrong** — `getDartHeatmap()` and `getBounceOutCount()`,
+fixed below. **One is right** — `getPlayerCsvExport()`/`getPlayerExport()`, the raw
+per-player data dump, where trainer rows belong (the import round-trip depends on them)
+and which is not a statistic. **Two are neither, and are left alone as product questions
+rather than decided by whoever happened to be auditing:**
+
+- `getSessionRecap()`'s `soloActivity` — the "Also tonight" line names Checkout Trainer
+  and reports a dart count, exactly as `REFERENCE.md` §29 specifies. But the *same*
+  recap's headline `perPlayer.dartsThrown` applies `NOT_CHECKOUT_TRAINER`, so one screen
+  can read "Darts Thrown 6" above "Checkout Trainer: 14 darts". Either the line should
+  report attempts/rounds instead of darts, or it should drop the trainer entirely — and
+  dropping it means a night of pure checkout training shows an empty recap, which is
+  probably worse. Owner's call.
+- `getHomeExtra().lastGame` — "the most recent completed game", with no game-type filter
+  of any kind, so a finished trainer session becomes Home's "*players* · *category* · won
+  by *name*" line. Really a question about what `lastGame` is for rather than about this
+  mode: every solo/practice game type lands there identically.
+
+Everything else — every stat bubble, Personal Best, roster figure, leaderboard, chart
+metric, checkout-route list, coaching insight and Around the World grid — held.
+
+**What actually goes wrong.** `getDartHeatmap(playerName, gameType, mode)` and
+`getBounceOutCount(playerName, gameType, mode)` both take `gameType` as *optional*.
+Supplied, `_scope()` pins the query to that one type; omitted, the query spans every game
+type — and nothing in that path excluded `checkout_trainer`. So the "every game type"
+heatmap plotted the trainer's pad taps as if they were darts that had landed somewhere.
+
+The reason this survived is worth recording, because it is the shape of bug the audit
+existed to find. The Player Profile always passes a `gameType`, and
+`loadDartHeatmap()` additionally hides the whole section on the Checkout Trainer tab, so
+**no screen in the app ever displayed the wrong picture.** The client was declining to
+ask the question; the query underneath was still giving the wrong answer to anyone who
+did — including `GET /api/players/dart-heatmap?name=…` with no `gameType`, which is
+public, and including the next feature to want an all-games heatmap. A guard that lives
+in the caller isn't a guard.
+
+The bounce-out half is narrower still: the Pad hides "Bounce Out" for this mode
+(`bounce-out-btn`, `hidden` when `isCheckoutTrainer`), so the shipped client cannot
+produce a trainer bounce-out at all. The count was wrong only for a hand-made API write —
+fixed anyway, in the same one-line shape, because "unreachable today" is a property of
+today's client.
+
+**Fix.** Both queries append `NOT_CHECKOUT_TRAINER` unconditionally, so the exclusion no
+longer depends on what the caller passed:
+
+```js
+const scope = _scope({ mode, gameType }) + NOT_CHECKOUT_TRAINER;
+```
+
+Unconditional, not "only when `gameType` is absent": under the rule that a pad tap is
+never a dart, `getDartHeatmap(name, 'checkout_trainer')` returning `[]` is the *correct*
+answer, not a lost feature — there is no such thing as where a proposed route landed. One
+rule, no argument-dependent behaviour to reason about at a call site.
+
+`NOT_CHECKOUT_TRAINER`, deliberately not the broader `NOT_HYPOTHETICAL_DARTS`: that
+constant also excludes Just Chuckin' It, whose darts are real physical throws with real
+landing spots and therefore belong on a heatmap. Chuckin is excluded from *scored*-derived
+stats, never from positional ones — `getChuckinHeatmap()` is a wrapper around this very
+function.
+
+**Verify.** Two `node:test` cases in
+`backend/test/db.checkout-trainer-stats.test.js`'s existing isolation block. The heatmap
+case seeds one real X01 treble 20, then plays trainer rounds that tap **double** 20 — a
+cell the real dart does not occupy, so a leak appears as a whole new row rather than a
+count nudged inside an existing one — and asserts all three argument shapes: unscoped,
+`'x01'`-scoped, and `'checkout_trainer'`-scoped. Asserting the scoped shapes too is the
+point: the bug was in the argument the caller *didn't* pass, and a test that only ever
+passes one shape cannot see it come back.
 
 ## Standing practice
 

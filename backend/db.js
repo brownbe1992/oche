@@ -6104,6 +6104,27 @@ function getKillerPersonalBests(playerName, mode) {
 // shared winner_id-based leaderboard body applies.
 function getKillerWinLeaderboard() { return _winLeaderboard('killer'); }
 
+/* ---------- dart heatmaps + bounce-outs ----------
+   Board-position aggregates, not a game mode — they read the per-dart `darts` rows
+   across whichever game type is asked for. They sat under the Killer banner above
+   purely because that is where they were written.
+
+   Both apply NOT_CHECKOUT_TRAINER unconditionally. A Checkout Trainer "dart" is a
+   pad tap proposing a route — nobody aimed at anything, so it has no landing spot
+   for a positional aggregate to be about, and the mode's standing rule is that its
+   taps register as a dart on no existing stat at all. The Player Profile already
+   hides the heatmap section on that tab, but that is the CLIENT declining to ask;
+   the query itself was answering honestly, and its unscoped form (`gameType`
+   omitted — the "every game type" aggregate `GET /api/players/dart-heatmap?name=`
+   serves publicly) folded those taps straight in. Found by diffing every
+   player-facing read surface across a full trainer session: these two were the only
+   *statistics* that moved (docs/bug-roadmap.md BUG-60, which also records the three
+   surfaces that move on purpose).
+
+   NOT_CHECKOUT_TRAINER, not the broader NOT_HYPOTHETICAL_DARTS: a Just Chuckin' It
+   dart is a real physical throw at a real board, so it belongs on a heatmap — it is
+   excluded from *scored*-derived stats, not from positional ones. */
+
 // Per-sector/multiplier/zone hit-count grid feeding the Player Profile's dartboard
 // heatmap. Originally Chuckin-only ("heatmap-heavy... patterns and trends" reporting
 // that mode was specifically requested to have); generalized (docs/dartboard-zone-
@@ -6114,14 +6135,10 @@ function getKillerWinLeaderboard() { return _winLeaderboard('killer'); }
 // wedge+depth) into separate rows instead of one undifferentiated bucket — a hit row
 // only ever has `zone` populated, a miss row (sector=0) only ever has miss_zone/
 // miss_depth populated, so a given row's fields are always unambiguous.
-/* ---------- dart heatmaps + bounce-outs ----------
-   Board-position aggregates, not a game mode — they read the per-dart `darts` rows
-   across whichever game type is asked for. They sat under the Killer banner above
-   purely because that is where they were written. */
 function getDartHeatmap(playerName, gameType, mode) {
   const p = getPlayer(playerName);
   if (!p) return [];
-  const scope = _scope({ mode, gameType });
+  const scope = _scope({ mode, gameType }) + NOT_CHECKOUT_TRAINER;
   return db.prepare(`
     SELECT d.sector AS sector, d.multiplier AS multiplier, d.zone AS zone,
            d.miss_zone AS missZone, d.miss_depth AS missDepth, COUNT(*) AS hits
@@ -6139,7 +6156,7 @@ function getChuckinHeatmap(playerName, mode) { return getDartHeatmap(playerName,
 function getBounceOutCount(playerName, gameType, mode) {
   const p = getPlayer(playerName);
   if (!p) return 0;
-  const scope = _scope({ mode, gameType });
+  const scope = _scope({ mode, gameType }) + NOT_CHECKOUT_TRAINER;   // see getDartHeatmap() above
   return db.prepare(`
     SELECT COUNT(*) AS n
     FROM darts d JOIN turns t ON t.id=d.turn_id JOIN games g ON g.id=t.game_id

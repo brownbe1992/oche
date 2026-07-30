@@ -5894,6 +5894,21 @@ markup) shows on every game-type tab that has one — `loadDartHeatmap()` fires
 for whichever tab is currently active, except Checkout Trainer (hidden
 entirely, since its taps aren't real thrown darts).
 
+**Checkout Trainer is excluded in the query, not just in the client.** Both
+`getDartHeatmap()` and `getBounceOutCount()` append `NOT_CHECKOUT_TRAINER` to
+whatever `_scope()` produced, unconditionally — so a pad tap proposing a
+checkout route never appears on a heatmap regardless of which `gameType` was
+asked for, `'checkout_trainer'` included (that request correctly returns `[]`:
+there is no such thing as where a proposed route landed). This is not
+redundant with `loadDartHeatmap()` hiding the section: `gameType` is optional
+on both functions, and the omitted "every game type" form — what
+`GET /api/players/dart-heatmap?name=` serves publicly — used to fold those taps
+in, a wrong answer no screen happened to be asking for. See
+`docs/bug-roadmap.md` BUG-60. The narrow `NOT_CHECKOUT_TRAINER` is deliberate
+rather than the broader `NOT_HYPOTHETICAL_DARTS`: a Just Chuckin' It dart is a
+real physical throw with a real landing spot and belongs on a heatmap — it is
+excluded from *scored*-derived stats, never from positional ones.
+
 `buildDartHeatmap(cells, {ariaLabel, noZoneTracking, heatmapStyle, numberStyle})`
 renders three things per number: the inner-single and outer-single regions
 (each independently shaded by hit count), and the miss ring (shaded by
@@ -6532,10 +6547,14 @@ Two exclusion constants in `backend/db.js`:
   Darts to Finish" and drag every average toward zero, since Checkout Trainer
   turns always write `scored=0`), `getCheckoutRoutes()`'s "most common checkout
   routes" list, `getLoadoutStats()`'s per-loadout `dartsThrown`/`checkouts`, and
-  the practice-side half of the roster's `avgDartsPerLeg`. The Player Profile's
-  dartboard-heatmap section is hidden entirely on the Checkout Trainer tab
-  (`frontend/index.html`'s `loadDartHeatmap()`) rather than showing a heatmap of
-  typed-in answers.
+  the practice-side half of the roster's `avgDartsPerLeg`. It is also appended
+  unconditionally to `getDartHeatmap()`/`getBounceOutCount()`, whose `gameType`
+  argument is optional and whose omitted "every game type" form used to plot the
+  trainer's pad taps as landed darts (`docs/bug-roadmap.md` BUG-60). The Player
+  Profile's dartboard-heatmap section is *additionally* hidden on the Checkout
+  Trainer tab (`frontend/index.html`'s `loadDartHeatmap()`) rather than showing a
+  heatmap of typed-in answers — belt and braces on purpose: that hiding is the
+  client choosing not to ask, which is no protection for anything else that does.
 
 **Stats** (`getCheckoutTrainerStatBubbles`/`getCheckoutTrainerPersonalBests`,
 `backend/db.js`):
