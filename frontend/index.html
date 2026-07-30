@@ -1375,6 +1375,28 @@ const DB = {
   // server re-derives correctness from the prompt, so a failure here loses the
   // record of one answer and never mis-scores it.
   recordMathsRound(gameId, round){ return Backend.send('POST', `/api/games/${gameId}/maths-round`, round).catch(logErr); },
+  // Checkout Trainer: a round is NOT a turn either — this mode writes no turns and
+  // no darts, for the same reason. Queued and fire-and-forget exactly like
+  // recordTurn() above, and queued through the SAME _queue so a round and the undo
+  // that removes it can never arrive out of order.
+  //
+  // The screen still grades the answer locally, with the same pure scoring.js
+  // function the server re-grades it with — so the verdict appears instantly with no
+  // round-trip, and the STORED verdict is the server's own. That is the same split
+  // Maths Trainer uses: the client decides what to show, the server decides what
+  // counts. lastCheckoutRoundId is undo's counterpart to lastTurnId above.
+  lastCheckoutRoundId: null,
+  recordCheckoutRound(round){
+    if(this.gameId==null) return;
+    const id=this.gameId;
+    this._queue(()=>Backend.send('POST',`/api/games/${id}/checkout-round`, round)
+      .then(r=>{ if(r && r.roundId!=null) this.lastCheckoutRoundId=r.roundId; }));
+  },
+  deleteLastCheckoutRound(){
+    if(this.gameId==null) return;
+    const id=this.gameId, roundId=this.lastCheckoutRoundId; this.lastCheckoutRoundId=null;
+    this._queue(()=>Backend.send('DELETE',`/api/games/${id}/checkout-round/last`+(roundId!=null?`?roundId=${roundId}`:'')));
+  },
 };
 // The project's one way to say "this request failing is not worth interrupting the
 // player over." Use `.catch(logErr)` — never a bare `.catch(()=>{})`, which is the
@@ -8343,6 +8365,13 @@ function recordSingleDartTurn(fields, dart, zone, missZone, missDepth, bounced){
 // (X01/Baseball/Shanghai/Halve-It/Pressure Chamber/Bob's 27/Dead Man Walking)
 // enterTurn*() functions' DB.recordTurn() calls, each mapping a full 1-3-dart
 // visit array instead of a single dart.
+// Checkout Trainer's counterpart to mapDartsForRecord() below. A proposed route
+// carries sector and multiplier and nothing else — there is no landing zone, no
+// throw timestamp and no bounce-out, because nothing was thrown. Sending the full
+// dart shape would be sending fields whose only honest value is null.
+function mapRouteForRecord(darts){
+  return darts.map(d => ({ sector:d.sector, multiplier:d.mult }));
+}
 function mapDartsForRecord(darts){
   return darts.map((d,i) => ({ dartNo:i+1, sector:d.sector, multiplier:d.mult, thrownAt:d.thrownAt,
     zone: d.zone || null, missZone: d.missZone != null ? d.missZone : null, missDepth: d.missDepth || null, bounced: !!d.bounced }));
@@ -8968,7 +8997,12 @@ function _finishUndo(snap, renderFn, opts){
   // through every turn committed this leg/round, not just the last one.
   game.turnSnapshots.pop();
   game.lastTurnSnapshot = game.turnSnapshots.length ? game.turnSnapshots[game.turnSnapshots.length-1] : null;
-  DB.deleteLastTurn();
+  // Checkout Trainer keeps its rounds in a table of its own rather than in `turns`,
+  // so undoing one has to delete from there. Registry-driven rather than a
+  // `gameType === 'checkout_trainer'` test, so a future mode with its own table
+  // declares how to undo itself instead of adding a second branch here.
+  const undoDelete = GAME_TYPES[game.gameType].deleteLastRecord;
+  if(undoDelete) undoDelete(); else DB.deleteLastTurn();
   const status=document.getElementById('status');
   if(status){ status.className='status'; status.textContent=msg; }
   renderFn();
@@ -11505,6 +11539,11 @@ const GAME_TYPES = {
     throwDart: throwDartCheckoutTrainer,
     undoLastTurn: undoLastTurnCheckoutTrainer,
     enterTurn: submitCheckoutAttempt,
+    // This mode records to checkout_trainer_rounds, not `turns`, so _finishUndo()
+    // has to delete from there instead of calling DB.deleteLastTurn(). Declared
+    // here rather than branched on inside _finishUndo() — one member per mode with
+    // its own table, no growing if-chain.
+    deleteLastRecord: () => DB.deleteLastCheckoutRound(),
     label: 'Checkout Trainer',
     // This mode has its own bespoke, paper-themed results screen (see paperTheme
     // below); the dark Trophy Cabinet panel would fight it. Same reasoning as
@@ -12671,9 +12710,8 @@ function submitCheckoutAttempt(){
   p.sessionRounds.push({ target:p.score, legal:grade.legal, optimal:grade.optimal,
     usedDarts:grade.usedDarts, optimalDarts:grade.optimalDarts, hint:grade.hint });
 
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust:!grade.legal, checkout:grade.legal, checkoutPoints:null, legWon:grade.optimal, targetScore:p.score,
-    darts: mapDartsForRecord(game.darts) });
+  DB.recordCheckoutRound({ player:p.name, roundNo:game.legNo, targetScore:p.score,
+    darts: mapRouteForRecord(game.darts) });
 
   game.lastResult = Object.assign({}, grade, { target: p.score });
 
@@ -12763,10 +12801,8 @@ function submitRouteRecall(){
   p.sessionRounds.push({ target:p.score, legal:grade.status === 'new',
     optimal:false, usedDarts:grade.labels.length, route:grade.labels.join(' ') });
 
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust:grade.status !== 'new', checkout:grade.status === 'new',
-    checkoutPoints:null, legWon:false, targetScore:p.score,
-    darts: mapDartsForRecord(game.darts) });
+  DB.recordCheckoutRound({ player:p.name, huntNo:game.setNo, roundNo:game.legNo,
+    targetScore:p.score, darts: mapRouteForRecord(game.darts) });
 
   const progress = routeHuntProgress(p.score, p.doubleOut, routeRecallCeiling(), p.foundKeys.size);
   game.lastResult = Object.assign({ routeRecall:true, status:grade.status,
@@ -12867,9 +12903,8 @@ function declareUnsolvable(){
   p.sessionRounds.push({ target:p.score, legal:grade.legal, optimal:grade.optimal,
     usedDarts:0, optimalDarts:grade.optimalDarts, hint:grade.hint, declared:true });
 
-  DB.recordTurn({ player:p.name, set:game.setNo, leg:game.legNo,
-    scored:0, bust:!grade.legal, checkout:grade.legal, checkoutPoints:null, legWon:grade.optimal,
-    targetScore:p.score, declaredUnsolvable:true, darts: [] });
+  DB.recordCheckoutRound({ player:p.name, roundNo:game.legNo, targetScore:p.score,
+    declaredUnsolvable:true, darts: [] });
 
   game.lastResult = Object.assign({}, grade, { target: p.score });
 
@@ -13073,7 +13108,7 @@ function endBlitzRun(){
 // Final score is tallied here from p.sessionRounds — every round this run ever
 // produced (one Checkout Blitz game = exactly one run, never reset mid-game) —
 // using the same 2/1/0 formula getCheckoutBlitzLeaderboard() sums server-side
-// from the persisted turns. This client-side tally is purely for the immediate
+// from the persisted checkout_trainer_rounds. This client-side tally is purely for the immediate
 // results screen; the leaderboard itself is always computed fresh from the
 // database, never from a client-submitted total (docs/archive/checkout-trainer-roadmap.md
 // "Security considerations").

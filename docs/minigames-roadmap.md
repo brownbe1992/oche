@@ -44,24 +44,32 @@ Checkout Trainer established the shape without naming it
 4. **Its own achievements, its own timed variant, its own lifetime correctness
    stats** — a real mode with a real record, not a toy.
 
-Point 3 is the one with teeth, and Checkout Trainer is the cautionary tale. It
-writes real `turns` and `darts` rows (a checkout attempt genuinely *is* an X01
+Point 3 is the one with teeth, and Checkout Trainer was the cautionary tale. It
+wrote real `turns` and `darts` rows (a checkout attempt genuinely *is* an X01
 visit from `remaining = target`, so reusing `evaluateVisit()` was right), and the
 price was two exclusion constants — `NOT_HYPOTHETICAL_DARTS` and
-`NOT_CHECKOUT_TRAINER` — that had to be threaded through roughly fifteen separate
-queries: roster totals, `getSummary()`'s day/week darts, six stat bubbles, four
+`NOT_CHECKOUT_TRAINER` — threaded through roughly fifteen separate queries: roster
+totals, `getSummary()`'s day/week darts, six stat bubbles, four
 `getMetricHistory()` chart metrics, four Personal Bests, checkout routes, loadout
-stats, and the practice half of the roster's average. `REFERENCE.md` §19 lists
-them. Miss one and a typed-in answer quietly becomes a career statistic — which
-is exactly what happened: `getPersonalBests()`'s `fewestDartsCheckout` was the
-severe leak, because a 1-dart optimal answer would both win "Fewest Darts to
-Finish" and drag every average toward zero (Checkout Trainer turns write
-`scored=0`).
+stats, and the practice half of the roster's average. Miss one and a typed-in
+answer quietly becomes a career statistic — which happened **twice**:
+`getPersonalBests()`'s `fewestDartsCheckout` (a 1-dart optimal answer both winning
+"Fewest Darts to Finish" and dragging every average toward zero, since those turns
+write `scored=0`), and then `getDartHeatmap()`/`getBounceOutCount()` plotting pad
+taps as darts that had landed somewhere (`docs/bug-roadmap.md` BUG-60).
 
 **Every minigame after Checkout Trainer should avoid that job entirely by not
 writing to `turns`/`darts` at all.** See "Data model" below. This is the single
 most important design decision in this document, and it gets easier to get right
 the first time than the fifth.
+
+**Update (2026-07): Checkout Trainer itself has been rewritten this way** — it now
+records to `checkout_trainer_rounds` and writes no `turns` and no `darts`
+(`REFERENCE.md` §19, `docs/open-roadmap-items.md`). `NOT_CHECKOUT_TRAINER` no
+longer exists. The cautionary tale above is kept because it is the *argument*, and
+because the second leak is what finally made the case: two correct one-query fixes
+in a row, neither of which could address the cause. **When the same exclusion has
+to be repeated in more than a handful of places, the exclusion is the symptom.**
 
 ## Build the quiz engine once
 
@@ -408,13 +416,14 @@ Three independent reasons, in increasing order of importance:
 1. **It doesn't fit.** A round has no darts, no `scored`, no bust, no checkout.
    Storing it in `turns` means overloading columns again — and `turns` is already
    the most overloaded table in the schema. `checkout` alone means "checked out"
-   for three game types and "this was a legal attempt" for two others, which is
-   exactly what produced `docs/bug-roadmap.md` BUG-27 and needed a
-   `checkoutIsAttempt` registry flag to document. `bust` means "this dart ended
+   for three game types and (until Checkout Trainer moved to its own table) "this
+   was a legal attempt" for two others, which is exactly what produced
+   `docs/bug-roadmap.md` BUG-27 and needed a `checkoutIsAttempt` registry flag to
+   document. `bust` means "this dart ended
    the round" for Doubles Practice and "this dart completed the clock" for Around
    the Clock. Adding a sixth meaning is how that table got this way.
-2. **`addTurn()` would need loosening.** A zero-dart turn is currently rejected
-   outright except for a Checkout Trainer trick-question declaration, and that
+2. **`addTurn()` would need loosening.** A zero-dart turn is rejected outright —
+   the one exception used to be a Checkout Trainer trick-question declaration, and that
    guard is a real one — it is what stops a client inventing turns with no
    evidence. Making every Maths Trainer round a zero-dart turn means widening the
    one guard protecting that invariant.
@@ -425,7 +434,8 @@ Three independent reasons, in increasing order of importance:
    `turns` and no `darts` satisfies that by construction, in every query that
    exists today and every query written later.** No constant to remember, no
    fifteenth site to miss. The `NOT_CHECKOUT_TRAINER` exercise is not repeated,
-   and cannot be forgotten.
+   and cannot be forgotten. (2026-07: Checkout Trainer was subsequently rewritten
+   onto the same footing, and that constant no longer exists at all.)
 
 One consequence to accept knowingly: the mode gets **no** free plumbing from the
 `turns` ecosystem — not the shared stat helpers, not `getMetricHistory()`, not
@@ -653,7 +663,9 @@ security property once a client can post rounds.
    played, every average, every Personal Best, every leaderboard. Written as a
    before/after snapshot rather than a list of named stats, so a statistic added
    later is covered automatically. This is the test that would have caught
-   Checkout Trainer's `fewestDartsCheckout` leak.
+   Checkout Trainer's `fewestDartsCheckout` leak — and, when the same sweep was
+   later run against Checkout Trainer itself at the owner's request, it is what
+   found BUG-60 and led to that mode being rewritten this way too.
 7. **Play Again round-trip** — the new case in
    `frontend.play-again-roundtrip.test.js`, with deliberately non-default choices.
 

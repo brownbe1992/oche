@@ -16,6 +16,7 @@ const scratchDb = path.join(scratchDir, 'test.db');
 process.env.DARTS_DB = scratchDb;
 
 const db = require('../db.js');
+const S = require('../../frontend/scoring.js');
 
 after(() => {
   for (const f of [scratchDb, scratchDb + '-wal', scratchDb + '-shm']) {
@@ -32,17 +33,43 @@ function checkoutTrainerGame(playerName, mode) {
     players: [{ name: playerName }],
   });
 }
-// Every dart-count attempt is its own turn — bust/checkout/legWon mirror the
-// three-way outcome throwDartCheckoutTrainer() writes: bust=1 "not legal",
-// checkout=1,legWon=0 "legal but not optimal", checkout=1,legWon=1 "optimal".
-function ctTurn(gameId, player, set, leg, targetScore, outcome) {
-  const bust = outcome === 'illegal';
-  const checkout = outcome !== 'illegal';
-  const legWon = outcome === 'optimal';
-  db.addTurn(gameId, {
-    player, set, leg, scored: 0, bust, checkout, checkoutPoints: null, legWon, targetScore,
-    darts: [{ dartNo: 1, sector: 20, multiplier: 2 }],
+/* A round, recorded the way live play records one — and NOT told what its outcome
+   was. That is the change from the turns-based version of these fixtures, which
+   asserted `bust`/`checkout`/`legWon` values they had themselves just supplied and
+   so could never have caught a grading bug. addCheckoutTrainerRound() re-grades the
+   submitted route with the same scoring.js functions the screen uses, so the fixture
+   now has to hand it a route that genuinely IS optimal / legal-but-not / illegal,
+   and the stat under test is computed from a verdict nobody in this file chose.
+
+   The three outcomes are built from allCheckoutRoutes(), the objective source of
+   truth for what a target's routes are:
+     optimal  the first (shortest) route that exists.
+     legal    a route strictly longer than the shortest — a real finish, not the
+              best one. Not every target has one; those that don't throw here rather
+              than silently recording something else.
+     illegal  T20 T20 T20 = 180, which overshoots every legal target (max 170). */
+const LABEL_RE = /^(T|D)?(\d+)$/;
+function dartsFromLabels(labels) {
+  return labels.map((l, i) => {
+    if (l === 'Bull') return { dartNo: i + 1, sector: 25, multiplier: 2 };
+    if (l === '25') return { dartNo: i + 1, sector: 25, multiplier: 1 };
+    const m = LABEL_RE.exec(l);
+    if (!m) throw new Error(`fixture cannot parse segment label "${l}"`);
+    return { dartNo: i + 1, sector: Number(m[2]), multiplier: m[1] === 'T' ? 3 : m[1] === 'D' ? 2 : 1 };
   });
+}
+function routeFor(targetScore, outcome) {
+  if (outcome === 'illegal') return dartsFromLabels(['T20', 'T20', 'T20']);
+  const routes = S.allCheckoutRoutes(targetScore, true, 3);
+  if (!routes.length) throw new Error(`fixture asked for a ${outcome} route to ${targetScore}, which has none`);
+  if (outcome === 'optimal') return dartsFromLabels(routes[0].darts);
+  const longer = routes.find(r => r.darts.length > routes[0].darts.length);
+  if (!longer) throw new Error(`fixture asked for a non-optimal route to ${targetScore}, which has only optimal ones`);
+  return dartsFromLabels(longer.darts);
+}
+function ctTurn(gameId, player, set, leg, targetScore, outcome) {
+  return db.addCheckoutTrainerRound(gameId, player,
+    { player, huntNo: set, roundNo: leg, targetScore, darts: routeFor(targetScore, outcome) });
 }
 
 describe('getCheckoutTrainerStatBubbles', () => {
@@ -460,81 +487,95 @@ describe('Checkout Trainer does not pollute physical-throwing stats (regression,
       'asking for the trainer\'s own heatmap returns nothing — there is no such thing as where a pad tap landed');
   });
 
-  test('NOT_CHECKOUT_TRAINER: a Checkout Trainer bounce-out does not reach the bounce-out count', () => {
-    const name = 'CT_Isolation_BounceOut';
+  test('a Checkout Trainer game cannot hold a turn or a dart at all', () => {
+    // The structural claim the whole rewrite rests on, asserted directly. Every
+    // isolation case above passes BECAUSE of this one: with no turns and no darts
+    // rows there is nothing for any query — present or future, remembering an
+    // exclusion or not — to pick up.
+    const name = 'CT_Isolation_NoTurns';
     db.addPlayer(name);
     const g = checkoutTrainerGame(name, 'freeform');
-    // The Pad hides "Bounce Out" for this mode, so the shipped client cannot send
-    // this — written straight to the DB because the query must be right on its own,
-    // not only for as long as one client keeps choosing not to ask.
-    db.addTurn(g.gameId, {
-      player: name, set: 1, leg: 1, scored: 0, bust: true, checkout: false, checkoutPoints: null,
-      legWon: false, targetScore: 40,
-      darts: [{ dartNo: 1, sector: 0, multiplier: 1, bounced: true }],
-    });
-    assert.equal(db.getBounceOutCount(name), 0, 'nothing bounced off anything — there was no board');
-    assert.equal(db.getBounceOutCount(name, 'checkout_trainer'), 0, 'and asking for it by name does not resurrect it');
+    ctTurn(g.gameId, name, 1, 1, 40, 'optimal');
+    ctTurn(g.gameId, name, 1, 2, 100, 'illegal');
+
+    const counts = db._db.prepare(`
+      SELECT (SELECT COUNT(*) FROM turns WHERE game_id = ?) AS turns,
+             (SELECT COUNT(*) FROM darts d JOIN turns t ON t.id = d.turn_id WHERE t.game_id = ?) AS darts,
+             (SELECT COUNT(*) FROM checkout_trainer_rounds WHERE game_id = ?) AS rounds
+    `).get(g.gameId, g.gameId, g.gameId);
+    assert.equal(counts.turns, 0, 'a played session leaves no turns rows');
+    assert.equal(counts.darts, 0, 'and no darts rows');
+    assert.equal(counts.rounds, 2, 'the rounds are all in its own table');
+
+    // And the door is shut, not merely unused: a stale client or a hand-made POST
+    // is refused rather than quietly reopening every exclusion this rewrite deleted.
+    assert.throws(() => db.addTurn(g.gameId, {
+      player: name, set: 1, leg: 1, scored: 0, bust: false, checkout: true, legWon: true,
+      targetScore: 40, darts: [{ dartNo: 1, sector: 20, multiplier: 2 }],
+    }), /records rounds, not turns/);
   });
 });
 
-// Trick-question variant (docs/archive/checkout-trainer-roadmap.md "Trick-question
-// difficulty variant"): a round answered by declaring "no possible checkout"
-// is recorded as a turns row with declared_unsolvable=1 and ZERO dart rows —
-// the grading verdict rides the same bust/checkout/leg_won three-way as a
-// tapped-out answer (correct declaration -> checkout=1,leg_won=1; wrong ->
-// bust=1), so every count/percentage/Blitz-score formula picks declarations
-// up with no formula change. The one deliberate exception is the
-// toughest-checkout Personal Best, which must NOT treat a correctly-called
-// bogey target as a checkout the player solved.
-function ctDeclaration(gameId, player, set, leg, targetScore, correct) {
-  db.addTurn(gameId, {
-    player, set, leg, scored: 0,
-    bust: !correct, checkout: correct, checkoutPoints: null, legWon: correct,
-    targetScore, declaredUnsolvable: true, darts: [],
-  });
+/* Trick-question variant (docs/archive/checkout-trainer-roadmap.md "Trick-question
+   difficulty variant"): a round answered by declaring "no possible checkout"
+   instead of tapping out a route. It carries no route at all — the one round shape
+   with nothing to grade for legality — so it gets its own column
+   (checkout_trainer_rounds.declared_unsolvable) and is graded by whether the target
+   really is a bogey number. A correct call is that round's OPTIMAL answer and scores
+   accordingly; the one deliberate exception is the toughest-checkout Personal Best,
+   which must not treat a correctly-called bogey as a checkout the player solved.
+
+   Note what the fixture no longer passes: whether the declaration was right. The
+   server decides, from the target, via gradeCheckoutDeclaration(). */
+function ctDeclaration(gameId, player, set, leg, targetScore) {
+  return db.addCheckoutTrainerRound(gameId, player,
+    { player, huntNo: set, roundNo: leg, targetScore, declaredUnsolvable: true, darts: [] });
 }
 
 describe('trick-question declarations (declared_unsolvable)', () => {
-  test('addTurn accepts a zero-dart declaration for a checkout_trainer game and stores the flag', () => {
+  test('a declaration is stored with no route, and graded against whether the target really is a bogey', () => {
     const name = 'CT_Trick_Accept';
     db.addPlayer(name);
     const g = checkoutTrainerGame(name, 'freeform');
-    ctDeclaration(g.gameId, name, 1, 1, 169, true);
+    const right = ctDeclaration(g.gameId, name, 1, 1, 169);   // 169 IS a bogey number
+    const wrong = ctDeclaration(g.gameId, name, 1, 2, 170);   // 170 is T20 T20 Bull
 
-    const row = db._db.prepare(
-      `SELECT t.declared_unsolvable AS du, t.bust, t.checkout, t.leg_won AS legWon,
-              (SELECT COUNT(*) FROM darts d WHERE d.turn_id = t.id) AS dartCount
-       FROM turns t WHERE t.game_id = ?`).get(g.gameId);
-    assert.equal(row.du, 1);
-    assert.equal(row.dartCount, 0, 'a declaration carries no dart rows');
-    assert.equal(row.checkout, 1);
-    assert.equal(row.legWon, 1);
+    assert.equal(right.correct, true);
+    assert.equal(right.optimal, true, 'a correct call is that round\'s best possible answer');
+    assert.equal(wrong.correct, false);
+    assert.equal(wrong.legal, false);
+
+    const rows = db._db.prepare(
+      `SELECT declared_unsolvable AS du, route, legal, optimal, used_darts AS usedDarts
+       FROM checkout_trainer_rounds WHERE game_id = ? ORDER BY id`).all(g.gameId);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].du, 1);
+    assert.equal(rows[0].route, '', 'a declaration carries no route');
+    assert.equal(rows[0].usedDarts, 0);
+    assert.equal(rows[0].legal, 1);
+    assert.equal(rows[0].optimal, 1);
+    assert.equal(rows[1].optimal, 0);
   });
 
-  test('addTurn rejects declaredUnsolvable outside checkout_trainer, with darts attached, or with points', () => {
+  test('a declaration may not carry a route, and a non-declaration must carry 1-3 darts', () => {
     const name = 'CT_Trick_Reject';
     db.addPlayer(name);
-    const x01 = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1, players: [{ name }] });
-    assert.throws(() => db.addTurn(x01.gameId, { player: name, set: 1, leg: 1, scored: 0, declaredUnsolvable: true, darts: [] }),
-      /only valid in a Checkout Trainer game/);
-
     const ct = checkoutTrainerGame(name, 'freeform');
-    assert.throws(() => db.addTurn(ct.gameId, { player: name, set: 1, leg: 1, scored: 0, declaredUnsolvable: true,
-      darts: [{ dartNo: 1, sector: 20, multiplier: 2 }] }), /must not contain darts/);
-    assert.throws(() => db.addTurn(ct.gameId, { player: name, set: 1, leg: 1, scored: 40, declaredUnsolvable: true, darts: [] }),
-      /must have scored=0/);
-    // And the 1-3-dart invariant is fully intact for every non-declaration turn.
-    assert.throws(() => db.addTurn(ct.gameId, { player: name, set: 1, leg: 1, scored: 0, darts: [] }),
-      /must contain 1 to 3 darts/);
+    assert.throws(() => db.addCheckoutTrainerRound(ct.gameId, name, { player: name, targetScore: 169,
+      declaredUnsolvable: true, darts: [{ sector: 20, multiplier: 2 }] }), /must not carry a route/);
+    assert.throws(() => db.addCheckoutTrainerRound(ct.gameId, name, { player: name, targetScore: 40, darts: [] }),
+      /1 to 3 darts/);
+    assert.throws(() => db.addCheckoutTrainerRound(ct.gameId, name, { player: name, targetScore: 999,
+      darts: [{ sector: 20, multiplier: 2 }] }), /targetScore must be an integer between 1 and 170/);
   });
 
   test('declarations count toward attempts/optimal bubbles and Blitz scoring, but never toughestCheckout', () => {
     const name = 'CT_Trick_Stats';
     db.addPlayer(name);
     const g = checkoutTrainerGame(name, 'blitz');
-    ctTurn(g.gameId, name, 1, 1, 40, 'optimal');          // a real solved checkout: 2 pts
-    ctDeclaration(g.gameId, name, 1, 2, 169, true);       // correct bogey call: 2 pts
-    ctDeclaration(g.gameId, name, 1, 3, 170, false);      // wrong call on a finishable target: 0 pts
+    ctTurn(g.gameId, name, 1, 1, 40, 'optimal');    // a real solved checkout: 2 pts
+    ctDeclaration(g.gameId, name, 1, 2, 169);       // 169 is a bogey — correct call: 2 pts
+    ctDeclaration(g.gameId, name, 1, 3, 170);       // 170 is finishable — wrong call: 0 pts
 
     const bubbles = db.getCheckoutTrainerStatBubbles(name, 'practice');
     assert.equal(bubbles.totalAttempts, 3);
@@ -548,24 +589,34 @@ describe('trick-question declarations (declared_unsolvable)', () => {
     assert.equal(blitz.bestScore, 4, '2 (optimal) + 2 (correct declaration) + 0 (wrong declaration)');
   });
 
-  test('declaration turns survive a per-player export/import round trip', () => {
+  test('rounds — declarations included — survive a per-player export/import round trip', () => {
+    // A per-player export used to carry this mode's history for free, because its
+    // history was turns. It no longer is, so the export has to carry the rounds
+    // explicitly — and without that, exporting a player who plays this mode would
+    // export their games and none of what they did in them.
     const name = 'CT_Trick_Export';
     db.addPlayer(name);
     const g = checkoutTrainerGame(name, 'freeform');
-    ctDeclaration(g.gameId, name, 1, 1, 169, true);
+    ctDeclaration(g.gameId, name, 1, 1, 169);
+    ctTurn(g.gameId, name, 1, 2, 40, 'optimal');
 
     const exported = db.getPlayerExport(name);
-    assert.equal(exported.turns[0].declared_unsolvable, 1, 'flag present in the export');
+    assert.equal(exported.turns.length, 0, 'nothing of this mode is in turns to export');
+    assert.equal(exported.checkoutTrainerRounds.length, 2);
+    assert.equal(exported.checkoutTrainerRounds[0].declared_unsolvable, 1, 'flag present in the export');
 
     // Re-key as a "different server's" player so the import creates a fresh row.
     exported.player.uuid = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
     exported.player.name = 'CT_Trick_Import_Target';
     const result = db.importPlayerExport(exported);
-    assert.equal(result.turnsImported, 1);
+    assert.equal(result.checkoutRoundsImported, 2);
 
-    const imported = db._db.prepare(
-      `SELECT t.declared_unsolvable AS du FROM turns t
-       JOIN players p ON p.id = t.player_id WHERE p.name = ?`).get('CT_Trick_Import_Target');
-    assert.equal(imported.du, 1, 'flag survives import');
+    // The imported player's stats are the same stats, which is the point of a
+    // round trip — not merely that some rows arrived.
+    const bubbles = db.getCheckoutTrainerStatBubbles('CT_Trick_Import_Target', 'practice');
+    assert.equal(bubbles.totalAttempts, 2);
+    assert.equal(bubbles.optimalCount, 2, 'the correct bogey call and the optimal solve both survive');
+    assert.equal(db.getCheckoutTrainerPersonalBests('CT_Trick_Import_Target', 'practice').toughestCheckout, 40,
+      'and the declaration still does not count as a solved checkout on the far side');
   });
 });

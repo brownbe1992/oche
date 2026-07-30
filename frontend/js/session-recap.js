@@ -128,7 +128,12 @@ function renderSessionRecapBody(r){
       ${r.soloActivity.map(s=>{
         const label = (GAME_TYPES[s.gameType] && GAME_TYPES[s.gameType].label) || s.gameType;
         const legsBit = s.legs != null ? `${s.legs} leg${s.legs===1?'':'s'} · ` : '';
-        return `<div class="pp-meta" style="margin:4px 0">${escapeHtml(s.name)} — ${escapeHtml(label)}: ${legsBit}${s.darts} darts</div>`;
+        // A mode that records rounds rather than darts says so. Checkout Trainer is
+        // the one so far: nothing it records is a dart, so counting its answers in
+        // darts here — directly under a "Darts Thrown" headline that excludes them —
+        // was describing the same session in two units and calling both "darts".
+        const amount = s.rounds != null ? `${s.rounds} round${s.rounds===1?'':'s'}` : `${s.darts} darts`;
+        return `<div class="pp-meta" style="margin:4px 0">${escapeHtml(s.name)} — ${escapeHtml(label)}: ${legsBit}${amount}</div>`;
       }).join('')}
     </div>` : '';
 

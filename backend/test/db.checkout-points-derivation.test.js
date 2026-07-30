@@ -78,10 +78,12 @@ describe('turns.checkout_points is derived, not stored (item 62)', () => {
     for (const t of ['x01', 'checkout_ladder', 'dead_man_walking']) {
       assert.ok(scoring.includes(t), `${t} records real checkouts and must count as one`);
     }
-    for (const t of ['pressure_chamber', 'checkout_trainer']) {
-      assert.ok(!scoring.includes(t),
-        `${t} reuses checkout=1 to mean "a legal attempt" — counting its scored as checkout points invents finishes`);
-    }
+    assert.ok(!scoring.includes('pressure_chamber'),
+      'pressure_chamber reuses checkout=1 to mean "a legal attempt" — counting its scored as checkout points invents finishes');
+    // checkout_trainer was the other one, until it moved to checkout_trainer_rounds
+    // and stopped writing turns at all. It is back in this list and that is correct:
+    // the list only ever decides what a `turns` row MEANS, and this mode no longer
+    // has any. The test that it cannot write one is below.
   });
 
   test('an X01 checkout still reports its own points', () => {
@@ -145,7 +147,12 @@ describe('turns.checkout_points is derived, not stored (item 62)', () => {
     assert.ok(!db.getTopFinishesAll(10, 'practice').some(f => f.score === 150));
   });
 
-  test('a Checkout Trainer round is not a checkout either', () => {
+  test('a Checkout Trainer round cannot become a turn at all', () => {
+    // The strongest form of the assertion the case above used to make. It used to
+    // record a trainer round as a turn and check that the derivation refused to read
+    // it as a finish — a check that only holds for as long as every reader remembers.
+    // The mode now writes checkout_trainer_rounds, and addTurn() REFUSES a turn for
+    // one of its games, so there is nothing for any reader to misread.
     const name = 'CPD_Trainer';
     db.addPlayer(name);
     const x = x01Game(name);
@@ -155,13 +162,18 @@ describe('turns.checkout_points is derived, not stored (item 62)', () => {
 
     const ct = db.createGame({ category: 'Checkout Trainer', legsPerSet: 1, setsPerGame: 1,
       practice: 1, gameType: 'checkout_trainer', config: { mode: 'freeform' }, players: [{ name }] });
-    db.addTurn(ct.gameId, { player: name, set: 1, leg: 1, scored: 0, bust: false,
+    assert.throws(() => db.addTurn(ct.gameId, { player: name, set: 1, leg: 1, scored: 0, bust: false,
       checkout: true, checkoutPoints: null, legWon: true, targetScore: 121,
-      darts: [dart(1, 20, 3), dart(2, 20, 3), dart(3, 20, 2)] });
+      darts: [dart(1, 20, 3), dart(2, 20, 3), dart(3, 20, 2)] }),
+      /records rounds, not turns/,
+      'a Checkout Trainer game must refuse a turn outright, not merely have it discounted later');
 
-    assert.deepEqual(derivedFor(name), [{ game_type: 'checkout_trainer', scored: 0, points: null },
-                                        { game_type: 'x01', scored: 40, points: 40 }],
-      'a Checkout Trainer round is an attempt, not a 0-point finish');
+    // And a real round, recorded the way live play records one, still leaves the
+    // derivation seeing only the X01 finish.
+    db.addCheckoutTrainerRound(ct.gameId, name, { targetScore: 121, roundNo: 1,
+      darts: [{ sector: 20, multiplier: 3 }, { sector: 20, multiplier: 3 }, { sector: 20, multiplier: 2 }] });
+    assert.deepEqual(derivedFor(name), [{ game_type: 'x01', scored: 40, points: 40 }],
+      'the trainer round is in its own table and reaches no checkout-points derivation at all');
     assert.deepEqual(db.getTopFinishes(name, 'practice').map(f => f.score), [40]);
   });
 

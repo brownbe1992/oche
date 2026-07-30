@@ -3146,6 +3146,22 @@ count nudged inside an existing one — and asserts all three argument shapes: u
 point: the bug was in the argument the caller *didn't* pass, and a test that only ever
 passes one shape cannot see it come back.
 
+**Superseded (2026-07), and this is the more interesting half of the entry.** Shown
+this finding, the owner's response was not "fix the query" but "why is that mode in
+those tables at all?" — and Checkout Trainer was rewritten to record to
+`checkout_trainer_rounds`, writing no `turns` and no `darts` rows, the way Maths
+Trainer already did. The `NOT_CHECKOUT_TRAINER` added above is gone, along with the
+other fourteen uses of it; `addTurn()` now refuses a turn for a `checkout_trainer`
+game outright. The two cases here were replaced by one that asserts the structural
+fact instead: a played session leaves zero turns and zero darts.
+
+Worth recording as a general lesson, because this bug class will recur. Two bugs of
+the same shape had already been fixed one query at a time (a 1-dart typed answer
+winning "Fewest Darts to Finish", then this). Each fix was correct and neither
+addressed the cause, which was that a table was carrying rows that did not mean what
+the table meant. **When the same exclusion has to be repeated in more than a handful
+of places, the exclusion is the symptom.** See `REFERENCE.md` §19's Storage section.
+
 ## Standing practice
 
 When a functional bug is found: add it here with a repro and a fix outline before fixing,

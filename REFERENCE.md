@@ -1498,7 +1498,7 @@ of that section.
 | Bubble | Formula |
 |---|---|
 | **X01 Average** | `avg` — same 3-dart-average formula as the table above, X01-only |
-| **Total Darts Thrown** | `dartsThrown` — `COUNT(*)` from `darts`, across every game mode except Checkout Trainer (`NOT_CHECKOUT_TRAINER`) |
+| **Total Darts Thrown** | `dartsThrown` — `COUNT(*)` from `darts`, across every game mode. Unscoped, and correct unscoped: every row in `darts` is a dart somebody actually threw. Checkout Trainer used to need excluding here and no longer writes the table at all (§19) |
 | **Darts / Day** | `avgDartsPerDay` — `dartsThrown / COUNT(DISTINCT date(created_at))`, same all-modes scope |
 | **Household Rating** | `rating` from `GET /api/players/elo` — `—` if `!data.played` (no rated H2H games yet) |
 
@@ -4565,7 +4565,9 @@ Export → Export a player…`), not from the Player Profile, and not PIN-gated
   `kind='turns'` returns one row per turn **they threw** (never an
   opponent's), ordered by game then turn id: `turn_id, game_id, game_type,
   category, turn_at, set_no, leg_no, scored, bust, checkout, checkout_points,
-  leg_won, target_score, declared_unsolvable, darts, darts_detail` —
+  leg_won, target_score, declared_unsolvable, darts, darts_detail`. Checkout
+  Trainer appears in neither CSV flavour beyond its `games` rows — it records no
+  turns (§19); the JSON per-player export carries its rounds explicitly —
   `darts_detail` is each
   dart in throw order as `S`/`D`/`T`+sector notation (`T20 S5 D16`), with
   `25` for a single bull, `BULL` for the 50, and `MISS` for sector 0. Column
@@ -4973,8 +4975,8 @@ any existing stat query.
 | `bust` / `checkout` | `INTEGER NOT NULL DEFAULT 0` | Booleans. Cricket turns always write `bust=0, checkout=0` — cricket has neither concept. Doubles Practice repurposes `bust` as "this dart ended the round" (so-close or wrong-double, §2) — the closest existing column to that meaning, since this mode has no bust/win concept of its own either; `checkout` stays `0` always. Guided Around the Clock repurposes `bust` the identical way: `1` marks whichever dart completed the round (all 20 numbers hit) — there's no "so-close"/"wrong-target" failure mode here, only completion or abandonment. Guided Around the World writes `bust=0` always (no round to end, matching Chuckin's own turns). **`checkout` is overloaded, and this matters to every query that reads it**: for `x01`, `checkout_ladder` and `dead_man_walking` it means "checked out, and `scored` is what for" — but The Pressure Chamber and Checkout Trainer reuse it for "this visit was a legal attempt rather than a miss", where `scored` is a CP gain or a flat `0` and no finish happened at all. `docs/bug-roadmap.md` BUG-27 is what happens when a query forgets this. The registry states it explicitly (`checkoutIsAttempt: true` on those two entries) and `CHECKOUT_POINTS` reads it from there |
 | ~~`checkout_points`~~ | *(dropped 2026-07 — `docs/archive/database-normalization-roadmap.md` §3.1, item 62)* | It held a copy of `scored` and nothing else, and is now **derived at read time** by the `CHECKOUT_POINTS` expression in `backend/db.js`: `CASE WHEN t.checkout = 1 AND g.game_type IN (<scoring types>) THEN t.scored END`. Two things make that correct rather than merely convenient. First, a checkout's points are the whole **visit's** score, not the finishing dart's — every evaluator returns `scored: bust ? 0 : pointsThisVisit`, a winning visit is never a bust, and `addTurn()` independently rejects a checkout turn whose `checkoutPoints` differs from its `scored` (SEC-22, and now also the guarantee the derivation rests on). Second, `checkout` is an **overloaded flag**, and this column was silently carrying that: see the row above. The game-type list is derived from `GAME_TYPE_REGISTRY`, not hand-kept — the two modes that overload the flag carry `checkoutIsAttempt: true` on their own entries. Covered by `backend/test/db.checkout-points-derivation.test.js`. The migration is a plain `DROP COLUMN` with no backfill and nothing to restore, since every value it held is still in the row it was copied from |
 | `leg_won` | `INTEGER NOT NULL DEFAULT 0` | Game-type-agnostic "this turn won the leg" signal, set by Cricket's write path (`enterTurnCricket()`) and — since 2026-07 — by the **Around the Clock race** on the dart that clears the twentieth number (`players.length > 1` only; solo is one clock = one game and has no leg to win). Without it `_h2hWonLegs()`, which matches `checkout=1 OR leg_won=1`, credited every race leg to nobody and each race read "N legs played, 0 legs won" for ever — the race signals completion with `bust`, which is a *completion* marker, not a winner. Originally set only by Cricket — Cricket has no checkout mechanism, so its Personal Bests (fewest darts to close, best MPR in a leg) need their own marker instead of reusing `checkout` (which keeps its narrower X01 double-out meaning). X01 turns always leave this `0` and its own Personal Bests keep using `checkout=1`, unchanged. Checkout Trainer repurposes it as "answered with the objectively fewest darts" (§19) |
-| `target_score` | `INTEGER` | Checkout Trainer only (§19): the target offered for that round — unlike X01 there's no persistent "remaining score" state to derive it from afterward. `NULL` for every other game type; `addTurn()` range-checks it to 1–170 |
-| `declared_unsolvable` | `INTEGER NOT NULL DEFAULT 0` | Checkout Trainer trick questions only (§19): `1` marks a round answered by declaring "no possible checkout" instead of tapping out darts — the only turn shape allowed to carry **zero** dart rows (`addTurn()` rejects it outside `checkout_trainer` games, with any darts attached, or with a nonzero `scored`). The verdict still lives on `bust`/`checkout`/`leg_won` (correct call → `checkout=1, leg_won=1`; wrong call → `bust=1`); this flag exists so "a real checkout was solved" queries (Toughest Checkout Solved) can exclude declarations |
+| `target_score` | `INTEGER` | "Which number was this turn aimed at", for the modes that serve a target rather than counting one down: Checkout Ladder (the rung), guided Around the Clock (the station) and Dead Man Walking (the round's frozen target), each validated server-side in `addTurn()`. `NULL` for every other game type; range-checked to 1–170. Added for Checkout Trainer, which no longer writes turns at all (§19) |
+| `declared_unsolvable` | `INTEGER NOT NULL DEFAULT 0` | **Historical — always `0`, read by nothing.** Checkout Trainer trick questions were the only thing that ever set it, and that mode now records to `checkout_trainer_rounds`, whose own `declared_unsolvable` carries the flag properly. Kept rather than dropped because `DROP COLUMN` in SQLite rewrites the whole table, and `turns` is the biggest one here |
 | `affected_player_id` | `INTEGER` | Killer only (§ Killer): which player's life total this dart changed (`NULL` = no effect, thrower's own id = self-effect, another id = an attack). `NULL` for every other game type |
 | `declared_hit` | `INTEGER` | The Pressure Chamber only (§34): the player's before-the-throw self-declaration — `1` = declared hit, `0` = declared miss, `NULL` = no declaration / every other game type. **Not a scoring input** and carries no leaderboard weight; feeds only the informational Honesty % stat. Deliberately has **no consistency guard** (unverifiable by design — an honor-system signal); `addTurn()` validates only its shape (`0`/`1`) and rejects it outside `pressure_chamber` games |
 | `created_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
@@ -4995,6 +4997,31 @@ any existing stat query.
 | `miss_zone` | `INTEGER` | `1`-`20`\|`NULL` — the wedge number nearest a **positioned miss** (Dartboard-mode tap on the miss ring outside the double). Always set together with `miss_depth`, never on a hit (`sector≠0`) |
 | `miss_depth` | `TEXT` | `'near'`\|`'far'`\|`NULL` — how close a positioned miss was: the band immediately outside the double ("near") vs. further out ("far"). Always set together with `miss_zone` |
 | `bounced` | `INTEGER` | `1`=this dart struck a real number/ring but bounced or fell out before it counted, `NULL` otherwise. `sector`/`multiplier` stay exactly `0`/`1` regardless — to every existing consumer (`evaluateVisit()`, every badge, `getGhostLegScript()`, `getFullDatabaseExport()`) a bounced dart is a completely ordinary miss row; v1 tracks only that it happened, not where (see REFERENCE.md §17) |
+
+### `checkout_trainer_rounds` (§19, one row per graded round, indexed on `game_id`, `player_id` and `(game_id, hunt_no)`)
+
+**Checkout Trainer writes NO `turns` and NO `darts` rows.** Every round it records
+lives here. `addTurn()` refuses a turn for a `checkout_trainer` game outright, which
+is what makes that a fact rather than a convention. See §19's **Storage** for the
+argument, and `migrateCheckoutTrainerRoundsOffTurns()` for how pre-2026-07 history
+came across.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `game_id` | `INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE` | The session. Sub-mode, route ceiling and pinned target are read from `games.config` — per-session settings, deliberately not copied onto every round where a second copy could disagree with the first |
+| `player_id` | `INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE` | Solo-only mode, but stored explicitly rather than inferred from `game_players` |
+| `hunt_no` | `INTEGER NOT NULL DEFAULT 1` | Route Recall's hunt counter (one target held across many submissions). `1` throughout for Freeform/Blitz. Previously borrowed `turns.set_no` |
+| `round_no` | `INTEGER NOT NULL DEFAULT 1` | The submission within the session, or within the hunt. Previously `turns.leg_no` |
+| `target_score` | `INTEGER NOT NULL` | The target offered, 1–170 |
+| `route` | `TEXT NOT NULL DEFAULT ''` | The proposed route as dart labels, in the order tapped (`'T20 T20 D20'`). Text rather than `darts` rows because nothing was thrown — there is no sector to plot, no zone, no per-dart timestamp. Empty for a declaration |
+| `route_key` | `TEXT` | `routeKey()`'s canonical, order-insensitive identity (`frontend/scoring.js`). Route Recall's duplicate check reads this for the hunt — server-side, against what is stored, so a reloaded page cannot re-bank a route |
+| `declared_unsolvable` | `INTEGER NOT NULL DEFAULT 0` | `1` for a trick-question round answered by declaring "no possible checkout" instead of tapping a route. Graded by `gradeCheckoutDeclaration()`; excluded from Toughest Checkout Solved, since correctly calling 169 a bogey is not the same feat as finishing from it |
+| `legal` | `INTEGER NOT NULL DEFAULT 0` | "A legal answer to the question THIS sub-mode asked" — a finish in Freeform/Blitz; a legal route not already named in Route Recall (a duplicate is recorded nowhere at all, so a stored Route Recall row is new by construction) |
+| `optimal` | `INTEGER NOT NULL DEFAULT 0` | "And the best possible answer" — matched the objective minimum dart count. Route Recall never sets it: its question has no single best answer. Replaces the old overloading of `turns.leg_won` |
+| `used_darts` | `INTEGER NOT NULL DEFAULT 0` | Stored, where it used to be `COUNT(darts)` — which is why a declaration, the one shape with no darts, needed a flag of its own to stay countable |
+| `optimal_darts` | `INTEGER` | The objective minimum for that target, from `checkoutHint()`. `NULL` for a bogey number. Never stored before this table existed; re-derived for migrated rows |
+| `answered_at` | `TEXT NOT NULL DEFAULT (datetime('now'))` | |
 
 ### `timeline_events`
 | Column | Type | Notes |
@@ -5894,20 +5921,17 @@ markup) shows on every game-type tab that has one — `loadDartHeatmap()` fires
 for whichever tab is currently active, except Checkout Trainer (hidden
 entirely, since its taps aren't real thrown darts).
 
-**Checkout Trainer is excluded in the query, not just in the client.** Both
-`getDartHeatmap()` and `getBounceOutCount()` append `NOT_CHECKOUT_TRAINER` to
-whatever `_scope()` produced, unconditionally — so a pad tap proposing a
-checkout route never appears on a heatmap regardless of which `gameType` was
-asked for, `'checkout_trainer'` included (that request correctly returns `[]`:
-there is no such thing as where a proposed route landed). This is not
-redundant with `loadDartHeatmap()` hiding the section: `gameType` is optional
-on both functions, and the omitted "every game type" form — what
-`GET /api/players/dart-heatmap?name=` serves publicly — used to fold those taps
-in, a wrong answer no screen happened to be asking for. See
-`docs/bug-roadmap.md` BUG-60. The narrow `NOT_CHECKOUT_TRAINER` is deliberate
-rather than the broader `NOT_HYPOTHETICAL_DARTS`: a Just Chuckin' It dart is a
-real physical throw with a real landing spot and belongs on a heatmap — it is
-excluded from *scored*-derived stats, never from positional ones.
+**Checkout Trainer cannot appear here at all** — it writes no `darts` rows (§19).
+Worth knowing what that replaced, because these two functions are the clearest
+example of what its old storage cost. `gameType` is OPTIONAL on both: supplied, the
+query pins to one type; omitted, it spans every type — which is what the public
+`GET /api/players/dart-heatmap?name=` serves. While the trainer wrote `darts` rows,
+that unscoped form plotted its pad taps as darts that had landed somewhere, and both
+functions had to carry an explicit `NOT_CHECKOUT_TRAINER` to stop it
+(`docs/bug-roadmap.md` BUG-60). Nothing about either query was wrong; the table
+underneath was answering a question it had no business answering. The exclusion is
+gone and these now read exactly what they say they read. `loadDartHeatmap()` still
+hides the section on that tab — there is simply nothing to plot.
 
 `buildDartHeatmap(cells, {ariaLabel, noZoneTracking, heatmapStyle, numberStyle})`
 renders three things per number: the inner-single and outer-single regions
@@ -6402,13 +6426,22 @@ break to the higher target). The per-hunt arithmetic runs in JS over a grouped
 query, because the denominator depends on both the hunt's ceiling and the player's
 out-mode and only `allCheckoutRoutes()` knows it.
 
-**Isolation from Freeform/Blitz — load-bearing.** `checkout=1` means different
-things in the two contexts ("a route you had not named yet" vs "a legal answer to
-this round"), so every Freeform/Blitz statistic carries `NOT_ROUTE_RECALL`.
-That fragment is `AND json_extract(g.config,'$.mode') IS NOT 'route_recall'` —
-`IS NOT`, not `!=`, because `config.mode` is absent on rows written before this
-sub-mode existed and `!= NULL` is NULL, which would erase every pre-existing
-Checkout Trainer statistic instead of excluding nothing.
+**Isolation from Freeform/Blitz — load-bearing.** `legal` means different things
+in the two contexts ("a route you had not named yet" vs "a legal answer to this
+round"), so `_ctRows()` — the one query every Freeform/Blitz statistic reads
+through — excludes Route Recall with
+`AND json_extract(g.config,'$.mode') IS NOT 'route_recall'`. `IS NOT`, not `!=`,
+because `config.mode` is absent on rows written before this sub-mode existed and
+`!= NULL` is NULL, which would erase every pre-existing Checkout Trainer statistic
+instead of excluding nothing.
+
+**A duplicate route is recorded nowhere at all** — re-entering a route by accident
+must cost nothing, and it is why "routes named" is simply the count of `legal`
+rows rather than something de-duplicated at read time. The check is now the
+SERVER's, against the hunt's already-stored `route_key`s, so a reloaded page or a
+second device cannot re-bank a route the client's in-memory set had forgotten.
+Hunts are grouped by `(game_id, hunt_no)`; `hunt_no` is a column of its own, where
+it used to borrow `turns.set_no`.
 
 **Badges**: `ROUTE_RECALL_MILESTONE_LADDERS` (routes named: 25/100/300/800/2000) —
 its own ladder, not merged into Freeform's attempts ladder, since they count
@@ -6416,10 +6449,43 @@ different things. 🗺️ **Cartographer**: every route of a target that had
 `ROUTE_RECALL_CARTOGRAPHER_MIN` (10) or more, in one hunt.
 
 **Game type**: `checkout_trainer`, one of `KNOWN_GAME_TYPES` (`backend/db.js`).
-Every dart-count attempt is its own 1-3 dart `turns` row — the same per-dart-
-turn shape Doubles Practice/Just Chuckin' It already use — reusing
-`evaluateVisit()` (`frontend/scoring.js`) completely unmodified: a checkout
-attempt genuinely IS a normal X01 visit starting from `remaining = target`.
+
+**Storage: its own table, and NO `turns` or `darts` rows at all** (2026-07 —
+`checkout_trainer_rounds`, §5's schema). Every answered round is one row there.
+This is the second thing to know about the mode after what it is for, because it
+is what every isolation claim below now rests on.
+
+It used to write ordinary `turns` and `darts`, and that was a defensible reading
+of the domain: a checkout attempt genuinely IS a normal X01 visit starting from
+`remaining = target`, and it reused `evaluateVisit()` unmodified to prove it. The
+cost was that every statistic in the app then had to be told, individually, that
+this particular X01-shaped visit was not one — two exclusion constants threaded
+through roughly fifteen queries. The bill came due twice: once when a 1-dart
+typed-in answer won "Fewest Darts to Finish", and again (`docs/bug-roadmap.md`
+BUG-60) when the dartboard heatmap plotted pad taps as darts that had landed
+somewhere. Neither was a careless query; both were queries written correctly
+against a table that was quietly lying to them.
+
+Its own table settles it by construction, for the fifteen queries that exist and
+every one written afterwards. `NOT_CHECKOUT_TRAINER` no longer exists;
+`NOT_HYPOTHETICAL_DARTS` and `NOT_CONTINUOUS_STREAM` no longer name this mode.
+`addTurn()` **refuses** a turn for a `checkout_trainer` game outright, so the
+exclusions cannot become necessary again by accident. Existing history was
+migrated across at boot rather than reset — see `migrateCheckoutTrainerRoundsOffTurns()`
+(`backend/db.js`) and `backend/test/db.checkout-trainer-migration.test.js`.
+
+**The server grades the round, not the client.** `POST /api/games/:id/checkout-round`
+carries the target and the route (and `declaredUnsolvable` for a trick-question
+call); `addCheckoutTrainerRound()` re-derives the verdict with the same
+`gradeCheckoutAttempt()`/`gradeCheckoutDeclaration()`/`gradeRouteSubmission()`
+the screen used, reading the player's out-mode from their own `game_players` row
+rather than from the request. Same standard as `addMathsTrainerRound()` (§19b) and
+strictly more than the old turns-based path checked, which stored the client's
+`bust`/`checkout`/`legWon` verbatim. The screen still grades locally for the
+instant on-screen verdict — the client decides what to SHOW, the server decides
+what COUNTS. Undo is `DELETE /api/games/:id/checkout-round/last?roundId=`, wired
+through the registry's `deleteLastRecord` member so `_finishUndo()` needs no
+per-mode branch.
 
 **Config validated at creation** (2026-07). `createGame()` rejects a malformed
 `config` rather than storing it verbatim, for every field a stat later trusts:
@@ -6433,13 +6499,8 @@ config-derived theoretical minimum to a single dart; `rounds: 9999` produced
 Shanghai targets above 20 that no dart can match, an unwinnable game whose
 zero-point rounds dragged the player's PPR down.
 
-**Schema**: `turns.target_score INTEGER` (nullable) — the target offered for
-that round; only ever populated for this game type, since (unlike X01) there's
-no persistent "remaining score" state to derive it from afterward.
-`turns.declared_unsolvable INTEGER NOT NULL DEFAULT 0` — `1` marks a
-trick-question round answered by declaring "no possible checkout" (see
-**Trick questions** below); the only turn shape allowed to carry zero dart
-rows. `games.config.mode`: `'freeform' | 'blitz' | 'route_recall'` — a mode flag, not a
+**Schema**: `checkout_trainer_rounds` (§5) holds every round.
+`games.config.mode`: `'freeform' | 'blitz' | 'route_recall'` — a mode flag, not a
 second `game_type`, since the sub-modes share identical target selection and dart
 entry and differ only in pacing/scoring (Route Recall differing most — see its own
 section above). `games.config.routeCeiling`: 1-3 for Route Recall, `null` otherwise (the same relationship X01's own H2H-vs-
@@ -6520,18 +6581,27 @@ Toughest Checkout Solved via `declared_unsolvable` and can never trigger the
 route-specific one-offs (170 Club, One-Darter — the declaration path never
 runs those checks).
 
-**Physical-stat exclusion — stricter than Chuckin's**: these darts are a
+**Physical-stat isolation — structural since 2026-07.** These "darts" are a
 *proposed* route, not a real throw, and must have **zero footprint on any
 pre-existing stat, full stop** (explicit product decision) — not just the
-sector-heatmap/treble-rate/dart-pace exclusions Just Chuckin' It's own darts
-already get, but also the raw "total darts thrown"/"last played" counters
-that Chuckin (a real physical throw) deliberately keeps counting toward.
-Two exclusion constants in `backend/db.js`:
+sector-heatmap/treble-rate/dart-pace exclusions Just Chuckin' It's own darts get,
+but also the raw "total darts thrown"/"last played" counters that Chuckin (a real
+physical throw) deliberately keeps counting toward.
+
+That requirement is now met by the mode writing no `turns` and no `darts` rows at
+all (see **Storage** above), which is a stronger guarantee than any list of
+exclusions: it holds for queries nobody has written yet. **`NOT_CHECKOUT_TRAINER`
+is gone**, and `NOT_HYPOTHETICAL_DARTS` is back to naming Chuckin alone.
+
+What follows is the historical record of what the exclusion approach cost, kept
+because it is the argument for the design and because a reader of an older commit
+will meet these constants. Every query in this list once needed telling:
 - `NOT_HYPOTHETICAL_DARTS` (generalized from the earlier Chuckin-only
-  `NOT_CHUCKIN`) excludes both `'chuckin'` and `'checkout_trainer'` from
-  sector heatmaps, treble rate, dart-pace, and Around the World progress.
+  `NOT_CHUCKIN`) excluded both `'chuckin'` and `'checkout_trainer'` from
+  sector heatmaps, treble rate, dart-pace, and Around the World progress. It now
+  names Chuckin only.
 - `NOT_CHECKOUT_TRAINER`, a narrower Checkout-Trainer-only sibling, additionally
-  excludes it (but not Chuckin) from every "pure total darts thrown" counter
+  excluded it (but not Chuckin) from every "pure total darts thrown" counter
   Chuckin is a deliberate exception to: `computeStats()`'s roster `turns`/
   `dartsThrown`, `getSummary()`'s `darts`/`todayDarts`/`weekDarts`, the roster
   "last played" timestamp, `getPlayerStatBubbles()`'s own `dartsThrown`/
@@ -6547,14 +6617,15 @@ Two exclusion constants in `backend/db.js`:
   Darts to Finish" and drag every average toward zero, since Checkout Trainer
   turns always write `scored=0`), `getCheckoutRoutes()`'s "most common checkout
   routes" list, `getLoadoutStats()`'s per-loadout `dartsThrown`/`checkouts`, and
-  the practice-side half of the roster's `avgDartsPerLeg`. It is also appended
-  unconditionally to `getDartHeatmap()`/`getBounceOutCount()`, whose `gameType`
-  argument is optional and whose omitted "every game type" form used to plot the
-  trainer's pad taps as landed darts (`docs/bug-roadmap.md` BUG-60). The Player
-  Profile's dartboard-heatmap section is *additionally* hidden on the Checkout
-  Trainer tab (`frontend/index.html`'s `loadDartHeatmap()`) rather than showing a
-  heatmap of typed-in answers — belt and braces on purpose: that hiding is the
-  client choosing not to ask, which is no protection for anything else that does.
+  the practice-side half of the roster's `avgDartsPerLeg`, and
+  `getDartHeatmap()`/`getBounceOutCount()` — whose `gameType` argument is optional
+  and whose omitted "every game type" form plotted the trainer's pad taps as
+  landed darts until `docs/bug-roadmap.md` BUG-60. **That is fifteen separate
+  places one product decision had to be restated, and BUG-60 is what one omission
+  looked like.** The Player Profile's dartboard-heatmap section is still hidden on
+  the Checkout Trainer tab (`frontend/index.html`'s `loadDartHeatmap()`) — there is
+  nothing to plot — but that hiding is now the only thing needed, rather than the
+  visible half of a guard whose invisible half was missing.
 
 **Stats** (`getCheckoutTrainerStatBubbles`/`getCheckoutTrainerPersonalBests`,
 `backend/db.js`):
@@ -6562,9 +6633,9 @@ Two exclusion constants in `backend/db.js`:
 - **Optimal %** = attempts matching the minimum dart count ÷ total attempts
   (the headline stat — hitting the objective optimum is the actual point of
   the game).
-- **Toughest Checkout Solved** = `MAX(target_score)` where `leg_won=1 AND
-  declared_unsolvable=0 AND json_extract(games.config,'$.pinnedTarget') IS
-  NULL` — a correctly-called trick question grades `leg_won=1` but its bogey
+- **Toughest Checkout Solved** = `MAX(target_score)` over rounds where
+  `optimal=1 AND declared_unsolvable=0 AND json_extract(games.config,'$.pinnedTarget') IS
+  NULL` — a correctly-called trick question grades `optimal` but its bogey
   target was never a checkout anyone *solved*, so without the
   `declared_unsolvable` exclusion one correct "169 is a bogey" call would
   permanently pin this Personal Best at 169. The `pinnedTarget` exclusion
@@ -6844,12 +6915,15 @@ floor — the peak-single-run shape `getCheckoutBlitzLeaderboard()` uses.
 
 **This mode writes no `turns` and no `darts` rows at all**, and that is the single
 most important decision in it. The requirement is that nothing it records reaches
-any other statistic. Checkout Trainer shows the alternative: it writes real turns (a
+any other statistic. Checkout Trainer showed the alternative: it wrote real turns (a
 checkout attempt genuinely *is* an X01 visit), and the price was two exclusion
-constants threaded through ~15 queries, one of which was missed long enough for a
-typed-in answer to win "Fewest Darts to Finish". A mode that writes neither table
-satisfies the requirement **by construction — in every query that exists today and
-every one written later**, with no constant to remember.
+constants threaded through ~15 queries — one missed long enough for a typed-in
+answer to win "Fewest Darts to Finish", another (`docs/bug-roadmap.md` BUG-60) long
+enough for the dartboard heatmap to plot pad taps as landed darts. A mode that
+writes neither table satisfies the requirement **by construction — in every query
+that exists today and every one written later**, with no constant to remember.
+**Checkout Trainer has since been rewritten the same way** (§19,
+`checkout_trainer_rounds`), and both exclusion constants are gone.
 `backend/test/db.maths-trainer.test.js` asserts it as a whole-stat-surface
 before/after snapshot rather than a list of named stats, so a statistic added later
 is covered automatically.
@@ -7954,7 +8028,7 @@ without cluttering an even match.
 - **"Fewest darts to finish"-shaped Personal Bests and nine-darter
   detection exclude a handicapped leg** — a shortened start makes finishing
   in fewer darts mechanically easier, not a skill feat. A new `NOT_HANDICAPPED`
-  SQL fragment (`backend/db.js`, alongside `NOT_CHECKOUT_TRAINER`) — `NOT
+  SQL fragment (`backend/db.js`, alongside `NOT_HYPOTHETICAL_DARTS`) — `NOT
   EXISTS (... game_players ... start_score IS NOT NULL)`, scoped to the
   *same* player and game the surrounding query is already reading —
   excludes it from all 6 nine-darter-detection call sites
@@ -8561,9 +8635,18 @@ played against each other"): every **completed** H2H game (`practice=0`,
 per-matchup win/loss records for 2-player games, a flat list for 3+ player
 games. Non-H2H activity (practice or solo, any game type) is folded into a
 light `soloActivity` summary grouped by player+game type (legs/rounds +
-darts thrown, `legs` omitted for the continuous-stream types — Chuckin,
-Checkout Trainer, guided Around the World — where a "leg" is meaningless),
-never itemized.
+darts thrown, `legs` omitted for the continuous-stream types — Chuckin and
+guided Around the World — where a "leg" is meaningless), never itemized.
+
+**Checkout Trainer is the one entry not produced by that grouped query**, because
+it writes no turns for it to see (§19). Its row is appended separately from
+`checkout_trainer_rounds` and reports `rounds` rather than `darts` — the renderer
+prints "N rounds" whenever `rounds` is non-null. Both halves are deliberate: it
+still appears, so a night spent entirely on checkout practice does not produce an
+empty recap; and it is counted in rounds, because it used to appear here with a
+dart count directly beneath a `perPlayer.dartsThrown` headline that (correctly)
+excluded it, so one screen could read "Darts Thrown 6" above "Checkout Trainer:
+14 darts". Both numbers described the same session; only one was about darts.
 
 ### Response shape (`GET /api/session-recap?date=YYYY-MM-DD`)
 
@@ -8574,7 +8657,7 @@ never itemized.
   h2hResultsByMatchup: [ {players:[a,b], games:[{gameId,category,gameType,winner}], record:{name:wins}} ],
   perPlayer: [ {name, gamesPlayed, gamesWon, gamesLost, dartsThrown, oneEighties,
                 tonPlusCheckouts, bestVisit, bestLegAvg} ],
-  soloActivity: [ {name, gameType, legs, darts} ],
+  soloActivity: [ {name, gameType, legs, darts, rounds} ],
   badgesEarnedTonight: [ {player, badgeId, count, earnedAt} ],
   personalBestsSetTonight: [ {player, metric, value, previousBest} ],
   moments: [ {ts, type, player, text} ],   // chronological
@@ -8586,9 +8669,8 @@ never itemized.
   every other game type's own formula is left for a future pass rather than
   ballooning this one aggregation. `gamesWon`/`gamesLost`/`dartsThrown`/
   `oneEighties`/`tonPlusCheckouts` cover every game type a player touched
-  that date (darts thrown excludes Checkout Trainer's non-physical darts,
-  same `NOT_CHECKOUT_TRAINER` convention as `getHomeExtra()`'s own
-  `todayDarts`).
+  that date. Checkout Trainer contributes to none of them, because it writes
+  no turns and no darts (§19).
 - **`h2hResultsByMatchup`** only covers exactly-2-player games, grouped by
   the unordered player pair in first-played order; a 3+ player game has no
   single pairwise record and is listed only in `h2hGames`.
@@ -9525,8 +9607,8 @@ represent.
 Bests) and `getPlayerStatBubbles()`'s `avgDartsPerLeg`, plus
 `getPersonalBests()`'s `fewestDartsCheckout`, all relied on `t.checkout=1`
 as an implicit "this is a real X01 leg" signal with no explicit
-`game_type='x01'` filter — true only as long as X01 (and Checkout Trainer,
-excluded separately via `NOT_CHECKOUT_TRAINER`) were the only game types
+`game_type='x01'` filter — true only as long as X01 (and, until it moved to its
+own table, Checkout Trainer, excluded separately) were the only game types
 that ever set `checkout=1`. Checkout Ladder broke that assumption when it
 shipped, and Dead Man Walking's own real Walked Out checkouts made it
 concrete: a committed isolation-regression test (played a full Dead Man

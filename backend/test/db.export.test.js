@@ -51,6 +51,10 @@ describe('getFullDatabaseExport (docs/archive/data-export-roadmap.md)', () => {
       // docs/archive/marathon-mode-roadmap.md: same standing rule — session groupings
       // (durations, leg order) can't be reconstructed from the raw leg games alone
       'marathonSessions', 'marathonSessionLegs',
+      // docs/minigames-roadmap.md: the two modes that record to tables of their own
+      // rather than to `turns` — omitting them drops the ENTIRETY of their history
+      // from a "take your data with you" dump, not merely some of its detail.
+      'checkoutTrainerRounds', 'mathsTrainerRounds',
     ].sort());
 
     const alice = dump.players.find(p => p.name === 'export_alice');

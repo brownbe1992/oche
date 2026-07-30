@@ -18,7 +18,12 @@
        GET  /api/stats             -> computed stats per player
        POST /api/games             -> start a game           { category, legsPerSet, setsPerGame, players:[names] } -> { gameId }
        POST /api/games/:id/turns   -> record one turn        { player, set, leg, scored, trebleLess, bust, checkout, checkoutPoints, legWon,
-                                                               targetScore?, declaredUnsolvable? (both Checkout Trainer only) }
+                                                               targetScore? (Checkout Ladder / Around the Clock / Dead Man Walking) }
+       POST /api/games/:id/checkout-round -> record one Checkout Trainer round (NOT a turn -- that mode writes
+                                            neither turns nor darts) { player, targetScore, darts:[{sector,multiplier}],
+                                            declaredUnsolvable?, huntNo?, roundNo? } -> the SERVER's own grade
+       DEL  /api/games/:id/checkout-round/last?roundId= -> undo the last such round
+       POST /api/games/:id/maths-round    -> record one Maths Trainer round (same "not a turn" shape)
        POST /api/games/:id/complete-> finish a game          { winner }
        POST /api/games/:id/forfeit -> one player bows out    { player } -> { ok, ended, winnerName } (game keeps going for the rest unless only one active player is left)
        POST /api/games/:id/abandon-> end the whole match early, marking every still-active participant DNF
@@ -1154,6 +1159,22 @@ const server = http.createServer(async (req, res) => {
       if (!requireWrite(req, res)) return;
       const b = await readJson(req);
       return send(res, 200, db.addMathsTrainerRound(Number(mt[1]), b.player, b));
+    }
+    // Checkout Trainer: the same shape and the same reason. A round is not a turn —
+    // this mode writes checkout_trainer_rounds and no turns/darts at all, which is
+    // what gives it zero footprint on every other statistic by construction.
+    // addCheckoutTrainerRound() re-grades the submitted route server-side rather
+    // than storing a client-supplied verdict.
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/checkout-round$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.addCheckoutTrainerRound(Number(mt[1]), b.player, b));
+    }
+    // Undo's counterpart to DELETE /turns/last, for the same mid-round "take that
+    // back" action on a mode whose rounds do not live in `turns`.
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/checkout-round\/last$/)) && m === 'DELETE') {
+      if (!requireWrite(req, res)) return;
+      return send(res, 200, db.deleteLastCheckoutTrainerRound(Number(mt[1]), url.searchParams.get('roundId')));
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/complete$/)) && m === 'POST') {
       if (!requireWrite(req, res)) return;

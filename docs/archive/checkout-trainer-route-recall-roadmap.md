@@ -9,6 +9,16 @@
 > of the possible checkouts." Filed as its own doc rather than reopening the
 > archived one, since Freeform/Blitz are complete and this is new, separable
 > work — see `CLAUDE.md`'s roadmap-doc convention.
+>
+> **Storage note (2026-07, after this doc was written):** the sections below
+> describing a submission as a `turns` row, and `turns.set_no` as the hunt
+> counter, describe how this shipped, not how it works now. Checkout Trainer has
+> since moved off `turns`/`darts` entirely and onto `checkout_trainer_rounds`,
+> where the hunt counter is a column of its own (`hunt_no`) rather than a
+> borrowed one — see `REFERENCE.md` §19 for why. The duplicate check also moved
+> to the server, against the hunt's stored `route_key`s, rather than living only
+> in the client's in-memory set. Everything else here — the grading, the coverage
+> maths, the ceiling, the badges — is unchanged.
 
 ## Resolved (2026-07)
 

@@ -12,6 +12,23 @@
 > than the original sketch, that's called out inline below rather than
 > silently edited away.
 >
+> **One thing this doc gets wrong throughout, and it is worth knowing before
+> reading it (2026-07):** every mention below of storing rounds as `turns` and
+> `darts` rows describes how the mode used to work, not how it works now. That
+> design was defensible — a checkout attempt genuinely *is* an X01 visit from
+> `remaining = target`, which is why `evaluateVisit()` could be reused
+> unmodified — but the price was two exclusion constants threaded through
+> roughly fifteen queries so that every other statistic would know these
+> particular X01-shaped visits were not real. That bill was paid twice: a 1-dart
+> typed-in answer winning "Fewest Darts to Finish", and then
+> `docs/bug-roadmap.md` BUG-60's dartboard heatmap plotting pad taps as darts
+> that had landed somewhere. The mode now records to its own
+> `checkout_trainer_rounds` table and writes no `turns` and no `darts` at all,
+> the way Maths Trainer already did; `NOT_CHECKOUT_TRAINER` no longer exists,
+> and existing history was migrated across rather than reset. The grading rules,
+> sub-modes, badges and stat definitions below are all still accurate — only the
+> storage changed.
+>
 > **What shipped last (trick-question variant, 2026-07 — this doc's final
 > open item)**: an opt-in New Game toggle (`games.config.trickQuestions`,
 > off by default) makes ~1 target in 8 (`CHECKOUT_TRAINER_TRICK_CHANCE`,

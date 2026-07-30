@@ -9,11 +9,11 @@
 //      and the player's own out-mode. Get the denominator wrong and the number is
 //      plausible and wrong — the exact shape of bug CLAUDE.md's "every new
 //      calculation gets a committed test" rule exists for.
-//   2. THE ISOLATION. Route Recall writes checkout=1 to mean "a route you had not
-//      named yet", while Freeform/Blitz write it to mean "a legal answer to this
-//      round". Same column, same game_type, different meanings — so a Route Recall
-//      hunt must move a player's Route Recall numbers and leave their Freeform
-//      accuracy exactly where it was. Nothing about that is visible on screen.
+//   2. THE ISOLATION. Route Recall's `legal` means "a route you had not named yet",
+//      while Freeform/Blitz's means "a legal answer to this round". Same column,
+//      same game_type, different meanings — so a Route Recall hunt must move a
+//      player's Route Recall numbers and leave their Freeform accuracy exactly where
+//      it was. Nothing about that is visible on screen.
 const { test, describe, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -48,11 +48,18 @@ function freeformGame(name) {
     config: { mode: 'freeform', difficulty: 'full', trickQuestions: false },
     players: [{ name }] });
 }
-// One submission, recorded exactly as submitRouteRecall() records it.
-function route(gameId, name, huntNo, submissionNo, target, darts, isNew) {
-  db.addTurn(gameId, { player: name, set: huntNo, leg: submissionNo,
-    scored: 0, bust: !isNew, checkout: isNew, checkoutPoints: null, legWon: false,
+// One submission, recorded exactly as submitRouteRecall() records it. Note what is
+// NOT passed: whether the route was legal, or new. The server derives both — from
+// the route itself and from what this hunt has already recorded — so these fixtures
+// can no longer assert a verdict they themselves supplied. Returns that verdict so a
+// case can check it.
+function route(gameId, name, huntNo, submissionNo, target, darts) {
+  return db.addCheckoutTrainerRound(gameId, name, { player: name, huntNo, roundNo: submissionNo,
     targetScore: target, darts });
+}
+// A Freeform round, likewise graded server-side.
+function freeform(gameId, name, roundNo, target, darts) {
+  return db.addCheckoutTrainerRound(gameId, name, { player: name, roundNo, targetScore: target, darts });
 }
 
 describe('Route Recall stats', () => {
@@ -61,8 +68,8 @@ describe('Route Recall stats', () => {
     db.addPlayer(name);
     const g = routeRecallGame(name, 2);
     // 40, two darts: D20, and 20 then D10. Both real, both distinct.
-    route(g.gameId, name, 1, 1, 40, [dart(1, 20, 2)], true);
-    route(g.gameId, name, 1, 2, 40, [dart(1, 20, 1), dart(2, 10, 2)], true);
+    route(g.gameId, name, 1, 1, 40, [dart(1, 20, 2)]);
+    route(g.gameId, name, 1, 2, 40, [dart(1, 20, 1), dart(2, 10, 2)]);
 
     const total = S.allCheckoutRoutes(40, true, 2).length;
     assert.equal(total, 36, 'the fixture is written against a known denominator');
@@ -79,8 +86,8 @@ describe('Route Recall stats', () => {
     const name = 'RR_Ceiling';
     db.addPlayer(name);
     const g = routeRecallGame(name, 3);
-    route(g.gameId, name, 1, 1, 40, [dart(1, 20, 2)], true);
-    route(g.gameId, name, 1, 2, 40, [dart(1, 20, 1), dart(2, 10, 2)], true);
+    route(g.gameId, name, 1, 1, 40, [dart(1, 20, 2)]);
+    route(g.gameId, name, 1, 2, 40, [dart(1, 20, 1), dart(2, 10, 2)]);
 
     const total2 = S.allCheckoutRoutes(40, true, 2).length;
     const total3 = S.allCheckoutRoutes(40, true, 3).length;
@@ -96,7 +103,7 @@ describe('Route Recall stats', () => {
     // 2 at a 1-dart ceiling has exactly one route: D1. Finding it is a full clear.
     const g = routeRecallGame(name, 1);
     assert.equal(S.allCheckoutRoutes(2, true, 1).length, 1);
-    route(g.gameId, name, 1, 1, 2, [dart(1, 1, 2)], true);
+    route(g.gameId, name, 1, 1, 2, [dart(1, 1, 2)]);
 
     const s = db.getCheckoutTrainerStatBubbles(name, 'practice');
     assert.equal(s.bestCoveragePct, 100);
@@ -110,8 +117,8 @@ describe('Route Recall stats', () => {
     // Two full clears at a 1-dart ceiling, both exactly one route: 2 (D1) and
     // 40 (D20). Neither is "tougher" by route count, so the higher target wins
     // the tie — and the record must not silently prefer whichever came first.
-    route(g.gameId, name, 1, 1, 2, [dart(1, 1, 2)], true);
-    route(g.gameId, name, 2, 1, 40, [dart(1, 20, 2)], true);
+    route(g.gameId, name, 1, 1, 2, [dart(1, 1, 2)]);
+    route(g.gameId, name, 2, 1, 40, [dart(1, 20, 2)]);
 
     const s = db.getCheckoutTrainerStatBubbles(name, 'practice');
     assert.equal(s.toughestFullClear.target, 40, 'the tie breaks to the higher target');
@@ -123,8 +130,8 @@ describe('Route Recall stats', () => {
     const name = 'RR_Illegal';
     db.addPlayer(name);
     const g = routeRecallGame(name, 2);
-    route(g.gameId, name, 1, 1, 40, [dart(1, 20, 2)], true);
-    route(g.gameId, name, 1, 2, 40, [dart(1, 20, 3)], false);   // T20 overshoots 40
+    route(g.gameId, name, 1, 1, 40, [dart(1, 20, 2)]);
+    route(g.gameId, name, 1, 2, 40, [dart(1, 20, 3)]);   // T20 overshoots 40
 
     const s = db.getCheckoutTrainerStatBubbles(name, 'practice');
     assert.equal(s.routesNamed, 1, 'only the legal, new route counts');
@@ -148,10 +155,8 @@ describe('Route Recall does not disturb Freeform/Blitz', () => {
 
     // Freeform: two rounds, one optimal, one illegal -> 50% legal, 50% optimal.
     const f = freeformGame(name);
-    db.addTurn(f.gameId, { player: name, set: 1, leg: 1, scored: 0, bust: false, checkout: true,
-      checkoutPoints: null, legWon: true, targetScore: 40, darts: [dart(1, 20, 2)] });
-    db.addTurn(f.gameId, { player: name, set: 1, leg: 2, scored: 0, bust: true, checkout: false,
-      checkoutPoints: null, legWon: false, targetScore: 60, darts: [dart(1, 20, 3)] });
+    freeform(f.gameId, name, 1, 40, [dart(1, 20, 2)]);     // D20 on 40 — optimal
+    freeform(f.gameId, name, 2, 60, [dart(1, 20, 3)]);     // T20 on 60 — overshoots
 
     const before = db.getCheckoutTrainerStatBubbles(name, 'practice');
     const pbBefore = db.getCheckoutTrainerPersonalBests(name, 'practice');
@@ -162,10 +167,10 @@ describe('Route Recall does not disturb Freeform/Blitz', () => {
     // Now a Route Recall hunt with several finds — many more turns than the
     // Freeform session has, so a leak would be unmistakable.
     const g = routeRecallGame(name, 2);
-    route(g.gameId, name, 1, 1, 40, [dart(1, 20, 2)], true);
-    route(g.gameId, name, 1, 2, 40, [dart(1, 20, 1), dart(2, 10, 2)], true);
-    route(g.gameId, name, 1, 3, 40, [dart(1, 10, 1), dart(2, 15, 2)], true);
-    route(g.gameId, name, 1, 4, 40, [dart(1, 20, 3)], false);
+    route(g.gameId, name, 1, 1, 40, [dart(1, 20, 2)]);
+    route(g.gameId, name, 1, 2, 40, [dart(1, 20, 1), dart(2, 10, 2)]);
+    route(g.gameId, name, 1, 3, 40, [dart(1, 10, 1), dart(2, 15, 2)]);
+    route(g.gameId, name, 1, 4, 40, [dart(1, 20, 3)]);
 
     const after = db.getCheckoutTrainerStatBubbles(name, 'practice');
     assert.equal(after.totalAttempts, before.totalAttempts, 'Freeform attempts must not move');
@@ -179,25 +184,52 @@ describe('Route Recall does not disturb Freeform/Blitz', () => {
     assert.equal(pbAfter.toughestCheckout, pbBefore.toughestCheckout,
       'a Route Recall find is not a "toughest checkout solved"');
     assert.equal(pbAfter.bestStreak, pbBefore.bestStreak,
-      'Route Recall writes leg_won=0 always and must not appear in the optimal streak');
+      'Route Recall is never `optimal` and must not appear in the optimal streak');
     assert.equal(pbAfter.routeRecallRoutesNamed, 3);
   });
 
   test('rows written before this sub-mode existed still count as Freeform', () => {
-    // The exclusion uses `IS NOT 'route_recall'` rather than `!=` precisely
+    // The sub-mode split uses `IS NOT 'route_recall'` rather than `!=` precisely
     // because config.mode is absent on older rows, and `!= NULL` is NULL — which
-    // would have silently erased every pre-existing Checkout Trainer stat.
+    // would silently erase every pre-existing Checkout Trainer stat.
     const name = 'RR_Legacy';
     db.addPlayer(name);
     const g = db.createGame({ category: 'Checkout Trainer (Freeform)', legsPerSet: 1, setsPerGame: 1,
       practice: 1, gameType: 'checkout_trainer', players: [{ name }] });
     db._db.prepare('UPDATE games SET config = NULL WHERE id = ?').run(g.gameId);
-    db.addTurn(g.gameId, { player: name, set: 1, leg: 1, scored: 0, bust: false, checkout: true,
-      checkoutPoints: null, legWon: true, targetScore: 40, darts: [dart(1, 20, 2)] });
+    freeform(g.gameId, name, 1, 40, [dart(1, 20, 2)]);
 
     const s = db.getCheckoutTrainerStatBubbles(name, 'practice');
     assert.equal(s.totalAttempts, 1, 'a config-less row is Freeform history, not Route Recall');
     assert.equal(s.legalCount, 1);
     assert.equal(s.routesNamed, 0);
+  });
+
+  test('a duplicate route is recorded nowhere at all, and says so', () => {
+    // The rule that makes "routes named" simply the count of legal rows rather than
+    // something de-duplicated at read time. It is also now enforced by the SERVER
+    // against what the database holds, not by the client against its own in-memory
+    // set — so a reloaded page or a second device cannot re-bank a route.
+    const name = 'RR_Duplicate';
+    db.addPlayer(name);
+    const g = routeRecallGame(name, 2);
+    assert.equal(route(g.gameId, name, 1, 1, 40, [dart(1, 20, 2)]).status, 'new');
+    const again = route(g.gameId, name, 1, 2, 40, [dart(1, 20, 2)]);
+    assert.equal(again.status, 'duplicate');
+    assert.equal(again.recorded, false, 'nothing is written for a duplicate');
+    assert.equal(db.getCheckoutTrainerStatBubbles(name, 'practice').routesNamed, 1);
+  });
+
+  test('the same route in a DIFFERENT hunt is new again', () => {
+    // The dedupe is per hunt, not per game: two hunts on the same target are two
+    // separate attempts at naming its routes.
+    const name = 'RR_PerHunt';
+    db.addPlayer(name);
+    const g = routeRecallGame(name, 2);
+    assert.equal(route(g.gameId, name, 1, 1, 40, [dart(1, 20, 2)]).status, 'new');
+    assert.equal(route(g.gameId, name, 2, 1, 40, [dart(1, 20, 2)]).status, 'new');
+    const s = db.getCheckoutTrainerStatBubbles(name, 'practice');
+    assert.equal(s.huntsPlayed, 2);
+    assert.equal(s.routesNamed, 2);
   });
 });

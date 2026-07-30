@@ -171,6 +171,42 @@ describe('getSessionRecap', () => {
     assert.equal(row.legs, 1, 'both turns land in the same leg (set 1, leg 1)');
   });
 
+  test('Checkout Trainer appears in soloActivity as ROUNDS, never as darts', () => {
+    /* This mode writes no turns and no darts (REFERENCE.md §19), so the grouped
+       turns query above cannot see it at all and it is added by hand. Two things
+       are being held down here.
+
+       That it still appears: a night spent entirely on checkout practice must not
+       produce an empty recap just because of where the mode stores its history.
+
+       And that it is counted in rounds: it used to appear here with a DART count,
+       directly beneath a "Darts Thrown" headline that (correctly) excluded it — so
+       one screen could read "Darts Thrown 6" above "Checkout Trainer: 14 darts".
+       Both numbers were about the same session; only one of them was about darts. */
+    const p = 'Recap_CheckoutTrainer';
+    db.addPlayer(p);
+    const ct = db.createGame({ category: 'Checkout Trainer (Freeform)', legsPerSet: 1,
+      setsPerGame: 1, practice: 1, gameType: 'checkout_trainer', config: { mode: 'freeform' },
+      players: [{ name: p }] });
+    db.addCheckoutTrainerRound(ct.gameId, p, { player: p, roundNo: 1, targetScore: 40,
+      darts: [{ sector: 20, multiplier: 2 }] });
+    db.addCheckoutTrainerRound(ct.gameId, p, { player: p, roundNo: 2, targetScore: 32,
+      darts: [{ sector: 16, multiplier: 2 }] });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const r = db.getSessionRecap(today);
+    const row = r.soloActivity.find(x => x.name === p && x.gameType === 'checkout_trainer');
+    assert.ok(row, 'a trainer session still shows up under "Also tonight"');
+    assert.equal(row.rounds, 2, 'two rounds answered');
+    assert.equal(row.darts, 0, 'and no darts, because none were thrown');
+    assert.equal(row.legs, null, 'a round is not a leg');
+
+    // The headline figure the "14 darts" line used to sit above.
+    const per = r.perPlayer.find(x => x.name === p);
+    assert.ok(!per || per.dartsThrown === 0,
+      'and the headline dart count stays at zero, so the two lines cannot disagree');
+  });
+
   test('date-boundary scoping: a turn just before midnight and one just after land on different recaps', () => {
     const p = 'Recap_Boundary';
     db.addPlayer(p);

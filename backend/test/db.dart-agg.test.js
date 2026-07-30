@@ -99,27 +99,32 @@ describe('the shared dart aggregate is never stale', () => {
   });
 
   test('a turn with no darts is absent from the aggregate, as the old inline join was', () => {
-    // Checkout Trainer declarations are the real case: the one turn shape allowed to
-    // carry zero dart rows. The inline subquery was an INNER join to darts, so those
-    // turns never appeared; the replacement must match, not suddenly count them.
+    // The inline subquery this aggregate replaced was an INNER join to darts, so a
+    // dartless turn never appeared in it; the replacement must match, not suddenly
+    // count them as turns with 0 darts.
+    //
+    // No WRITE PATH can produce one any more. Checkout Trainer trick-question
+    // declarations used to be the real case — the one turn shape allowed to carry
+    // zero dart rows — and that mode now records to checkout_trainer_rounds and is
+    // refused by addTurn() outright. So the row is planted directly, which is the
+    // honest way to test a shape the app no longer creates but the query must still
+    // handle: an old database, a restored backup, or a future mode that brings the
+    // shape back.
     const name = 'AGG_NoDarts';
     db.addPlayer(name);
-    const ct = db.createGame({ category: 'Checkout Trainer', legsPerSet: 1, setsPerGame: 1,
-      practice: 1, gameType: 'checkout_trainer',
-      config: { mode: 'freeform', trickQuestions: true }, players: [{ name }] });
-    db.addTurn(ct.gameId, { player: name, set: 1, leg: 1, scored: 0, bust: false, checkout: true,
-      checkoutPoints: null, legWon: true, targetScore: 169, declaredUnsolvable: 1, darts: [] });
+    const g = db.createGame({ category: '501', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'x01', config: { startingScore: 501 }, players: [{ name }] });
+    const pid = db._db.prepare('SELECT id FROM players WHERE name = ?').get(name).id;
+    db._db.prepare(`INSERT INTO turns (game_id, player_id, set_no, leg_no, scored, bust, checkout)
+                    VALUES (?, ?, 1, 1, 0, 0, 0)`).run(g.gameId, pid);
 
     db.computeStats();   // builds the aggregate
     const row = db._db.prepare(`
       SELECT (SELECT COUNT(*) FROM _dart_agg a WHERE a.turn_id = t.id) AS inAgg
-        FROM turns t WHERE t.player_id = (SELECT id FROM players WHERE name = ?)
-    `).get(name);
+        FROM turns t WHERE t.player_id = ?
+    `).get(pid);
     assert.equal(row.inAgg, 0,
       'a zero-dart turn has no aggregate row — matching the INNER join the inline subquery was');
-    // (The roster's own turn/dart counters exclude Checkout Trainer entirely
-    // via NOT_CHECKOUT_TRAINER — a typed-in route was never a physical throw —
-    // so they are not what this case is about.)
     assert.equal(db.computeStats()[name].dartsThrown, 0);
   });
 
