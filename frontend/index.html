@@ -3919,7 +3919,13 @@ function askImportPlayer(){
         const oppSummary = r.opponents.length
           ? ' Opponents: ' + r.opponents.map(o => `${o.name}${o.created ? (o.renamed ? ' (new, renamed to avoid a name clash)' : ' (new)') : ' (matched an existing player)'}`).join(', ') + '.'
           : '';
-        uiAlert(`Imported "${r.player.name}"${r.player.created ? (r.player.renamed ? ' (new player, renamed to avoid a name clash)' : ' (new player)') : ' (matched an existing player)'}: ${r.gamesImported} game(s) added, ${r.gamesSkipped} already present, ${r.turnsImported} turn(s), ${r.dartsImported} dart(s).${oppSummary}`);
+        // Checkout Trainer records rounds, not turns, so a player who plays it would
+        // otherwise be reported as "0 turn(s), 0 dart(s)" with their whole history
+        // silently unmentioned. `legacyRoundsConverted` covers a pre-rewrite export,
+        // whose rounds arrived as turns and were folded across on the way in.
+        const rounds = (r.checkoutRoundsImported || 0) + (r.legacyRoundsConverted || 0);
+        const roundSummary = rounds ? `, ${rounds} Checkout Trainer round(s)` : '';
+        uiAlert(`Imported "${r.player.name}"${r.player.created ? (r.player.renamed ? ' (new player, renamed to avoid a name clash)' : ' (new player)') : ' (matched an existing player)'}: ${r.gamesImported} game(s) added, ${r.gamesSkipped} already present, ${r.turnsImported} turn(s), ${r.dartsImported} dart(s)${roundSummary}.${oppSummary}`);
       }catch(err){
         uiAlertErr('Could not import', err);
       }
@@ -11543,6 +11549,15 @@ const GAME_TYPES = {
     // has to delete from there instead of calling DB.deleteLastTurn(). Declared
     // here rather than branched on inside _finishUndo() — one member per mode with
     // its own table, no growing if-chain.
+    //
+    // Note for whoever reads this next: the "Undo Turn" button is `hidden` for this
+    // mode (see renderGameShell()'s template), and nothing else calls undoLastTurn()
+    // for it — so undoLastTurnCheckoutTrainer() and this member are correct but
+    // currently unreachable from the UI. That predates the move to its own table
+    // (the same path called DB.deleteLastTurn() before, equally unreachably). Kept
+    // wired rather than deleted because the mode's roadmap does specify one level of
+    // undo; whether the hidden button is the bug is a separate question, and either
+    // answer wants this to already be right. Verified against a real server.
     deleteLastRecord: () => DB.deleteLastCheckoutRound(),
     label: 'Checkout Trainer',
     // This mode has its own bespoke, paper-themed results screen (see paperTheme
@@ -12871,14 +12886,14 @@ function bankRouteRecallHunt(p){
 // "Trick-question difficulty variant") — the player calls the current target a bogey
 // number instead of tapping out a route. Mirrors submitCheckoutAttempt() step for
 // step (same Blitz deadline checks, same counters/undo snapshot/next-target serving,
-// same three-way outcome recorded); only the grading source differs
-// (gradeCheckoutDeclaration(), scoring.js) and the recorded turn carries
-// declaredUnsolvable:true with NO darts — any darts already staged this round are
+// same outcome recorded); only the grading source differs
+// (gradeCheckoutDeclaration(), scoring.js) and the recorded round carries
+// declaredUnsolvable:true with NO route — any darts already staged this round are
 // discarded, since "there's no checkout" supersedes a half-entered route. A correct
 // declaration counts as this round's optimal answer everywhere (ladders, streak,
 // Blitz's 2 points); it deliberately does NOT count as a solved checkout for the
 // route-specific one-offs (170 Club, One-Darter) or the toughest-checkout Personal
-// Best (excluded server-side via turns.declared_unsolvable).
+// Best (excluded server-side via checkout_trainer_rounds.declared_unsolvable).
 function declareUnsolvable(){
   if(!game || game.gameType !== 'checkout_trainer' || !game.config.trickQuestions || game.blitzEnded) return;
   if(game.config.mode === 'blitz' && blitzDeadlinePassed(game.blitzDeadline, Date.now())){

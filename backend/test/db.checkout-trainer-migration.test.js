@@ -159,6 +159,73 @@ describe('Checkout Trainer migration off turns/darts', () => {
       'a second and third boot change nothing');
   });
 
+  test('importing a PRE-REWRITE export converts its turns instead of re-creating them', () => {
+    /* The import path writes straight into `turns`/`darts` — it replays history, so
+       it deliberately bypasses addTurn() and therefore bypasses addTurn()'s refusal
+       of a Checkout Trainer turn. An export taken before this move carries the
+       mode's history as turns, so without converting at the end of the import, an
+       imported trainer "dart" lands on the dartboard heatmap and in the global
+       darts-thrown total — docs/bug-roadmap.md BUG-60, back verbatim, with none of
+       the exclusions that used to make it safe still in the codebase.
+
+       This is the one hole a boot-time-only migration cannot close: it self-heals
+       at the next process start, which on a long-running server is "eventually". */
+    const name = 'MIG_ImportLegacy';
+    db.addPlayer(name);
+    const gameId = plantOldStyleSession(name, { mode: 'freeform' }, [
+      [40, 'optimal', [[20, 2]]],
+      [100, 'legal', [[20, 1], [20, 1], [20, 2]]],
+    ]);
+    const exported = db.getPlayerExport(name);
+    assert.equal(exported.turns.length, 2, 'the fixture really is a pre-rewrite export');
+    assert.equal(exported.darts.length, 4);
+    assert.equal(exported.checkoutTrainerRounds.length, 0, 'and carries no rounds');
+
+    // Clear the source side first, so what the assertions below see came from the
+    // import and nothing else.
+    runMigration();
+    assert.equal(db._db.prepare('SELECT COUNT(*) n FROM turns WHERE game_id = ?').get(gameId).n, 0);
+
+    exported.player.uuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    exported.player.name = 'MIG_ImportLegacy_Target';
+    const result = db.importPlayerExport(exported);
+    assert.equal(result.legacyRoundsConverted, 2, 'the import reports what it folded across');
+
+    assert.equal(db._db.prepare(`SELECT COUNT(*) n FROM turns t JOIN games g ON g.id = t.game_id
+                                 WHERE g.game_type = 'checkout_trainer'`).get().n, 0,
+      'no Checkout Trainer turns survive the import');
+    assert.equal(db.getDartHeatmap('MIG_ImportLegacy_Target').length, 0,
+      'and nothing it imported reaches the dartboard heatmap');
+
+    // The history itself is intact on the far side — converting must not mean losing.
+    const bubbles = db.getCheckoutTrainerStatBubbles('MIG_ImportLegacy_Target', 'practice');
+    assert.equal(bubbles.totalAttempts, 2);
+    assert.equal(bubbles.optimalCount, 1, 'the 1-dart D20 on 40 was optimal; the 3-dart 100 was not');
+  });
+
+  test('a game whose rounds already exist keeps its turns rather than losing them', () => {
+    /* The conversion SELECT skips a game that already has rounds, so a re-run cannot
+       double-insert. The delete has to skip it too: deleting "every turn belonging to
+       a checkout_trainer game" would throw away that game's turns having converted
+       none of them. Nothing reachable produces a game holding both shapes today —
+       this pins the delete to the rows actually converted so nothing ever can. */
+    const name = 'MIG_MixedShape';
+    db.addPlayer(name);
+    const converted = plantOldStyleSession(name, { mode: 'freeform' }, [[40, 'optimal', [[20, 2]]]]);
+    runMigration();
+    // Now put a stray turn back on that already-converted game, the shape the
+    // NOT EXISTS guard is there to skip.
+    const pid = db._db.prepare('SELECT id FROM players WHERE name = ?').get(name).id;
+    db._db.prepare(`INSERT INTO turns (game_id, player_id, set_no, leg_no, scored, bust, checkout, target_score)
+                    VALUES (?, ?, 1, 9, 0, 0, 1, 60)`).run(converted, pid);
+
+    runMigration();
+    assert.equal(db._db.prepare('SELECT COUNT(*) n FROM turns WHERE game_id = ?').get(converted).n, 1,
+      'the skipped turn is still there — not silently deleted after being skipped for conversion');
+    assert.equal(db._db.prepare('SELECT COUNT(*) n FROM checkout_trainer_rounds WHERE game_id = ?').get(converted).n, 1,
+      'and the already-converted round was not duplicated');
+  });
+
   test('it leaves every other game type completely alone', () => {
     const name = 'MIG_Bystander';
     db.addPlayer(name);

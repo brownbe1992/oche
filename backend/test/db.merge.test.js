@@ -327,6 +327,54 @@ describe('mergePlayers — marathon sessions and killer configs', () => {
   });
 });
 
+describe('mergePlayers — the minigame tables that keep their own history', () => {
+  /* Checkout Trainer and Maths Trainer record to tables of their own rather than to
+     `turns` (REFERENCE.md §19/§19b). Both carry `player_id ... ON DELETE CASCADE`,
+     which makes a missed reassignment here the WORST kind: the final
+     DELETE FROM players silently destroys the source's entire history in that mode,
+     while its `games` rows survive (those follow game_players, which IS reassigned).
+     The merged player is left listing sessions with nothing behind them.
+
+     Checkout Trainer is the regression case specifically: its history used to live
+     in `turns`, which this function has always reassigned, so moving it to its own
+     table quietly took it out of the merge until it was added back. */
+  test('Checkout Trainer rounds follow the merge instead of being cascade-deleted', () => {
+    db.addPlayer('merge_ct_src'); db.addPlayer('merge_ct_tgt');
+    const g = db.createGame({ category: 'Checkout Trainer (Freeform)', legsPerSet: 1, setsPerGame: 1,
+      practice: 1, gameType: 'checkout_trainer', config: { mode: 'freeform' },
+      players: [{ name: 'merge_ct_src' }] });
+    db.addCheckoutTrainerRound(g.gameId, 'merge_ct_src',
+      { player: 'merge_ct_src', roundNo: 1, targetScore: 40, darts: [{ sector: 20, multiplier: 2 }] });
+    db.addCheckoutTrainerRound(g.gameId, 'merge_ct_src',
+      { player: 'merge_ct_src', roundNo: 2, targetScore: 32, darts: [{ sector: 16, multiplier: 2 }] });
+
+    const preview = db.getMergePreview('merge_ct_src', 'merge_ct_tgt');
+    assert.equal(preview.moves.checkoutTrainerRounds, 2,
+      'the preview warns about the trainer history being moved — a silent loss is the failure mode');
+
+    db.mergePlayers('merge_ct_src', 'merge_ct_tgt');
+    const bubbles = db.getCheckoutTrainerStatBubbles('merge_ct_tgt', 'practice');
+    assert.equal(bubbles.totalAttempts, 2, 'both rounds survived and now belong to the target');
+    assert.equal(bubbles.optimalCount, 2);
+    assert.equal(db._db.prepare('SELECT COUNT(*) n FROM checkout_trainer_rounds').get().n, 2,
+      'nothing was cascade-deleted along the way');
+  });
+
+  test('Maths Trainer rounds follow the merge too', () => {
+    db.addPlayer('merge_mt_src'); db.addPlayer('merge_mt_tgt');
+    const g = db.createGame({ category: 'Maths Trainer', legsPerSet: 1, setsPerGame: 1, practice: 1,
+      gameType: 'maths_trainer', config: { mode: 'freeform', questionType: 'segment' },
+      players: [{ name: 'merge_mt_src' }] });
+    db.addMathsTrainerRound(g.gameId, 'merge_mt_src',
+      { questionType: 'segment', prompt: 'T19', options: [57, 52, 55, 59], chosenAnswer: 57, answeredMs: 800, roundNo: 1 });
+
+    assert.equal(db.getMergePreview('merge_mt_src', 'merge_mt_tgt').moves.mathsTrainerRounds, 1);
+    db.mergePlayers('merge_mt_src', 'merge_mt_tgt');
+    assert.equal(db._db.prepare('SELECT COUNT(*) n FROM maths_trainer_rounds WHERE player_id = ?')
+      .get(pid('merge_mt_tgt')).n, 1);
+  });
+});
+
 describe('mergePlayers — turns.affected_player_id follows the merge', () => {
   test("killer turns that affected the source point at the target after the merge", () => {
     db.addPlayer('merge_ap_src'); db.addPlayer('merge_ap_tgt'); db.addPlayer('merge_ap_opp');

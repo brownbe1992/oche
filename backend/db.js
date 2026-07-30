@@ -4869,8 +4869,9 @@ function getDeadManWalkingLongestStreak(playerName) {
 
 
 /* ---------- The Pressure Chamber (docs/archive/pressure-chamber-roadmap.md) ----------
-   Reuses Checkout Trainer's exact 3-way bust=1(miss)/checkout=1,leg_won=0
-   (partial)/checkout=1,leg_won=1(full) outcome, so full/partial-hit rate read
+   Encodes its outcome as bust=1(miss)/checkout=1,leg_won=0(partial)/
+   checkout=1,leg_won=1(full) — the shape Checkout Trainer used before that mode
+   moved to a table of its own — so full/partial-hit rate read
    directly off those columns with no replay needed. The one genuine
    complication: a run's total CP is NOT SUM(scored) alone -- it's
    SUM(scored) MINUS a derived total miss penalty (every bust=1 turn's own
@@ -7790,8 +7791,10 @@ function getPlayerExport(name, chunkSize = ID_CHUNK) {
 // Opponents appear only as a names column on the games CSV — never their turns,
 // so unlike the JSON export this can't reconstruct H2H and isn't meant to.
 // Column semantics follow the underlying schema: `scored`/`checkout`/`bust` mean
-// whatever they mean for that row's game_type (e.g. Cricket's scored is points,
-// Checkout Trainer's target_score is only ever set for its own turns).
+// whatever they mean for that row's game_type (e.g. Cricket's scored is points;
+// target_score is only set by the modes that serve a target — Checkout Ladder,
+// guided Around the Clock, Dead Man Walking). Checkout Trainer contributes only
+// its `games` rows to either flavour: it records no turns at all.
 //
 // Cell encoding is RFC-4180 (quote+double any cell containing `"`, `,`, or a
 // newline; CRLF line endings for spreadsheet-app friendliness). Player names are
@@ -8204,7 +8207,26 @@ function _importPlayerExport(payload) {
     badgesImported++;
   }
 
-  return { ok: true, player: playerReport, opponents: opponentReports, gamesImported, gamesSkipped, turnsImported, dartsImported, checkoutRoundsImported, badgesImported };
+  /* An export written BEFORE Checkout Trainer moved to its own table carries that
+     mode's history as turns/darts rows, and everything above wrote them in
+     faithfully — this path replays history, so it inserts directly rather than
+     going through addTurn() and its new refusal. Left there, those rows are exactly
+     what this codebase no longer has a single exclusion for: an imported trainer
+     "dart" would land on the dartboard heatmap and in the global darts-thrown total
+     (docs/bug-roadmap.md BUG-60, verbatim). Convert them here, with the same body
+     the boot migration uses, inside the caller's transaction. A modern export has
+     nothing to convert and this costs one COUNT(*).
+
+     Reported separately rather than folded into turnsImported/checkoutRoundsImported,
+     because the conversion is DATABASE-WIDE, not scoped to this import: if legacy
+     rows were already sitting here they go too. That is correct — they should not
+     exist either, and the next process start would have converted them regardless —
+     but it means the number does not describe only what this file brought, so it
+     does not belong inside a count that does. */
+  const legacyRoundsConverted = _countPendingCheckoutTrainerTurns() ? convertCheckoutTrainerTurnsToRounds() : 0;
+
+  return { ok: true, player: playerReport, opponents: opponentReports, gamesImported, gamesSkipped,
+    turnsImported, dartsImported, checkoutRoundsImported, legacyRoundsConverted, badgesImported };
 }
 
 /* ---------- player merge (docs/archive/player-merge-roadmap.md) ----------
@@ -8333,6 +8355,8 @@ function getMergePreview(sourceName, targetName) {
     loadouts:              count('SELECT COUNT(*) n FROM loadouts WHERE player_id = ?', source.id),
     ghostRaces:            count('SELECT COUNT(*) n FROM ghost_races WHERE player_id = ?', source.id),
     marathonSessions:      count('SELECT COUNT(*) n FROM marathon_sessions WHERE player_id = ?', source.id),
+    checkoutTrainerRounds: count('SELECT COUNT(*) n FROM checkout_trainer_rounds WHERE player_id = ?', source.id),
+    mathsTrainerRounds:    count('SELECT COUNT(*) n FROM maths_trainer_rounds WHERE player_id = ?', source.id),
     uuidAliases:           count('SELECT COUNT(*) n FROM player_uuid_aliases WHERE player_id = ?', source.id),
   };
   const resolutions = {
@@ -8442,6 +8466,23 @@ function mergePlayers(sourceName, targetName) {
     // DELETE FROM players below would silently cascade away the source's entire
     // Marathon history (sessions and, via session_id CASCADE, their legs).
     run('UPDATE marathon_sessions SET player_id = ? WHERE player_id = ?', target.id, source.id);
+
+    // The two minigame tables, for exactly the same reason and with a nastier
+    // failure mode: both carry `player_id ... ON DELETE CASCADE`, so without these
+    // the DELETE FROM players below silently erases the source's entire Checkout
+    // Trainer and Maths Trainer history — while their `games` rows SURVIVE (those
+    // follow game_players, reassigned above). The result is a merged player whose
+    // profile lists sessions with nothing behind them and whose stat bubbles read
+    // zero. Checkout Trainer is a regression risk specifically: its history used to
+    // live in `turns`, which this function has always reassigned, so moving it to a
+    // table of its own quietly took it out of the merge unless it was added here.
+    //
+    // Standing rule, and the third time it has had to be learned (marathon_sessions
+    // above was the second): ANY new table with a players FK must be added to this
+    // function in the same change that creates it. `grep "REFERENCES players"` is
+    // the list this block has to match.
+    run('UPDATE checkout_trainer_rounds SET player_id = ? WHERE player_id = ?', target.id, source.id);
+    run('UPDATE maths_trainer_rounds SET player_id = ? WHERE player_id = ?', target.id, source.id);
 
     // Killer configs key number assignments by player id — rewrite the source's
     // key to the target's id in every killer game being absorbed, or the merged
@@ -9424,14 +9465,44 @@ migrateKillerConfigsToIdKeys();
    here, for a column that is 0 on every remaining row. Its migration comment now
    says it is historical. (`turns.target_score` stays in active use — Checkout
    Ladder, guided Around the Clock and Dead Man Walking all took it up.) */
+// The boot entry point: wraps the conversion in its own transaction. Split from the
+// body below because _importPlayerExport() calls that body from INSIDE its own
+// transaction, and SQLite has no nested BEGIN.
 function migrateCheckoutTrainerRoundsOffTurns() {
-  // Fast exit for the overwhelmingly common case — including every scratch DB this
-  // module is required into by a test, and every boot after the first.
+  if (!_countPendingCheckoutTrainerTurns()) return;
+  db.exec('BEGIN');
+  let moved;
+  try {
+    moved = convertCheckoutTrainerTurnsToRounds();
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  console.log(`[oche] Migrated ${moved} Checkout Trainer round(s) off turns/darts into checkout_trainer_rounds.`);
+}
+// Fast exit for the overwhelmingly common case — including every scratch DB this
+// module is required into by a test, and every boot after the first.
+function _countPendingCheckoutTrainerTurns() {
   const pending = db.prepare(`
     SELECT COUNT(*) AS n FROM turns t JOIN games g ON g.id = t.game_id
     WHERE g.game_type = 'checkout_trainer'`).get().n;
-  if (!pending) return;
+  return pending;
+}
 
+/* The conversion itself. Caller owns the transaction.
+
+   Two callers, and the second is the one worth explaining. The boot migration is
+   obvious. The other is _importPlayerExport(): a per-player export written BEFORE
+   this move carries the mode's history as `turns`/`darts` rows, and the import path
+   writes straight into those tables (it has to — it replays history, and addTurn()'s
+   live-play rules do not all apply to it). So an old export would re-create exactly
+   the rows this whole change exists to eliminate, with none of the exclusions that
+   used to make them safe left in the codebase — docs/bug-roadmap.md BUG-60, back
+   verbatim, until the next process restart happened to run the boot migration.
+   Converting at the end of the import closes that, and reuses this one body rather
+   than growing a second converter that could drift from it. */
+function convertCheckoutTrainerTurnsToRounds() {
   const games = db.prepare(`SELECT id, config FROM games WHERE game_type = 'checkout_trainer'`).all();
   const cfgById = new Map(games.map(g => [g.id, _parseConfig(g.config)]));
   const rows = db.prepare(`
@@ -9453,35 +9524,35 @@ function migrateCheckoutTrainerRoundsOffTurns() {
        declared_unsolvable, legal, optimal, used_darts, optimal_darts, answered_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
-  db.exec('BEGIN');
-  try {
-    for (const r of rows) {
-      const cfg = cfgById.get(r.gameId) || {};
-      const isRouteRecall = _checkoutTrainerSubMode(cfg) === 'route_recall';
-      const doubleOut = r.outMode !== 'single';
-      const labels = dartsFor.all(r.id).map(d => dartLabel(d.sector, d.multiplier));
-      const hint = (r.target != null) ? checkoutHint(r.target, doubleOut, 3) : null;
-      ins.run(r.gameId, r.playerId,
-        isRouteRecall ? (r.setNo || 1) : 1,
-        r.legNo || 1,
-        r.target ?? 0,
-        labels.join(' '),
-        labels.length ? routeKey(labels) : null,
-        r.declared ? 1 : 0,
-        r.checkout ? 1 : 0,
-        (!isRouteRecall && r.legWon) ? 1 : 0,
-        labels.length,
-        hint ? hint.split(' ').length : null,
-        r.createdAt);
-    }
-    // The whole point of the move. Dart rows go with them via ON DELETE CASCADE.
-    db.prepare(`DELETE FROM turns WHERE game_id IN (SELECT id FROM games WHERE game_type = 'checkout_trainer')`).run();
-    db.exec('COMMIT');
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
+  for (const r of rows) {
+    const cfg = cfgById.get(r.gameId) || {};
+    const isRouteRecall = _checkoutTrainerSubMode(cfg) === 'route_recall';
+    const doubleOut = r.outMode !== 'single';
+    const labels = dartsFor.all(r.id).map(d => dartLabel(d.sector, d.multiplier));
+    const hint = (r.target != null) ? checkoutHint(r.target, doubleOut, 3) : null;
+    ins.run(r.gameId, r.playerId,
+      isRouteRecall ? (r.setNo || 1) : 1,
+      r.legNo || 1,
+      r.target ?? 0,
+      labels.join(' '),
+      labels.length ? routeKey(labels) : null,
+      r.declared ? 1 : 0,
+      r.checkout ? 1 : 0,
+      (!isRouteRecall && r.legWon) ? 1 : 0,
+      labels.length,
+      hint ? hint.split(' ').length : null,
+      r.createdAt);
   }
-  console.log(`[oche] Migrated ${rows.length} Checkout Trainer round(s) off turns/darts into checkout_trainer_rounds.`);
+  /* Remove exactly the turns just converted — by id, not "every turn belonging to a
+     checkout_trainer game". The broader form reads more naturally and is wrong in
+     one narrow case: the SELECT above deliberately SKIPS a game that already has
+     rounds (so a re-run cannot double-insert), and a blanket delete would then throw
+     away that game's turns having converted none of them. Nothing reachable produces
+     a game holding both shapes today; scoping the delete means nothing ever can.
+     Dart rows go with their turns via ON DELETE CASCADE. */
+  const del = db.prepare('DELETE FROM turns WHERE id = ?');
+  for (const r of rows) del.run(r.id);
+  return rows.length;
 }
 migrateCheckoutTrainerRoundsOffTurns();
 

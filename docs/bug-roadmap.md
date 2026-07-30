@@ -20,7 +20,7 @@
 > the `node:test` suite under `backend/test/` (all green as of this writing). This doc
 > tracks the correctness gaps that suite doesn't yet assert.
 >
-> **BUG-1 through BUG-60 are all fixed.** BUG-58 was opened by the 2026-07 tenth-pass
+> **BUG-1 through BUG-62 are all fixed.** BUG-58 was opened by the 2026-07 tenth-pass
 > audit (see `docs/security-audit-roadmap.md` Part 12, whose SEC-29/SEC-30 came from the
 > same pass) and fixed in the following change, with a committed regression test proven
 > to fail against the pre-fix source. **BUG-59** was opened by a live user bug report
@@ -30,7 +30,12 @@
 > it. **BUG-60** came from an audit the owner asked for directly — "does Checkout Trainer
 > also write nothing that counts as a real dart?" — answered by diffing every read
 > surface across a trainer session rather than by re-reading the queries. 42 of 43 held;
-> the dart heatmap and bounce-out count did not.
+> the dart heatmap and bounce-out count did not. **BUG-61** and **BUG-62** came out of
+> a code review of the rewrite that followed — a merge that silently destroyed both
+> minigames' history, and an import path that re-created the very rows the rewrite
+> removed. Both are the same lesson from opposite ends: a table with a players FK has
+> to be in `mergePlayers()`, and a write path that bypasses `addTurn()` bypasses its
+> guards too.
 >
 > **BUG-1 … BUG-8 fixed.** BUG-1/BUG-2/BUG-3 (second pass); BUG-4/BUG-5/BUG-6/BUG-7
 > (fixed 2026-07 alongside `security-audit-roadmap.md` SEC-15/SEC-16), each with a
@@ -3161,6 +3166,76 @@ winning "Fewest Darts to Finish", then this). Each fix was correct and neither
 addressed the cause, which was that a table was carrying rows that did not mean what
 the table meant. **When the same exclusion has to be repeated in more than a handful
 of places, the exclusion is the symptom.** See `REFERENCE.md` §19's Storage section.
+
+### BUG-61 — Merging two players silently destroyed the source's Checkout Trainer and Maths Trainer history  **(HIGH, data loss / no error, no warning, and the games it belonged to survive to make it look intact)**
+
+**Status: ✅ Fixed (2026-07).** Found by a code review of the change that moved
+Checkout Trainer onto its own table, not in play.
+
+**What goes wrong.** `mergePlayers()` reassigns `player_id` table by table, then
+deletes the source player row. Both minigame tables carry
+`player_id ... ON DELETE CASCADE`, and neither was in the reassignment list — so the
+final delete cascaded away every Checkout Trainer round and every Maths Trainer round
+the source player had ever recorded. Reproduced: 1 round before, 0 after, and the
+target's stat bubbles reading `totalAttempts: 0`.
+
+Two things make it worse than a plain deletion. The `games` rows **survive**, because
+they follow `game_players`, which *is* reassigned — so the merged player's profile
+still lists the sessions, with nothing behind them. And `getMergePreview()` didn't
+count either table, so the admin confirming the merge was shown no indication that
+anything would be lost.
+
+Checkout Trainer is the regression: its history used to live in `turns`, which this
+function has always reassigned, so moving it to a table of its own quietly took it out
+of the merge. Maths Trainer had the same hole from the day it shipped.
+
+**Fix.** Reassign both tables alongside `marathon_sessions` — whose own comment
+already describes this exact hazard, making this the third time it has had to be
+learned — and count both in the preview. **Standing rule, now stated in the code: any
+new table with a players FK must be added to `mergePlayers()` in the same change that
+creates it.** `grep "REFERENCES players"` is the list that block has to match.
+
+**Verify.** Two `node:test` cases in `backend/test/db.merge.test.js`, one per table,
+each asserting the preview counts the rows *and* that the history survives the merge —
+both proven to fail against the pre-fix source.
+
+### BUG-62 — Importing a pre-rewrite player export re-created Checkout Trainer turns that nothing excluded any more  **(MED, correctness / re-opens BUG-60 through a different door)**
+
+**Status: ✅ Fixed (2026-07).** Same review pass as BUG-61.
+
+**What goes wrong.** `_importPlayerExport()` writes into `turns`/`darts` **directly**.
+It has to: it replays history, and `addTurn()`'s live-play rules do not all apply to an
+imported row. That means it also bypasses `addTurn()`'s new refusal of a Checkout
+Trainer turn. A per-player export taken *before* that mode moved to its own table
+carries its history as turns — so importing one re-created exactly the rows the move
+exists to eliminate, with none of the exclusions that used to make them safe still in
+the codebase. Reproduced: after such an import the unscoped `getDartHeatmap()` plots
+the pad tap as a landed dart and `getSummary().darts` counts it. BUG-60, verbatim,
+through a door BUG-60's fix did not cover.
+
+It self-healed at the next process start, when the boot migration ran — which on a
+long-running server means "eventually", and until then every affected statistic is
+wrong.
+
+**Fix.** Convert at the end of the import, reusing the boot migration's own body
+rather than a second converter that could drift from it. That meant splitting the
+migration into a transaction wrapper (the boot entry point) and a body the import
+calls from inside its own transaction, since SQLite has no nested `BEGIN`. Reported as
+`legacyRoundsConverted`, deliberately separate from `turnsImported`/
+`checkoutRoundsImported`: the conversion is database-wide rather than scoped to the
+import, so the number does not describe only what the file brought.
+
+While scoping that, one latent sharp edge in the migration was closed too: it deleted
+"every turn belonging to a checkout_trainer game" while the conversion SELECT
+deliberately *skips* a game that already has rounds, so a game holding both shapes
+would have had its turns deleted without being converted. Not reachable today; the
+delete is now by row id, so it cannot become reachable.
+
+**Verify.** Two `node:test` cases in
+`backend/test/db.checkout-trainer-migration.test.js` — one importing a genuinely
+pre-rewrite export and asserting no trainer turns survive, the heatmap stays empty and
+the *history* still arrives intact; one planting a stray turn on an already-converted
+game and asserting it is not swept away. Both fail against the pre-fix source.
 
 ## Standing practice
 
