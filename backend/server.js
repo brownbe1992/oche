@@ -821,6 +821,12 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/stats/doubles-practice-accuracy' && m === 'GET') return send(res, 200, db.getDoublesPracticeAccuracyLeaderboard());
     if (p === '/api/stats/doubles-practice-best-round' && m === 'GET') return send(res, 200, db.getDoublesPracticeBestRoundStats());
     if (p === '/api/stats/checkout-blitz-leaderboard' && m === 'GET') return send(res, 200, db.getCheckoutBlitzLeaderboard());
+    if (p === '/api/stats/maths-sprint-leaderboard' && m === 'GET') return send(res, 200, db.getMathsSprintLeaderboard());
+    // The crib sheet: every segment in the pool with its value, state and median
+    // time. A read, so unauthenticated like every other stats GET.
+    if (p === '/api/stats/maths-segments' && m === 'GET') {
+      return send(res, 200, db.getMathsTrainerSegments(url.searchParams.get('name'), url.searchParams.get('difficulty')));
+    }
     if (p === '/api/stats/bobs27-leaderboard' && m === 'GET') return send(res, 200, db.getBobs27Leaderboard());
     if (p === '/api/stats/elo-leaderboard' && m === 'GET') return send(res, 200, db.getEloLeaderboard());
     if (p === '/api/stats/checkout-ladder-leaderboard' && m === 'GET') return send(res, 200, db.getCheckoutLadderLeaderboard());
@@ -1138,6 +1144,16 @@ const server = http.createServer(async (req, res) => {
       // the SEC-22 scored/darts consistency cross-check — there is no flag to omit). Any
       // future route that records a turn should call this, not the raw db.addTurn().
       return send(res, 200, db.recordTurn(Number(mt[1]), b));
+    }
+    // Maths Trainer (docs/minigames-roadmap.md Part A). A round is NOT a turn: this
+    // mode writes no turns and no darts at all, which is what gives it zero
+    // footprint on every other statistic by construction. addMathsTrainerRound()
+    // re-derives the correct answer from the submitted prompt rather than trusting
+    // a client-supplied verdict — same standard as recordTurn()'s SEC-22 check.
+    if ((mt = p.match(/^\/api\/games\/(\d+)\/maths-round$/)) && m === 'POST') {
+      if (!requireWrite(req, res)) return;
+      const b = await readJson(req);
+      return send(res, 200, db.addMathsTrainerRound(Number(mt[1]), b.player, b));
     }
     if ((mt = p.match(/^\/api\/games\/(\d+)\/complete$/)) && m === 'POST') {
       if (!requireWrite(req, res)) return;

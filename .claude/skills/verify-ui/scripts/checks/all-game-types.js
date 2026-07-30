@@ -70,13 +70,32 @@ module.exports = async function run() {
           // dartboard, never both and never neither.
           inputSurfaces: [vis(pad), vis(board)].filter(Boolean).length,
           scoreboardHasContent: document.getElementById('scoreboard').textContent.trim().length > 0,
+          // Read from the registry, not a hand-kept list here, so the next dartless
+          // mode arrives covered.
+          dartless: !!(GAME_TYPES[game.gameType] && GAME_TYPES[game.gameType].noDartInput),
+          ownSurfaceVisible: (() => { const q = document.getElementById('maths-quiz'); return !!q && q.offsetParent !== null; })(),
         };
       });
 
-      rep.ok(`${key}: reaches the game screen`, shell.onGameScreen && shell.ocheVisible);
-      rep.ok(`${key}: exactly one input surface is live`, shell.inputSurfaces === 1,
-        `pad+board visible = ${shell.inputSurfaces}`);
-      rep.ok(`${key}: scoreboard renders something`, shell.scoreboardHasContent);
+      /* A DARTLESS mode (GAME_TYPES.<type>.noDartInput — today the Maths Trainer)
+         breaks three of this sweep's assumptions on purpose: nothing is thrown, so
+         it hides .oche and both dart inputs, and it clears #scoreboard because its
+         whole surface is its own container. Rather than skip it — which would
+         quietly shrink this sweep's coverage for a whole game type — assert the
+         equivalent facts FOR that shape, so the count is unchanged and a dartless
+         mode that failed to render at all would still fail here. */
+      if (shell.dartless) {
+        rep.ok(`${key}: reaches the game screen with its own surface`,
+          shell.onGameScreen && shell.ownSurfaceVisible);
+        rep.ok(`${key}: hides both dart inputs — it takes neither`, !shell.ocheVisible,
+          `oche visible = ${shell.ocheVisible}`);
+        rep.ok(`${key}: leaves the scoreboard empty deliberately`, !shell.scoreboardHasContent);
+      } else {
+        rep.ok(`${key}: reaches the game screen`, shell.onGameScreen && shell.ocheVisible);
+        rep.ok(`${key}: exactly one input surface is live`, shell.inputSurfaces === 1,
+          `pad+board visible = ${shell.inputSurfaces}`);
+        rep.ok(`${key}: scoreboard renders something`, shell.scoreboardHasContent);
+      }
 
       // A single dart through whichever input the mode uses. Some modes commit
       // per dart and some stage a visit; either way this must not throw.

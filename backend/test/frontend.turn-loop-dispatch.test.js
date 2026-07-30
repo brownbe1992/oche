@@ -73,13 +73,42 @@ describe('the GAME_TYPES turn-loop contract', () => {
   // (Doubles Practice, Checkout Trainer) had simply never been added — Play Again
   // silently rebuilt them from whatever `setup` happened to hold. buildConfig has
   // been enforced since item 70; its opposite direction now is too.
+  /* Types with no turn loop AT ALL, and why that is a real exemption rather than
+     an unimplemented one: maths_trainer (docs/minigames-roadmap.md Part A) has no
+     darts. Nothing is thrown, so there is no visit to evaluate, nothing to undo a
+     dart from and no turn to enter — its round lifecycle is answerMaths() /
+     nextMathsQuestion(), and it writes to maths_trainer_rounds rather than turns.
+     Declaring stub throwDart/enterTurn members to satisfy a contract would be
+     inventing dead code to keep a test quiet.
+
+     The exemption is deliberately NARROW: everything that is not about darts
+     (render, resetLegState, buildConfig, restoreSetup) is still required of it
+     below, so a dartless mode cannot skip Play Again or leg-state hygiene. */
+  const DARTLESS = new Set(['maths_trainer']);
+  const DART_LOOP_MEMBERS = ['throwDart', 'undoLastTurn', 'enterTurn'];
   for (const name of ['render', 'throwDart', 'undoLastTurn', 'enterTurn', 'resetLegState',
                       'buildConfig', 'restoreSetup']) {
     test(`every type declares ${name}() — there is no implicit X01 default any more`, () => {
-      const missing = [...ENTRIES].filter(([, body]) => !hasMember(body, name)).map(([k]) => k);
+      const exempt = DART_LOOP_MEMBERS.includes(name) ? DARTLESS : new Set();
+      const missing = [...ENTRIES]
+        .filter(([k, body]) => !exempt.has(k) && !hasMember(body, name)).map(([k]) => k);
       assert.deepEqual(missing, [], `${name} missing on: ${missing.join(', ')}`);
     });
   }
+
+  test('a dartless type declares NO dart-loop member — no stubs to keep a test quiet', () => {
+    // The other direction of the exemption above: if one of these ever appears on
+    // maths_trainer it means the mode grew a dart input, and the exemption should
+    // go rather than being quietly half-true.
+    for (const key of DARTLESS) {
+      const body = ENTRIES.get(key);
+      assert.ok(body, `${key} missing from the parsed registry`);
+      for (const name of DART_LOOP_MEMBERS) {
+        assert.equal(hasMember(body, name), false,
+          `${key} declares ${name}() — it has no darts, so that member cannot mean anything`);
+      }
+    }
+  });
 
   test('afterDart is declared by exactly the types that share throwDartVisit', () => {
     // The split is the point: seven types replace dart input wholesale, the

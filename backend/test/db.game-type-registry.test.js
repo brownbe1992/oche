@@ -30,7 +30,7 @@ describe('GAME_TYPE_REGISTRY — derived lists', () => {
     assert.deepEqual([...db.KNOWN_GAME_TYPES].sort(), [
       'around_the_clock', 'around_the_world', 'baseball', 'bobs_27', 'checkout_ladder',
       'checkout_trainer', 'chuckin', 'cricket', 'dead_man_walking', 'doubles_practice',
-      'gauntlet', 'halve_it', 'killer', 'pressure_chamber', 'shanghai', 'x01',
+      'gauntlet', 'halve_it', 'killer', 'maths_trainer', 'pressure_chamber', 'shanghai', 'x01',
     ]);
     assert.ok(!db.KNOWN_GAME_TYPES.includes('marathon'), 'marathon is a dispatch-only routing key, not a real game type');
   });

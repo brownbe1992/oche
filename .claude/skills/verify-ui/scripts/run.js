@@ -37,10 +37,11 @@ const L = require('./lib');
 const CHECKS = {
   'results-takeover':      { path: './checks/results-takeover',      assertions: 29 },
   'new-game':              { path: './checks/new-game',              assertions: 47 },
+  'maths-trainer':         { path: './checks/maths-trainer',         assertions: 36 },
   'ghost-picker':          { path: './checks/ghost-picker',          assertions: 11 },
   'scoring-modes':         { path: './checks/scoring-modes',         assertions: 32 },
-  'all-game-types':        { path: './checks/all-game-types',        assertions: 82 },
-  'turn-loop':             { path: './checks/turn-loop',             assertions: 47 },
+  'all-game-types':        { path: './checks/all-game-types',        assertions: 87 },
+  'turn-loop':             { path: './checks/turn-loop',             assertions: 50 },
   'save-resume':           { path: './checks/save-resume',           assertions: 6 },
   'leg-reset':             { path: './checks/leg-reset',             assertions: 12 },
   'resume-fidelity':       { path: './checks/resume-fidelity',       assertions: 18 },

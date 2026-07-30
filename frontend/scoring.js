@@ -2768,6 +2768,302 @@ function aroundTheHornProgress(visitLogs){
   return { nextExpected, done: nextExpected < 1, dartsThrown: darts.length };
 }
 
+/* ---------- Maths Trainer (docs/minigames-roadmap.md Part A) ----------
+   A recall drill for the values a scoring player needs off the top of their
+   head: the doubles and trebles of the higher numbers, and then a whole visit
+   totalled at a glance. Everything here is pure — no DOM, no network, no clock
+   — so the two things that actually decide whether the mode teaches anything
+   (which options it offers, and where the instant threshold falls) are
+   assertable rather than eyeballed.
+
+   Segment notation is the app's OWN dartLabel() output ('T19', 'D17', '13',
+   'Bull', '25'), not a private encoding, so a prompt stored in the database
+   reads the same as a dart does everywhere else. */
+
+// The instant threshold: the line between "knew it" and "worked it out". This is
+// the dial the whole mode hangs off — a correct answer past it means the player
+// computed the value rather than recalling it, which is precisely the habit the
+// mode exists to remove.
+//
+// ONE threshold per question type, and deliberately NOT a per-difficulty one.
+// The roadmap sketched a tighter window on Hard, which was dropped on building:
+// "known cold" has to mean one thing for a segment regardless of which
+// difficulty happened to serve it, or the same answer counts as learned in one
+// session and not in the next, and the lifetime ledger stops being comparable
+// with itself. Hard's difficulty is its wider pool instead.
+const MATHS_INSTANT_MS = { segment: 1500, counting: 3500 };
+function mathsInstantMs(questionType){
+  return MATHS_INSTANT_MS[questionType] || MATHS_INSTANT_MS.segment;
+}
+// How many recent attempts at one segment are examined, and how many are needed
+// before it can be called learned at all. A single lucky fast tap is not
+// knowledge; three in a row is a reasonable claim.
+const MATHS_KNOWN_WINDOW = 3;
+
+// 'T19' -> 57. Accepts every label dartLabel() can produce.
+function mathsSegmentValue(seg){
+  const s = String(seg).trim();
+  if(s === 'Bull') return 50;
+  if(s === '25') return 25;
+  const m = /^([TD]?)(\d{1,2})$/.exec(s);
+  if(!m) return null;
+  const n = Number(m[2]);
+  if(!(n >= 1 && n <= 20)) return null;
+  return m[1] === 'T' ? n*3 : m[1] === 'D' ? n*2 : n;
+}
+// 'T19' -> 'treble 19'. Spoken form, for the question line and the working.
+function mathsSegmentWords(seg){
+  const s = String(seg).trim();
+  if(s === 'Bull') return 'the bull';
+  if(s === '25') return 'the outer bull';
+  const m = /^([TD]?)(\d{1,2})$/.exec(s);
+  if(!m) return s;
+  return (m[1] === 'T' ? 'treble ' : m[1] === 'D' ? 'double ' : '') + m[2];
+}
+// Which shape a segment's value must have — the constraint that stops an option
+// set being solvable by arithmetic alone (see mathsDistractors).
+//   treble -> a multiple of 3;  double -> even;  single -> anything.
+function mathsSegmentShape(seg){
+  const s = String(seg).trim();
+  if(s === 'Bull') return { stride: 2, test: v => v % 2 === 0, max: 60 };
+  if(s === '25')   return { stride: 1, test: () => true, max: 25 };
+  if(/^T/.test(s)) return { stride: 3, test: v => v % 3 === 0, max: 60 };
+  if(/^D/.test(s)) return { stride: 2, test: v => v % 2 === 0, max: 50 };
+  return { stride: 1, test: () => true, max: 25 };
+}
+
+// The pool. Easy is the doubles and trebles of 10-20 — exactly the set whose
+// multiples nobody just knows, which is the whole reason the mode exists. Hard
+// adds the awkward extras rather than opening out to all 62 segments: a single
+// is already known to anyone who can read (S13 is 13) and D3/T4 are trivial to
+// compute, so including them would dilute every session with questions that
+// need no practice while making "segments known cold" look better as it got
+// less meaningful.
+const MATHS_EASY_SEGMENTS = (() => {
+  const a = [];
+  for(let n = 10; n <= 20; n++){ a.push('T'+n); a.push('D'+n); }
+  return a;
+})();
+const MATHS_HARD_EXTRA_SEGMENTS = ['Bull','25','D7','D9','D3','D5','T7','T9'];
+function mathsSegmentPool(difficulty){
+  return difficulty === 'hard'
+    ? MATHS_EASY_SEGMENTS.concat(MATHS_HARD_EXTRA_SEGMENTS)
+    : MATHS_EASY_SEGMENTS.slice();
+}
+// Counting mode's dart alphabet — what a real visit can land on. Deliberately
+// wider than the recall pool: you have to total whatever is in the board.
+const MATHS_COUNT_SEGMENTS = (() => {
+  const a = [];
+  for(let n = 1; n <= 20; n++){ a.push(''+n); a.push('D'+n); a.push('T'+n); }
+  a.push('25'); a.push('Bull');
+  return a;
+})();
+
+// Board order, so a counting question can be drawn as real darts in real wedges
+// and a distractor can be a genuinely adjacent number rather than a numerically
+// near one. Same list as index.html's DB_SECTORS.
+const MATHS_BOARD_ORDER = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+function mathsBoardNeighbours(n){
+  const i = MATHS_BOARD_ORDER.indexOf(Number(n));
+  if(i < 0) return [];
+  const L = MATHS_BOARD_ORDER.length;
+  return [MATHS_BOARD_ORDER[(i-1+L)%L], MATHS_BOARD_ORDER[(i+1)%L]];
+}
+
+// A question. `prompt` is the canonical stored form — one segment for recall,
+// comma-separated darts for counting — which is what makes the per-segment
+// statistics a GROUP BY rather than string-parsing English.
+function pickMathsQuestion(rng, opts){
+  const r = rng || Math.random;
+  const o = opts || {};
+  const questionType = o.questionType === 'counting' ? 'counting' : 'segment';
+  const difficulty = o.difficulty === 'hard' ? 'hard' : 'easy';
+  if(questionType === 'segment'){
+    const pool = mathsSegmentPool(difficulty);
+    const seg = pool[Math.floor(r() * pool.length) % pool.length];
+    return { questionType, difficulty, prompt: seg, segments: [seg],
+      answer: mathsSegmentValue(seg) };
+  }
+  // Counting: 2 darts on easy, 3 on hard.
+  const n = difficulty === 'hard' ? 3 : 2;
+  const segs = [];
+  for(let i = 0; i < n; i++){
+    segs.push(MATHS_COUNT_SEGMENTS[Math.floor(r() * MATHS_COUNT_SEGMENTS.length) % MATHS_COUNT_SEGMENTS.length]);
+  }
+  return { questionType, difficulty, prompt: segs.join(','), segments: segs,
+    answer: segs.reduce((t,s) => t + mathsSegmentValue(s), 0) };
+}
+// Rebuild a question from its stored prompt — what the server uses to re-derive
+// the correct answer instead of trusting the client's own `correct` flag.
+function mathsQuestionFromPrompt(prompt, questionType){
+  const segs = String(prompt).split(',').map(s => s.trim()).filter(Boolean);
+  if(!segs.length) return null;
+  for(const s of segs) if(mathsSegmentValue(s) == null) return null;
+  const qt = questionType || (segs.length > 1 ? 'counting' : 'segment');
+  return { questionType: qt, prompt: segs.join(','), segments: segs,
+    answer: segs.reduce((t,s) => t + mathsSegmentValue(s), 0) };
+}
+
+// The working, spelled out. A trainer that only says "wrong" teaches nothing.
+function mathsWorking(q){
+  if(!q || !q.segments) return '';
+  if(q.segments.length === 1){
+    const s = q.segments[0];
+    const m = /^([TD])(\d{1,2})$/.exec(s);
+    if(m) return `${s} = ${m[2]} × ${m[1] === 'T' ? 3 : 2} = ${q.answer}`;
+    return `${s} = ${q.answer}`;
+  }
+  return q.segments.map(s => `${s} = ${mathsSegmentValue(s)}`).join(', ') + ` → ${q.answer}`;
+}
+
+/* The four options. This is the part that decides whether the mode teaches
+   anything, and the part most likely to be got wrong: options must be
+   answerable ONLY by knowing the answer.
+
+   The rule that is easy to miss is the arithmetic one. Every treble is a
+   multiple of 3 and every double is even, so an option set mixing shapes can be
+   narrowed — sometimes solved outright — by a player who knows only that rule.
+   Both leaks were present in this mode's own design mockups before anyone
+   noticed, which is why every option here is forced to share the correct
+   answer's shape. It costs the "wrong multiplier" distractor (T19 -> D19 = 38),
+   which is a real confusion, but a distractor that identifies itself is worth
+   less than one that doesn't. */
+function mathsDistractors(q, rng){
+  const r = rng || Math.random;
+  const correct = q.answer;
+  const single = q.segments.length === 1;
+  const shape = single ? mathsSegmentShape(q.segments[0])
+                       : { stride: 2, test: v => (v % 2) === (correct % 2), max: 180 };
+  const spread = Math.max(20, Math.round(correct * 0.25));
+  const lo = 1, hi = shape.max;
+  const ok = v => Number.isInteger(v) && v !== correct && v >= lo && v <= hi
+    && Math.abs(v - correct) <= spread && shape.test(v);
+
+  const cand = [];
+  const add = v => { if(ok(v) && !cand.includes(v)) cand.push(v); };
+
+  if(single){
+    const m = /^([TD]?)(\d{1,2})$/.exec(q.segments[0]);
+    if(m && m[2]){
+      const n = Number(m[2]), mult = m[1] === 'T' ? 3 : m[1] === 'D' ? 2 : 1;
+      // The confusable numbers: the ones beside it on the BOARD (a misread
+      // wedge is a real error), then its numeric neighbours.
+      mathsBoardNeighbours(n).forEach(k => add(k * mult));
+      [n-1, n+1, n-2, n+2].forEach(k => { if(k >= 1 && k <= 20) add(k * mult); });
+    }
+  } else {
+    // Swap one dart for the same number at a different ring — the real "I read
+    // that as a treble" error — then the classic off-by-ten.
+    q.segments.forEach(s => {
+      const m = /^([TD]?)(\d{1,2})$/.exec(s);
+      if(!m || !m[2]) return;
+      const base = mathsSegmentValue(s), n = Number(m[2]);
+      [n, n*2, n*3].forEach(v => add(correct - base + v));
+      mathsBoardNeighbours(n).forEach(k => add(correct - base + k * (base / n)));
+    });
+    [10, -10, 20, -20].forEach(d => add(correct + d));
+  }
+  // Widen to a real pool, ALWAYS — not just when the confusion sources came up
+  // short. Stopping the moment three candidates existed made a segment's three
+  // wrong answers identical every single time it was served, and a fixed option
+  // set is one players memorise instead of learning the value. Stepping on the
+  // shape's own stride also guarantees four distinct, shape-compliant options
+  // however sparse the confusion candidates were.
+  for(let step = shape.stride; step <= spread; step += shape.stride){
+    add(correct + step); add(correct - step);
+  }
+  // Last resort — ignore the spread rather than return fewer than three.
+  for(let step = shape.stride; cand.length < 3 && step <= hi; step += shape.stride){
+    const a = correct + step, b = correct - step;
+    if(Number.isInteger(a) && a !== correct && a >= lo && a <= hi && shape.test(a) && !cand.includes(a)) cand.push(a);
+    if(cand.length < 3 && Number.isInteger(b) && b !== correct && b >= lo && b <= hi && shape.test(b) && !cand.includes(b)) cand.push(b);
+  }
+
+  // Draw three from the five NEAREST candidates: near enough that the set stays
+  // hard, wide enough that it varies between servings of the same segment.
+  const pool = cand.slice().sort((a,b) => Math.abs(a-correct) - Math.abs(b-correct));
+  const take = pool.slice(0, Math.max(3, Math.min(pool.length, 5)));
+  for(let i = take.length - 1; i > 0; i--){
+    const j = Math.floor(r() * (i+1)) % (i+1);
+    [take[i], take[j]] = [take[j], take[i]];
+  }
+  return take.slice(0, 3);
+}
+// The four offered values, in display order. The correct answer's position must
+// be uniform — a generator that favours slot 2 teaches players the generator.
+function mathsOptions(q, rng){
+  const r = rng || Math.random;
+  const opts = mathsDistractors(q, r).concat([q.answer]);
+  for(let i = opts.length - 1; i > 0; i--){
+    const j = Math.floor(r() * (i+1)) % (i+1);
+    [opts[i], opts[j]] = [opts[j], opts[i]];
+  }
+  return opts;
+}
+
+// One answer, graded. `ms` null/undefined means never answered (the clock ran
+// out), which is neither correct nor a streak continuation.
+function gradeMathsAnswer(q, chosen, ms){
+  const answered = chosen != null;
+  const correct = answered && Number(chosen) === q.answer;
+  const threshold = mathsInstantMs(q.questionType);
+  const instant = correct && ms != null && ms >= 0 && ms <= threshold;
+  return { answered, correct, instant, threshold, answer: q.answer,
+    verdict: !answered ? 'timeout' : !correct ? 'wrong' : instant ? 'known' : 'worked',
+    working: mathsWorking(q) };
+}
+
+/* "Segments known cold" — the mode's headline, and the only statistic that
+   answers "am I actually learning this?". Raw correctness cannot: a player
+   multiplying by three every time is 100% correct and has learned nothing.
+
+   Derived at READ time from answered_ms, never from a stored boolean, so
+   retuning MATHS_INSTANT_MS reclassifies history instead of silently
+   disagreeing with it. `rows` are segment-mode rounds oldest-first, each
+   {prompt, correct, answered_ms}. */
+function mathsSegmentsKnown(rows, opts){
+  const o = opts || {};
+  const pool = o.pool || mathsSegmentPool(o.difficulty || 'easy');
+  const window = o.window || MATHS_KNOWN_WINDOW;
+  const threshold = mathsInstantMs('segment');
+  const by = new Map();
+  for(const row of (rows || [])){
+    const seg = String(row.prompt || '');
+    if(!by.has(seg)) by.set(seg, []);
+    by.get(seg).push(row);
+  }
+  const segments = [];
+  for(const seg of pool){
+    const all = by.get(seg) || [];
+    const recent = all.slice(-window);
+    const attempts = all.length;
+    const times = recent.filter(r => r.correct && r.answered_ms != null).map(r => Number(r.answered_ms));
+    const median = times.length ? times.slice().sort((a,b)=>a-b)[Math.floor(times.length/2)] : null;
+    let state = 'cold';
+    if(recent.length >= window && recent.every(r => r.correct && r.answered_ms != null && Number(r.answered_ms) <= threshold)) state = 'known';
+    else if(recent.length && recent.some(r => r.correct)) state = 'slow';
+    segments.push({ segment: seg, value: mathsSegmentValue(seg), attempts, state, medianMs: median });
+  }
+  return {
+    poolSize: pool.length,
+    knownCount: segments.filter(s => s.state === 'known').length,
+    slowCount: segments.filter(s => s.state === 'slow').length,
+    segments,
+  };
+}
+// The longest run of consecutive KNOWN answers. Walked over the rows rather
+// than maintained as a counter, so it can never drift from the data — the same
+// reasoning Checkout Trainer's Best Optimal Streak already documents.
+function mathsBestInstantStreak(rows){
+  let best = 0, run = 0;
+  for(const row of (rows || [])){
+    const t = mathsInstantMs(row.question_type || row.questionType || 'segment');
+    if(row.correct && row.answered_ms != null && Number(row.answered_ms) <= t){ run++; if(run > best) best = run; }
+    else run = 0;
+  }
+  return best;
+}
+
 // Only executes under Node (require()'d from a test file) — undefined in a
 // browser, so this is a no-op there and every name above stays a plain global.
 if (typeof module !== 'undefined' && module.exports) {
@@ -2814,5 +3110,12 @@ if (typeof module !== 'undefined' && module.exports) {
     isPressureIceRun, isPressureModifierFullHit, pressureChamberDecideWinnerIndex,
     evaluateVisitPressureChamber, rebuildPressureChamberState,
     doubleElimStructure,
+    MATHS_INSTANT_MS, mathsInstantMs, MATHS_KNOWN_WINDOW,
+    mathsSegmentValue, mathsSegmentWords, mathsSegmentShape,
+    MATHS_EASY_SEGMENTS, MATHS_HARD_EXTRA_SEGMENTS, mathsSegmentPool,
+    MATHS_COUNT_SEGMENTS, MATHS_BOARD_ORDER, mathsBoardNeighbours,
+    pickMathsQuestion, mathsQuestionFromPrompt, mathsWorking,
+    mathsDistractors, mathsOptions, gradeMathsAnswer,
+    mathsSegmentsKnown, mathsBestInstantStreak,
   };
 }

@@ -916,6 +916,168 @@
   body.colorblind .pocket .pk-nums button.bull{color:#9c4a06}
   body.colorblind .pocket .pk-verdict.good{color:#1d5a8c}
 
+  /* ================= MATHS TRAINER =================
+     docs/minigames-roadmap.md Part A. Rides on Paper Mode above (the mode declares
+     paperTheme), so every colour here is the same stationery Checkout Trainer
+     already uses — --paper/--paper-ink/--paper-rule/--paper-soft, the #75570f flag
+     gold, #a3271c and #1f6b34. Nothing new is introduced: this mode has to read as
+     the same card, not a cousin of it. */
+  .mathsq{padding:2px 2px 4px}
+  /* Scoped to BOTH hosts: the session summary reuses this markup inside
+     #game-result, and styling only .mathsq left it as unspaced running text
+     ("Maths sprintSession"). */
+  .mathsq .mq-eyebrow,.game-result .mq-eyebrow{display:flex;align-items:center;gap:8px;
+    font-size:9.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--paper-soft)}
+  .mathsq .mq-eyebrow::after,.game-result .mq-eyebrow::after{content:'';flex:1;height:1px;
+    background:var(--paper-rule)}
+  .mathsq .mq-mode,.game-result .mq-mode{letter-spacing:.1em;color:#75570f}
+  /* The question is the one place this mode speaks, so it gets the handwriting —
+     exactly as Paper Mode gives the verdict line Kalam. */
+  .mathsq .mq-ask{font-family:'Kalam',cursive;font-weight:700;font-size:17px;margin-top:11px;color:#3a3524}
+  .mathsq .mq-hero{font-family:'Bebas Neue',sans-serif;font-size:76px;line-height:.82;
+    letter-spacing:.01em;margin-top:1px;color:var(--paper-ink)}
+  .mathsq .mq-ring{color:#75570f}
+  .mathsq .mq-sub{font-size:11px;color:var(--paper-soft);margin-top:3px;min-height:15px}
+
+  /* ---- the timing rule: this mode's signature ----
+     The only instrument in the app that expresses time as QUALITY. A correct
+     answer you had to work out is not the same as one you knew, and no existing
+     screen could say that — so it needs its own device, and on a printed card the
+     honest one is a ruler. Half-second ticks, the threshold marked in flag gold,
+     and once answered a tick dropped where the answer actually landed. */
+  .mathsq .mq-rule{margin-top:15px}
+  .mathsq .mq-scale{position:relative;height:22px}
+  .mathsq .mq-base{position:absolute;left:0;right:0;top:11px;height:1px;background:var(--paper-rule)}
+  .mathsq .mq-fill{position:absolute;left:0;top:9.5px;height:4px;background:var(--paper-ink);
+    border-radius:2px;transition:width .18s linear}
+  .mathsq .mq-band{position:absolute;top:1px;bottom:1px;left:0;border-right:2px solid #75570f;
+    background:rgba(117,87,15,.07)}
+  .mathsq .mq-tick{position:absolute;top:5px;width:1px;height:7px;background:var(--paper-rule)}
+  .mathsq .mq-tick.major{height:13px;top:2px;background:var(--paper-edge)}
+  .mathsq .mq-landed{position:absolute;top:0;width:2px;height:22px;background:var(--paper-ink)}
+  .mathsq .mq-landed::after{content:'';position:absolute;left:-3px;top:-3px;width:8px;height:8px;
+    border-radius:50%;background:var(--paper-ink)}
+  .mathsq .mq-legend{display:flex;justify-content:space-between;font-size:9px;font-weight:700;
+    letter-spacing:.13em;text-transform:uppercase;color:var(--paper-soft);margin-top:1px}
+  .mathsq .mq-legend .in{color:#75570f}
+  .mathsq .mq-legend .raw{text-transform:none;font-size:10px}
+
+  /* ---- the four options ---- */
+  .mathsq .mq-opts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
+  .mathsq .mq-opt{position:relative;border:1px solid var(--paper-rule);background:var(--paper-hi);
+    border-radius:8px;padding:14px 0 12px;text-align:center;cursor:pointer;
+    font-family:'Bebas Neue',sans-serif;font-size:34px;line-height:1;letter-spacing:.02em;
+    color:var(--paper-ink)}
+  .mathsq .mq-opt:nth-child(even){background:#eee6d0}
+  .mathsq .mq-opt:hover:not(:disabled){border-color:var(--paper-ink)}
+  .mathsq .mq-opt:disabled{cursor:default}
+  /* The small numeral is the KEYBOARD SHORTCUT, not decoration: this mode is
+     played fast and a keyboard user needs to see what to press. */
+  .mathsq .mq-k{position:absolute;top:4px;left:6px;font-family:'Inter',sans-serif;font-size:9px;
+    font-weight:700;color:#6f664f;letter-spacing:.06em}
+  .mathsq .mq-mk{position:absolute;top:4px;right:7px;font-family:'Inter',sans-serif;font-size:12px;font-weight:700}
+  /* Verdict styling comes AFTER selection styling and restates the text colour.
+     An option that is both chosen and correct was inheriting cream from .chosen
+     while .truth repainted the background pale, which rendered the answer
+     invisible — found in the design mockups. */
+  .mathsq .mq-opt.chosen{background:var(--paper-ink);border-color:var(--paper-ink);color:var(--paper)}
+  .mathsq .mq-opt.truth,.mathsq .mq-opt.chosen.truth{border:2px solid #1f6b34;background:#e9eddc;color:var(--paper-ink)}
+  .mathsq .mq-opt.wrong,.mathsq .mq-opt.chosen.wrong{border:2px solid #a3271c;background:#f1e3dd;color:var(--paper-ink)}
+  .mathsq .mq-opt.truth .mq-mk{color:#1f6b34}
+  .mathsq .mq-opt.wrong .mq-mk{color:#a3271c}
+  .mathsq .mq-opt.truth .mq-k,.mathsq .mq-opt.wrong .mq-k{color:#6f664f}
+  .mathsq :focus-visible{outline:2px solid var(--paper-ink);outline-offset:2px}
+
+  .mathsq .mq-verdict{margin-top:15px;font-family:'Kalam',cursive;font-weight:700;font-size:16px;color:#3a3524}
+  .mathsq .mq-verdict.good{color:#1f6b34}
+  .mathsq .mq-verdict.slow{color:#75570f}
+  .mathsq .mq-verdict.bad{color:#a3271c}
+  .mathsq .mq-working{font-size:11.5px;color:var(--paper-soft);margin-top:5px;line-height:1.5}
+  .mathsq .mq-working b{color:var(--paper-ink);font-family:'Bebas Neue',sans-serif;font-size:15px;
+    letter-spacing:.04em;font-weight:400}
+  .mathsq .mq-acts{display:flex;gap:8px;margin-top:16px}
+  /* Paper Mode styles the ghost buttons it knows about (.turn-actions, .undo-row);
+     these two hosts are new, and without this the app's dark-theme ghost renders as
+     muted grey on cream, which reads as disabled. */
+  .mathsq .mq-acts .btn-primary,.game-result .mq-acts .btn-primary{
+    background:var(--paper-ink);color:var(--paper);border-color:var(--paper-ink)}
+  .mathsq .mq-acts .btn-ghost,.game-result .mq-acts .btn-ghost{
+    background:transparent;border:1px solid var(--paper-rule);color:#4a442f}
+  .mathsq .mq-foot,.game-result .mq-session{margin-top:14px;border-top:1px solid var(--paper-rule);
+    padding-top:10px;display:flex;justify-content:space-between;font-size:10.5px;color:var(--paper-soft)}
+  .mathsq .mq-foot b{font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:.04em;
+    color:var(--paper-ink);font-weight:400}
+
+  /* ---- the board prompt ---- */
+  .mathsq .mq-board{display:flex;justify-content:center;margin:6px 0 -2px}
+  .mathsq .mq-board svg{width:min(308px,80vw);height:auto}
+
+  /* ---- sprint ---- */
+  .mathsq .mq-clock{display:flex;align-items:baseline;gap:7px;margin-top:10px}
+  .mathsq .mq-clock-n{font-family:'Bebas Neue',sans-serif;font-size:44px;line-height:.85;color:var(--paper-ink)}
+  .mathsq .mq-clock-u{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--paper-soft)}
+  .mathsq .mq-score{margin-left:auto;text-align:right}
+  .mathsq .mq-score b{font-family:'Bebas Neue',sans-serif;font-size:34px;font-weight:400;line-height:.85;display:block;color:var(--paper-ink)}
+  .mathsq .mq-score span{font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--paper-soft)}
+  .mathsq .mq-timebar{margin-top:9px;height:5px;background:rgba(201,191,164,.5);border-radius:3px;overflow:hidden}
+  .mathsq .mq-timebar i{display:block;height:100%;background:var(--paper-ink);transition:width .25s linear}
+  /* The round-by-round strip carries a GLYPH per outcome, not just a colour —
+     the roadmap's accessibility rule, and the first mockup pass got this wrong. */
+  .mathsq .mq-pips{display:flex;gap:6px;margin-top:9px;font-size:13px;line-height:1;flex-wrap:wrap}
+  .mathsq .mq-pips i{font-style:normal;color:var(--paper-rule)}
+  .mathsq .mq-pips i.known{color:#1f6b34}
+  .mathsq .mq-pips i.worked{color:#75570f}
+  .mathsq .mq-pips i.wrong,.mathsq .mq-pips i.timeout{color:#a3271c}
+
+  /* ---- the crib sheet (session summary) ----
+     A player learning these values has always carried a printed card, so the
+     report IS that card — every segment with its VALUE, which is what makes it a
+     crib sheet rather than a bar chart that happens to be about segments. */
+  .game-result .mq-crib-head{display:flex;align-items:flex-end;justify-content:space-between;margin-top:12px}
+  .game-result .mq-crib-n{font-family:'Bebas Neue',sans-serif;font-size:64px;line-height:.8;color:var(--paper-ink)}
+  .game-result .mq-crib-n small{font-size:24px;color:var(--paper-soft)}
+  .game-result .mq-crib-lab{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--paper-soft);text-align:right;line-height:1.45;padding-bottom:6px}
+  .game-result .mq-sub{font-size:11px;color:var(--paper-soft);margin-top:3px}
+  .game-result .mq-grid{margin-top:14px;border-top:1px solid var(--paper-rule);max-height:46vh;overflow-y:auto}
+  .game-result .mq-row{display:grid;grid-template-columns:44px 34px 1fr 42px 16px;align-items:center;gap:7px;
+    padding:7px 2px;border-bottom:1px solid rgba(201,191,164,.55);font-size:12px}
+  .game-result .mq-seg{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:.04em;color:var(--paper-ink)}
+  .game-result .mq-val{font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--paper-soft);text-align:right}
+  .game-result .mq-row.known .mq-val{color:var(--paper-ink)}
+  .game-result .mq-bar{height:5px;background:rgba(201,191,164,.5);border-radius:3px;overflow:hidden}
+  .game-result .mq-bar i{display:block;height:100%;background:var(--paper-ink);border-radius:3px}
+  .game-result .mq-row.known .mq-bar i{background:#1f6b34}
+  .game-result .mq-row.slow .mq-bar i{background:#75570f}
+  .game-result .mq-t{text-align:right;font-size:11px;color:var(--paper-soft);font-variant-numeric:tabular-nums}
+  .game-result .mq-st{text-align:center;font-size:12px;font-weight:700}
+  .game-result .mq-row.known .mq-st{color:#1f6b34}
+  .game-result .mq-row.slow .mq-st{color:#75570f}
+  .game-result .mq-row.cold .mq-st{color:#a3271c}
+  .game-result .mq-legend-key{margin-top:11px;display:flex;gap:13px;font-size:10px;color:var(--paper-soft);flex-wrap:wrap}
+  .game-result .mq-legend-key .g{color:#1f6b34}
+  .game-result .mq-legend-key .f{color:#75570f}
+  .game-result .mq-legend-key .r{color:#a3271c}
+  .game-result .mq-acts{display:flex;gap:8px;margin-top:16px}
+  /* Colorblind mode remaps --red/--green app-wide, but these are hardcoded for the
+     cream sheet (the tokens are tuned for the dark board and wash out here), so
+     without these overrides this one screen would ignore a setting the rest of the
+     app honours. Same fix Paper Mode's own status line needed. Meaning is never
+     colour-only here — every state also carries a ✓/◐/● and a word. */
+  body.colorblind .mathsq .mq-verdict.bad,
+  body.colorblind .mathsq .mq-pips i.wrong,
+  body.colorblind .mathsq .mq-pips i.timeout,
+  body.colorblind .game-result .mq-row.cold .mq-st{color:#9c4a06}
+  body.colorblind .mathsq .mq-verdict.good,
+  body.colorblind .mathsq .mq-pips i.known,
+  body.colorblind .game-result .mq-row.known .mq-st{color:#1d5a8c}
+  body.colorblind .mathsq .mq-opt.truth,
+  body.colorblind .mathsq .mq-opt.chosen.truth{border-color:#1d5a8c}
+  body.colorblind .mathsq .mq-opt.wrong,
+  body.colorblind .mathsq .mq-opt.chosen.wrong{border-color:#9c4a06}
+  body.colorblind .game-result .mq-row.known .mq-bar i{background:#1d5a8c}
+
   /* A pad-only game type (GAME_TYPES.<type>.padOnly — Checkout Trainer) hides the
      toggle via the `hidden` attribute in applyDartMode(). `.imt-row{display:flex}`
      above is an AUTHOR declaration, and an author `display` always outranks the UA

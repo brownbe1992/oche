@@ -38,7 +38,14 @@ const { checkoutHint, dartLabel,
   makeDartCore, PRESSURE_ROUNDS, generatePressureCard, computePressureRoundResult,
   pressureMissPenaltyForCard, pressureComposureRating, rebuildPressureChamberState,
   doubleElimStructure,
-  resolveBoardColors, allCheckoutRoutes, CRICKET_STANDARD_NUMBERS } = require('../frontend/scoring.js');
+  resolveBoardColors, allCheckoutRoutes, CRICKET_STANDARD_NUMBERS,
+  // Maths Trainer: the server re-derives every round's correct answer from its
+  // stored prompt rather than trusting the client's own `correct` flag — see
+  // addMathsTrainerRound(). mathsSegmentsKnown()/mathsBestInstantStreak() are the
+  // read-time verdict calculations, shared with the frontend so the crib sheet and
+  // the stat bubbles cannot disagree about what "known cold" means.
+  mathsQuestionFromPrompt, mathsSegmentsKnown, mathsBestInstantStreak,
+  mathsInstantMs, mathsSegmentPool, mathsSegmentValue } = require('../frontend/scoring.js');
 
 const DB_PATH = process.env.DARTS_DB || path.join(__dirname, '..', 'data', 'darts.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -504,6 +511,44 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_marathon_session_legs_session ON marathon_session_legs(session_id);
   CREATE INDEX IF NOT EXISTS idx_marathon_session_legs_game    ON marathon_session_legs(game_id);
+
+  -- Maths Trainer (docs/minigames-roadmap.md Part A) — a recall drill for the
+  -- doubles and trebles of the higher numbers, and then for totalling a visit at
+  -- a glance. Its own table, and NO turns/darts rows at all, which is the whole
+  -- point: the requirement is that nothing it records may reach any other
+  -- statistic, and Checkout Trainer shows what the alternative costs. That mode
+  -- writes real turns (a checkout attempt genuinely IS an X01 visit), and the
+  -- price was two exclusion constants threaded through ~15 queries, one of which
+  -- was missed long enough for a typed-in answer to win "Fewest Darts to Finish".
+  -- A mode that writes neither table satisfies the requirement by construction —
+  -- in every query that exists today and every one written later.
+  --
+  -- answered_ms is load-bearing rather than telemetry: the mode's headline
+  -- statistic is how many segments you answer INSTANTLY, so this column carries
+  -- as much meaning as the correct flag does. Recorded for wrong answers too — a
+  -- fast wrong answer and a slow wrong answer are different learner behaviours.
+  -- There is deliberately no stored 'instant' flag: the threshold is applied at read
+  -- time, so retuning it reclassifies history instead of disagreeing with it.
+  CREATE TABLE IF NOT EXISTS maths_trainer_rounds (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id        INTEGER NOT NULL REFERENCES games(id)   ON DELETE CASCADE,
+    player_id      INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    round_no       INTEGER NOT NULL,
+    question_type  TEXT    NOT NULL,   -- 'segment' | 'counting'
+    prompt_style   TEXT    NOT NULL DEFAULT 'text',   -- 'text' | 'board' (counting only)
+    prompt         TEXT    NOT NULL,   -- canonical segment notation: 'T19' or 'T17,13,D19'
+    correct_answer INTEGER NOT NULL,
+    options        TEXT    NOT NULL,   -- JSON array of the four offered values, as displayed
+    chosen_answer  INTEGER,            -- NULL = never answered (the clock ran out)
+    correct        INTEGER NOT NULL DEFAULT 0,
+    answered_ms    INTEGER,
+    answered_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_maths_rounds_game   ON maths_trainer_rounds(game_id);
+  CREATE INDEX IF NOT EXISTS idx_maths_rounds_player ON maths_trainer_rounds(player_id);
+  -- The crib sheet and every "known cold" query group one player's rounds by
+  -- segment, so this is the index that matters most.
+  CREATE INDEX IF NOT EXISTS idx_maths_rounds_prompt ON maths_trainer_rounds(player_id, prompt);
 `);
 
 /* Column migrations for tables not recreated above — safe to re-run.
@@ -1161,6 +1206,33 @@ function createGame({ category, legsPerSet, setsPerGame, players, practice, game
   if (resolvedGameType === 'shanghai' && config && config.rounds != null) {
     const r = Number(config.rounds);
     if (!Number.isInteger(r) || r < 1 || r > 20) throw httpError(400, 'rounds must be an integer between 1 and 20');
+  }
+  // Maths Trainer (docs/minigames-roadmap.md Part A). Four closed sets and a
+  // fixed duration — same "reject rather than store verbatim" standard as every
+  // field above. It matters here because `mode` decides whether a game's rounds
+  // feed the Sprint leaderboard: an unrecognised value stored as-is would be
+  // silently treated as freeform by every reader, which is a confusing way to
+  // fail rather than an explicit rejection.
+  if (resolvedGameType === 'maths_trainer' && config) {
+    const closed = {
+      questionType: ['segment', 'counting'],
+      promptStyle: ['text', 'board'],
+      difficulty: ['easy', 'hard'],
+      mode: ['freeform', 'sprint'],
+    };
+    for (const [key, allowed] of Object.entries(closed)) {
+      if (config[key] != null && !allowed.includes(config[key])) {
+        throw httpError(400, `${key} must be one of: ${allowed.join(', ')}`);
+      }
+    }
+    if (config.durationSec != null && Number(config.durationSec) !== MATHS_SPRINT_SECONDS) {
+      throw httpError(400, `durationSec must be ${MATHS_SPRINT_SECONDS}`);
+    }
+    // A board prompt only means anything for a visit of several darts; on a single
+    // segment there is nothing to read off a board that the label doesn't say.
+    if (config.promptStyle === 'board' && config.questionType !== 'counting') {
+      throw httpError(400, 'promptStyle "board" applies only to counting questions');
+    }
   }
   // Halve-It custom target editor (docs/archive/halve-it-roadmap.md "Custom target editor"):
   // config.targets rides in from the untrusted client just like cricket's variant/
@@ -1996,6 +2068,13 @@ const GAME_TYPE_REGISTRY = {
   checkout_trainer: { savable: false, checkoutIsAttempt: true,
                       statBubbles: getCheckoutTrainerStatBubbles,
                       personalBests: (name, mode) => Object.assign({}, getCheckoutTrainerPersonalBests(name, mode), getCheckoutBlitzPersonalStats(name)) },
+  // Maths Trainer writes no turns and no darts — its rounds live in
+  // maths_trainer_rounds — so it is `savable: false` and has no rebuild/position:
+  // there is no visit history to replay. Every other type's stats read `turns`;
+  // these two read that table instead.
+  maths_trainer:    { savable: false,
+                      statBubbles: getMathsTrainerStatBubbles,
+                      personalBests: getMathsTrainerPersonalBests },
   around_the_clock: { savable: true,  statBubbles: getAroundTheClockStatBubbles,    personalBests: getAroundTheClockPersonalBests,
     rebuild: (game, participants, turns) => rebuildAroundTheClockState({ turns }),
     position: (game, r) => ({ legNo: r.legNo, hit: r.hitSet.size, total: 20 }) },
@@ -5243,6 +5322,205 @@ function getCheckoutBlitzPersonalStats(playerName) {
   const bestScore = Math.max(...rows.map(r => r.score));
   const lifetimeAvgScore = rows.reduce((s, r) => s + r.score, 0) / rows.length;
   return { bestScore, lifetimeAvgScore, runs: rows.length };
+}
+
+/* ---------- Maths Trainer (docs/minigames-roadmap.md Part A) ----------
+   Every query here reads maths_trainer_rounds, never `turns`. That is not a
+   stylistic choice: this mode is required to have zero footprint on any other
+   statistic, and writing no turns/darts rows achieves that by construction
+   rather than by remembering to add an exclusion clause to fifteen queries and
+   every query written afterwards. See the table's own comment.
+
+   `mode` is accepted and ignored throughout, matching the registry's
+   (name, mode) statBubbles/personalBests signature — this mode is solo-only, so
+   there is no practice/H2H split to scope by. */
+
+// One answered round. The client sends what it offered and what was tapped; the
+// server decides whether that was RIGHT, by re-deriving the answer from the
+// prompt. Trusting a client-supplied `correct` flag would make the Sprint
+// leaderboard and every achievement a number the client invents — the same
+// reasoning behind addTurn()'s scored-vs-darts consistency guard (SEC-22), at a
+// fraction of the cost because a maths answer is trivially verifiable.
+function addMathsTrainerRound(gameId, playerName, r) {
+  const p = getPlayer(playerName);
+  if (!p) throw httpError(400, 'Unknown player');
+  const game = db.prepare('SELECT id, game_type FROM games WHERE id=?').get(gameId);
+  if (!game) throw httpError(404, 'Unknown game');
+  if (game.game_type !== 'maths_trainer') throw httpError(400, 'Not a Maths Trainer game');
+
+  const questionType = r.questionType === 'counting' ? 'counting' : 'segment';
+  const promptStyle = r.promptStyle === 'board' ? 'board' : 'text';
+  const q = mathsQuestionFromPrompt(r.prompt, questionType);
+  if (!q) throw httpError(400, 'Malformed round — prompt is not a valid segment list');
+  if (questionType === 'segment' && q.segments.length !== 1) throw httpError(400, 'A segment round carries exactly one segment');
+  if (questionType === 'counting' && (q.segments.length < 2 || q.segments.length > 3)) throw httpError(400, 'A counting round carries two or three darts');
+
+  const options = Array.isArray(r.options) ? r.options.map(Number) : null;
+  if (!options || options.length !== 4 || options.some(v => !Number.isInteger(v))) {
+    throw httpError(400, 'A round must carry exactly four integer options');
+  }
+  if (!options.includes(q.answer)) throw httpError(400, 'The offered options do not include the correct answer');
+
+  // null is a real, meaningful value here: the Sprint clock ran out with the
+  // question on screen. It is neither correct nor a streak continuation.
+  const chosen = (r.chosenAnswer == null) ? null : Number(r.chosenAnswer);
+  if (chosen != null && !Number.isInteger(chosen)) throw httpError(400, 'chosenAnswer must be an integer or null');
+  if (chosen != null && !options.includes(chosen)) throw httpError(400, 'chosenAnswer was not one of the offered options');
+
+  // answered_ms drives the instant threshold, the "segments known cold" headline
+  // and the instant ladders, so it is guarded as carefully as correctness: a
+  // client reporting 1ms for every answer would otherwise earn this mode's
+  // flagship badge for nothing.
+  let ms = (r.answeredMs == null) ? null : Number(r.answeredMs);
+  if (ms != null && (!Number.isFinite(ms) || ms < 0)) throw httpError(400, 'answeredMs must be a non-negative number');
+  if (ms != null && ms < MATHS_MIN_PLAUSIBLE_MS) throw httpError(400, `answeredMs below ${MATHS_MIN_PLAUSIBLE_MS}ms is not a human answer`);
+  if (ms != null && ms > MATHS_MAX_ROUND_MS) ms = MATHS_MAX_ROUND_MS;
+  if (chosen == null) ms = null;   // never answered, so there is no answer time
+
+  const correct = (chosen != null && chosen === q.answer) ? 1 : 0;
+  const roundNo = Number(r.roundNo) > 0 ? Math.floor(Number(r.roundNo)) : 1;
+
+  const info = db.prepare(`
+    INSERT INTO maths_trainer_rounds
+      (game_id, player_id, round_no, question_type, prompt_style, prompt, correct_answer, options, chosen_answer, correct, answered_ms)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+  `).run(gameId, p.id, roundNo, questionType, promptStyle, q.prompt, q.answer,
+         JSON.stringify(options), chosen, correct, ms);
+  return { id: info.lastInsertRowid, correct: !!correct, correctAnswer: q.answer };
+}
+// A tap faster than this is not a person reading four options; a round left open
+// longer than this is a player who walked away, and letting it through would drag
+// every median. Both are clamps on a field the client supplies.
+const MATHS_MIN_PLAUSIBLE_MS = 120;
+const MATHS_SPRINT_SECONDS = 60;
+const MATHS_MAX_ROUND_MS = 120000;
+
+function _mathsRows(playerId, opts) {
+  const o = opts || {};
+  let sql = `SELECT r.prompt, r.question_type, r.prompt_style, r.correct, r.answered_ms,
+                    r.chosen_answer, r.correct_answer, r.game_id, r.answered_at
+             FROM maths_trainer_rounds r WHERE r.player_id=?`;
+  const args = [playerId];
+  if (o.questionType) { sql += ' AND r.question_type=?'; args.push(o.questionType); }
+  sql += ' ORDER BY r.id ASC';   // oldest first — streaks and windows walk forward
+  return db.prepare(sql).all(...args);
+}
+function _median(nums) {
+  if (!nums.length) return null;
+  const a = nums.slice().sort((x, y) => x - y);
+  const mid = Math.floor(a.length / 2);
+  return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+}
+
+// The headline is "segments known cold", NOT correctness. A player multiplying by
+// three every time is 100% correct and has learned nothing, so correctness alone
+// would tell them they had acquired a skill they hadn't.
+function getMathsTrainerStatBubbles(playerName, mode) {  // eslint-disable-line no-unused-vars
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const rows = _mathsRows(p.id);
+  const segRows = rows.filter(r => r.question_type === 'segment');
+  const countRows = rows.filter(r => r.question_type === 'counting');
+  // Scored against the FULL (hard) pool so the number means the same thing
+  // whichever difficulty served it — a ledger that rescaled with a session
+  // setting could not be compared with itself.
+  const known = mathsSegmentsKnown(segRows, { pool: mathsSegmentPool('hard') });
+  const instantMs = t => mathsInstantMs(t);
+  const instantCount = rows.filter(r => r.correct && r.answered_ms != null
+    && Number(r.answered_ms) <= instantMs(r.question_type)).length;
+  const answered = rows.filter(r => r.chosen_answer != null).length;
+  const correct = rows.filter(r => r.correct).length;
+  return {
+    segmentsKnown: known.knownCount,
+    segmentPoolSize: known.poolSize,
+    segmentsStillCounting: known.slowCount,
+    rounds: rows.length,
+    // Kept, but deliberately not the headline — see this function's own comment.
+    correctPct: answered ? (correct / answered * 100) : null,
+    instantPct: answered ? (instantCount / answered * 100) : null,
+    // Median, not mean: one round left open while someone answered the door
+    // would otherwise dominate.
+    medianSegmentMs: _median(segRows.filter(r => r.correct && r.answered_ms != null).map(r => Number(r.answered_ms))),
+    medianCountingMs: _median(countRows.filter(r => r.correct && r.answered_ms != null).map(r => Number(r.answered_ms))),
+    bestInstantStreak: mathsBestInstantStreak(rows),
+    // Raw lifetime counters the frontend's achievement ladders read once at game
+    // start, the same "avoid a round-trip per answer" reasoning Chuckin's and
+    // Checkout Trainer's own ladders already document.
+    instantCount,
+  };
+}
+
+function getMathsTrainerPersonalBests(playerName, mode) {  // eslint-disable-line no-unused-vars
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const rows = _mathsRows(p.id);
+  const sprint = getMathsSprintPersonalStats(playerName);
+  const known = mathsSegmentsKnown(rows.filter(r => r.question_type === 'segment'),
+    { pool: mathsSegmentPool('hard') });
+  // The weakest segment is by TIME as much as by correctness: the point of this
+  // mode is that a slow right answer is still a gap, and this is the stat that
+  // names which one to work on next.
+  const attempted = known.segments.filter(s => s.attempts > 0 && s.state !== 'known');
+  attempted.sort((a, b) => (b.medianMs == null ? -1 : b.medianMs) - (a.medianMs == null ? -1 : a.medianMs));
+  return {
+    segmentsKnown: known.knownCount,
+    segmentPoolSize: known.poolSize,
+    bestInstantStreak: mathsBestInstantStreak(rows),
+    bestSprintScore: sprint ? sprint.bestScore : null,
+    weakestSegment: attempted.length ? attempted[0].segment : null,
+    weakestSegmentMs: attempted.length ? attempted[0].medianMs : null,
+  };
+}
+
+// The crib sheet: every segment in the pool with its VALUE, its state and its
+// median time. The value is what makes this a crib sheet — the printed card a
+// learner actually carries, listing the answers — rather than a bar chart that
+// happens to be about segments.
+function getMathsTrainerSegments(playerName, difficulty) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const rows = _mathsRows(p.id, { questionType: 'segment' });
+  const pool = mathsSegmentPool(difficulty === 'hard' ? 'hard' : 'easy');
+  const known = mathsSegmentsKnown(rows, { pool });
+  return { poolSize: known.poolSize, knownCount: known.knownCount,
+    slowCount: known.slowCount, thresholdMs: mathsInstantMs('segment'),
+    segments: known.segments };
+}
+
+// Sprint scoring: one point per correct answer, and nothing for a wrong one.
+// Deliberately flatter than Checkout Blitz's 2/1/0, which exists because that
+// mode has a third outcome (legal but not optimal). There is no partial credit
+// for a multiple-choice tap.
+function _mathsSprintRuns(where, args) {
+  return db.prepare(`
+    SELECT g.id AS gameId, p.name AS name, MAX(r.answered_at) AS achievedAt,
+           COALESCE(SUM(CASE WHEN r.correct=1 THEN 1 ELSE 0 END),0) AS score
+    FROM maths_trainer_rounds r JOIN games g ON g.id=r.game_id JOIN players p ON p.id=r.player_id
+    WHERE g.game_type='maths_trainer' AND json_extract(g.config,'$.mode')='sprint' ${where}
+    GROUP BY g.id
+  `).all(...args);
+}
+function getMathsSprintLeaderboard() {
+  const rows = _mathsSprintRuns('', []);
+  const best = new Map();
+  for (const r of rows) {
+    const cur = best.get(r.name);
+    if (!cur || r.score > cur.bestScore) best.set(r.name, { name: r.name, bestScore: r.score, achievedAt: r.achievedAt });
+  }
+  // Peak single run, so no minimum-attempts floor — the same shape
+  // getCheckoutBlitzLeaderboard() uses, for the same reason.
+  return Array.from(best.values()).sort((a, b) => b.bestScore - a.bestScore);
+}
+function getMathsSprintPersonalStats(playerName) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const rows = _mathsSprintRuns('AND r.player_id=?', [p.id]);
+  if (!rows.length) return { bestScore: null, lifetimeAvgScore: null, runs: 0 };
+  return {
+    bestScore: Math.max(...rows.map(r => r.score)),
+    lifetimeAvgScore: rows.reduce((s, r) => s + r.score, 0) / rows.length,
+    runs: rows.length,
+  };
 }
 
 /* ---------- Bob's 27 (docs/archive/practice-ladders-roadmap.md Part A) ----------
@@ -8947,6 +9225,8 @@ module.exports = {
   getChuckinStatBubbles, getChuckinPersonalBests, getChuckinHeatmap, getDartHeatmap, getBounceOutCount,
   getCheckoutTrainerStatBubbles, getCheckoutTrainerPersonalBests,
   getCheckoutBlitzLeaderboard, getCheckoutBlitzPersonalStats,
+  addMathsTrainerRound, getMathsTrainerStatBubbles, getMathsTrainerPersonalBests,
+  getMathsTrainerSegments, getMathsSprintLeaderboard, getMathsSprintPersonalStats,
   getBobs27StatBubbles, getBobs27PersonalBests, getBobs27Leaderboard,
   getEloRatings, getEloLeaderboard, getPlayerElo,
   getCheckoutLadderStatBubbles, getCheckoutLadderPersonalBests, getCheckoutLadderLeaderboard,

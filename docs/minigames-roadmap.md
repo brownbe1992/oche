@@ -1,9 +1,22 @@
 # Minigames — Design Roadmap
 
-> Status (2026-07): **Nothing here is built yet.**
+> Status (2026-07): **Part A is built and shipped. Part B is still proposals only.**
 >
-> - **Part A — Maths Trainer**: designed below, requested directly by the owner.
->   Not started. Tracked as item 10 on `docs/open-roadmap-items.md`.
+> - **Part A — Maths Trainer**: **DONE.** Both question types (segment recall and
+>   visit counting, the latter with a text prompt and a board-diagram prompt), both
+>   difficulties, the instant threshold and the known/worked-out distinction, the
+>   crib sheet, the 60-second Sprint with its three-point hard stop, five achievement
+>   ladders and three one-off badges, the Home leaderboard, and the dedicated
+>   `maths_trainer_rounds` table. What shipped: `REFERENCE.md` §19b.
+>   Tests: `backend/test/scoring.maths-trainer.test.js` (36 cases),
+>   `backend/test/db.maths-trainer.test.js` (21), and a 36-assertion
+>   `maths-trainer` browser check. Step 10 of the build order below (the
+>   "drill this segment" deep link) was deliberately deferred and is tracked
+>   separately.
+>   **Where the shipped mode differs from the design below, it is called out inline
+>   rather than silently edited away** — the one substantive change is that Hard no
+>   longer carries a tighter instant threshold (see §19b for why: "known cold" has to
+>   mean one thing for a segment regardless of which difficulty served it).
 > - **Part B — four further trainers**: **proposals only, awaiting the owner's
 >   selection.** None is approved and none should be built until one is chosen.
 >   Tracked as a single decision item (11) on the tracker, not as four build

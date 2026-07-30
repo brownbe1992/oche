@@ -42,7 +42,8 @@ convention in `CLAUDE.md`.
 - [18. League Mode](#18-league-mode)
 - [19. Checkout Trainer](#19-checkout-trainer)
 - [19a. "Drill this checkout" deep link](#19a-drill-this-checkout-deep-link)
-- [20. New Game Screen (3-Step Wizard)](#20-new-game-screen-3-step-wizard)
+- [19b. Maths Trainer](#19b-maths-trainer)
+- [20. New Game Screen (2-Step Wizard)](#20-new-game-screen-2-step-wizard)
 - [21. Known Limitations & Open Gaps](#21-known-limitations--open-gaps)
 - [22. Troubleshooting](#22-troubleshooting)
 - [23. Saved Games / Pause & Resume](#23-saved-games--pause--resume)
@@ -6699,6 +6700,203 @@ and Checkout Blitz scoring unchanged (moot in practice since a pin forces
 Freeform). The one deliberate exception is **Toughest Checkout Solved**,
 which excludes pinned rounds entirely (see above) — repetition is the whole
 point of the drill, so it must never manufacture a "toughest ever" record.
+
+---
+
+## 19b. Maths Trainer
+
+Full design: `docs/minigames-roadmap.md` Part A. The second entry in the
+**Minigames** category (§20), and the first game type in the app with **no darts
+at all** — nothing is thrown, so there is no visit, no pad, no dartboard, and no
+`turns`/`darts` rows.
+
+**Who it is for**, because it decides everything below: players who have not
+learned the doubles and trebles of the higher numbers. Acquiring them, not
+polishing them. Two skills, and they are a *progression* rather than two
+difficulties of one thing — you cannot total a visit quickly while still computing
+what T17 is:
+
+1. **Segment recall** — "what is treble 19?", answered off the top of your head.
+2. **Counting a visit** — two or three darts totalled at a glance, optionally read
+   off a board diagram rather than named in words.
+
+### Speed is the metric, not correctness
+
+**A correct answer past the instant threshold means the player COMPUTED the value
+rather than recalled it**, and correctness alone cannot tell those apart: someone
+multiplying by three every time is 100% correct and has learned nothing. So every
+answer lands on one of three verdicts (`gradeMathsAnswer()`, `frontend/scoring.js`):
+
+| verdict | condition |
+|---|---|
+| **known** | correct, and answered within the threshold |
+| **worked** | correct, but slower |
+| **wrong** / **timeout** | incorrect, or never answered (the Sprint clock ran out) |
+
+`MATHS_INSTANT_MS` = `{ segment: 1500, counting: 3500 }`. **One threshold per
+question type, and deliberately not a per-difficulty one** — the roadmap sketched a
+tighter window on Hard, dropped on building because "known cold" has to mean one
+thing for a segment regardless of which difficulty served it, or the lifetime
+ledger stops being comparable with itself. Hard's difficulty is its wider pool.
+
+The threshold is applied at **read time**, never stored as a boolean, so retuning
+`MATHS_INSTANT_MS` reclassifies history instead of disagreeing with it.
+
+### The pool
+
+`mathsSegmentPool(difficulty)`. Easy is the **22 doubles and trebles of 10–20** —
+exactly the set whose multiples nobody just knows. Hard adds `Bull`, `25`, and the
+awkward low doubles/trebles (`MATHS_HARD_EXTRA_SEGMENTS`, 30 total) rather than
+opening out to all 62 segments: a single is already known to anyone who can read
+(S13 is 13) and D3/T4 are trivial to compute, so including them would dilute every
+session with questions needing no practice while making "segments known cold" look
+better as it got less meaningful.
+
+Counting mode draws its darts from a wider alphabet (`MATHS_COUNT_SEGMENTS`, every
+single/double/treble plus both bulls) — you have to total whatever is in the board.
+
+### The four options — no arithmetic shortcut
+
+`mathsOptions()`/`mathsDistractors()`. Options must be answerable **only** by
+knowing the answer, and the rule that is easy to miss is the arithmetic one:
+
+- Every treble is a multiple of 3, so a treble question's options are **all**
+  multiples of 3. `57 · 38 · 55 · 59` is solvable by divisibility alone.
+- Every double is even, so a double question's options are **all** even.
+  `D17 → 34 · 36 · 28 · 51` is answerable without knowing D17: 51 is the only odd
+  one. *(This leak shipped in the design mockups.)*
+- A visit's total has derivable parity — odd + odd + even is even, and that is
+  knowable without knowing any dart's value — so counting options **all** match the
+  true total's parity. *(This one shipped in the mockups too.)*
+
+Enforcing shape strictly costs the "wrong multiplier" distractor (T19 → D19 = 38),
+a real confusion, but a distractor that identifies itself is worth less than one
+that doesn't. Other rules: four distinct options, the answer present exactly once,
+every distractor within ±25%/±20 of the answer (so none is eliminable on magnitude),
+the correct answer's position uniform across many rolls, and the candidate pool
+always widened past three so a segment's wrong answers vary between servings — the
+first implementation stopped at three and produced a fixed set players would
+memorise. All covered by `backend/test/scoring.maths-trainer.test.js` (36 cases).
+
+### Stats
+
+`getMathsTrainerStatBubbles()`/`getMathsTrainerPersonalBests()`/
+`getMathsTrainerSegments()` (`backend/db.js`), all reading `maths_trainer_rounds`.
+
+- **Segments known cold** — *the headline*. A segment counts as known when its last
+  `MATHS_KNOWN_WINDOW` (3) attempts were all correct and all inside the threshold.
+  Demoted again the moment a slow answer enters the window: learning is not a
+  ratchet. Scored against the full (Hard) pool so the number means the same thing
+  whichever difficulty produced it.
+- **Still counting** — its complement, and the more useful half for a learner.
+- **Correctness %** — kept, deliberately not the headline.
+- **Median answer time**, per question type (median, not mean: one round left open
+  while someone answered the door would dominate).
+- **Best instant streak** — longest run of consecutive *known* answers, walked over
+  the rows rather than maintained as a counter, so it cannot drift from the data.
+- **Weakest segment** — the slowest one still unlearned, by time as much as by
+  correctness. This is the stat that names what to work on next.
+- **The crib sheet** (`GET /api/stats/maths-segments`) — every pool segment with its
+  **value**, state and median time. The value is what makes it a crib sheet, the
+  printed card a learner carries listing the answers, rather than a bar chart that
+  happens to be about segments.
+
+### Sprint
+
+`config.mode = 'sprint'`, 60 seconds (`MATHS_SPRINT_SECONDS`), **1 point per correct
+answer** — flatter than Checkout Blitz's 2/1/0, which exists because that mode has a
+third outcome. There is no partial credit for a multiple-choice tap.
+
+The deadline is a **wall clock** checked per tick, never a decrementing counter, so a
+backgrounded tab cannot buy time, and it is a **hard stop at three independent
+points** — `answerMaths()` refuses a tap at or past it, the same function ends the run
+instead, and `tickMathsSprint()` ends an idle run within one 250ms tick. Checkout
+Blitz shipped without the last two and a paused player could answer arbitrarily late
+(§19); that is not re-earned here. `endMathsSprint()` is idempotent.
+
+`getMathsSprintLeaderboard()`: one row per player, best-ever run, no minimum-attempts
+floor — the peak-single-run shape `getCheckoutBlitzLeaderboard()` uses.
+
+### Schema, and why it writes no turns
+
+`maths_trainer_rounds` (`game_id`/`player_id` FKs, `round_no`, `question_type`,
+`prompt_style`, `prompt`, `correct_answer`, `options` JSON, `chosen_answer`,
+`correct`, `answered_ms`, `answered_at`).
+
+**This mode writes no `turns` and no `darts` rows at all**, and that is the single
+most important decision in it. The requirement is that nothing it records reaches
+any other statistic. Checkout Trainer shows the alternative: it writes real turns (a
+checkout attempt genuinely *is* an X01 visit), and the price was two exclusion
+constants threaded through ~15 queries, one of which was missed long enough for a
+typed-in answer to win "Fewest Darts to Finish". A mode that writes neither table
+satisfies the requirement **by construction — in every query that exists today and
+every one written later**, with no constant to remember.
+`backend/test/db.maths-trainer.test.js` asserts it as a whole-stat-surface
+before/after snapshot rather than a list of named stats, so a statistic added later
+is covered automatically.
+
+`prompt` stores canonical segment notation (`'T19'`, `'T17,13,D19'`) — the app's own
+`dartLabel()` output — which makes the per-segment queries a `GROUP BY` rather than
+string-parsing English.
+
+**`answered_ms` is load-bearing, not telemetry**: it drives the threshold, the known
+ledger and the instant ladders, so it is guarded as carefully as `correct` — negatives
+and sub-`MATHS_MIN_PLAUSIBLE_MS` (120ms) values rejected, long ones clamped. A client
+reporting 1ms per answer would otherwise earn the mode's flagship badge for nothing.
+Recorded for wrong answers too: a fast wrong answer and a slow wrong answer are
+different learner behaviours.
+
+**Server-side re-derivation**: `addMathsTrainerRound()` recomputes the correct answer
+from the submitted `prompt` and ignores any client-supplied verdict — same standard as
+`addTurn()`'s SEC-22 consistency guard, at a fraction of the cost because a maths
+answer is trivially verifiable. Without it the Sprint leaderboard is a number the
+client invents. `createGame()` validates the four closed config sets and rejects
+`promptStyle:'board'` on a single-segment session.
+
+### Registry and screen
+
+`maths_trainer` in `KNOWN_GAME_TYPES` and `GAME_TYPES`. **It declares no
+`throwDart`/`enterTurn`/`undoLastTurn`** — a dartless mode has nothing for them to
+act on, and `backend/test/frontend.turn-loop-dispatch.test.js` states that as an
+explicit narrow exemption (everything not about darts is still required, and the test
+also asserts those three members stay *absent*, so a stub cannot be added to keep it
+quiet). `noDartInput: true` hides the Pad/Dartboard toggle — distinct from `padOnly`,
+which means "the pad, not the board". `paperTheme: true` reuses Checkout Trainer's
+cream skin, which that member's own comment anticipated ("a future no-board mode
+might well want one without the other"). `noLiveDisplay`/`noCompletionStats`;
+`NON_SAVABLE_GAME_TYPES` because resume is replay-from-turns and there are none.
+
+The play surface is `#maths-quiz`, which **must exist in `renderGameShell()`'s
+template as well as the static markup** — that function replaces `.game-play-area`'s
+innerHTML wholesale, so an element present only in the markup is gone the instant a
+game starts (this was the build's first real bug). `renderGameMathsTrainer()` hides
+`#rail-play` and `.oche`, the same two regions `showGameResult()` takes over.
+
+**The timing rule** is the mode's signature and the only instrument in the app that
+expresses time as quality: a printed ruler under the question, eight divisions, the
+threshold marked in flag gold, and a tick dropped where the answer landed. Its
+verdict styling deliberately comes *after* the selection styling and restates the text
+colour — an option that is both chosen and correct was inheriting cream from `.chosen`
+while `.truth` repainted the background pale, rendering the answer invisible.
+
+**The board prompt** (`counting` + `promptStyle:'board'`) is a *printed* diagram, not
+the app's real dartboard: rendering the live board on cream produces a dark slab in
+the middle of the paper, the identical mistake Paper Mode's CSS warns about for
+`.oche`. Ink hairlines, the two scoring rings tone-washed, each dart a solid dot with
+a paper halo. Position rather than colour separates a treble from a double, which is
+also what keeps it readable in colorblind mode. Geometry is `BOARD_GEOM`/`DB_SECTORS`
+so it cannot drift from the real board.
+
+### Achievements
+
+`MATHS_MILESTONE_LADDERS` (4 ladders: **Segments Known Cold** 3/6/10/15/22, lifetime
+rounds, lifetime *instant* answers, best instant streak) and
+`MATHS_SPRINT_MILESTONE_LADDERS` (1 ladder), reusing `checkChuckinMilestoneTier()`.
+Note what is absent: a lifetime *correct* ladder. Rewarding slow correct answers would
+reward the habit the mode removes. Three one-offs: ⚡ **Flawless Minute** (a 10+-round
+Sprint with every answer correct), 👁️ **At a Glance** (25 instant 3-dart totals read
+off the **board** — board-only, because the text prompt does the reading for you), and
+🔢 **Ton Counter** (25 correct 3-dart totals of 100+).
 
 ---
 

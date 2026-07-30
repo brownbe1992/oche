@@ -89,11 +89,23 @@ const CASES = {
                                checkoutTrainerTricks: false, checkoutTrainerPin: null, routeRecallCeiling: 3 },
                       keys: ['checkoutTrainerMode', 'checkoutTrainerDifficulty', 'checkoutTrainerPin',
                              'routeRecallCeiling'] },
+  // Four independent choices, so all four have to survive the round trip — and
+  // deliberately non-default values, since a fixture of defaults would pass
+  // against a restoreSetup() that did nothing at all.
+  maths_trainer:     { setup: { mathsQuestionType: 'counting', mathsPromptStyle: 'board',
+                                mathsDifficulty: 'hard', mathsMode: 'sprint' },
+                       keys: ['mathsQuestionType', 'mathsPromptStyle', 'mathsDifficulty', 'mathsMode'] },
 };
 
 // Types whose config is a constant or empty — nothing was chosen, so nothing comes
 // back. Listed rather than inferred, so a type that GAINS options is a failure here
 // (its key stops matching this list) rather than a silent no-op.
+const MATHS_SPRINT_SECONDS = (() => {
+  const m = src.match(/const MATHS_SPRINT_SECONDS\s*=\s*(\d+)/);
+  assert.ok(m, 'MATHS_SPRINT_SECONDS not found in the page source');
+  return Number(m[1]);
+})();
+
 const NO_OPTIONS = ['baseball', 'pressure_chamber', 'chuckin', 'around_the_clock',
   'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
 
@@ -102,6 +114,7 @@ function run(key, setupObj, startScore) {
   const sandbox = {
     setup: setupObj, CRICKET_STANDARD_NUMBERS, KILLER_DEFAULT_LIVES,
     DEAD_MAN_WALKING_DEFAULT_DIFFICULTY, PRESSURE_ROUNDS, normaliseDeadManWalkingDifficulty,
+    MATHS_SPRINT_SECONDS,
     buildConfigNone, restoreSetupNone,
     resolveCricketNumbers: () => setupObj.cricketCustomNumbers.slice(),
     resolveHalveItTargets: () => (setupObj.halveItPreset === 'custom' ? setupObj.halveItCustomTargets.slice() : null),

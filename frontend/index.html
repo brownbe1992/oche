@@ -167,6 +167,40 @@
             <select class="date-input" id="setup-flavor-select" style="width:auto" onchange="onSetupFlavorSelect(this.value)"></select>
           </div>
 
+          <!-- Maths Trainer (docs/minigames-roadmap.md Part A). Four choices, all
+               baked into games.config at startGame() and immutable for the session,
+               the same treatment Checkout Trainer's difficulty/sub-mode already get. -->
+          <div class="setup-section" id="maths-options-section" hidden>
+            <div class="setup-label">What to practise</div>
+            <div class="opts" style="margin:0">
+              <div class="seg" role="group" aria-label="Question type">
+                <button id="maths-qt-segment" aria-pressed="true" onclick="setMathsQuestionType('segment')">Segment values</button>
+                <button id="maths-qt-counting" aria-pressed="false" onclick="setMathsQuestionType('counting')">Count a visit</button>
+              </div>
+            </div>
+            <div class="opts" style="margin:8px 0 0" id="maths-prompt-style-row" hidden>
+              <div class="seg" role="group" aria-label="How the darts are shown">
+                <button id="maths-ps-text" aria-pressed="true" onclick="setMathsPromptStyle('text')">Named in words</button>
+                <button id="maths-ps-board" aria-pressed="false" onclick="setMathsPromptStyle('board')">🎯 Read the board</button>
+              </div>
+            </div>
+            <div class="setup-label" style="margin-top:14px">Difficulty</div>
+            <div class="opts" style="margin:0">
+              <div class="seg" role="group" aria-label="Maths Trainer difficulty">
+                <button id="maths-diff-easy" aria-pressed="true" onclick="setMathsDifficulty('easy')">Easy</button>
+                <button id="maths-diff-hard" aria-pressed="false" onclick="setMathsDifficulty('hard')">Hard</button>
+              </div>
+            </div>
+            <div class="setup-label" style="margin-top:14px">Session</div>
+            <div class="opts" style="margin:0">
+              <div class="seg" role="group" aria-label="Maths Trainer session type">
+                <button id="maths-mode-freeform" aria-pressed="true" onclick="setMathsMode('freeform')">Freeform</button>
+                <button id="maths-mode-sprint" aria-pressed="false" onclick="setMathsMode('sprint')">⏱️ Sprint (60s)</button>
+              </div>
+            </div>
+            <p class="pp-meta" id="maths-options-blurb" style="margin:8px 0 0"></p>
+          </div>
+
           <!-- Cricket target numbers (Cricket only) -->
           <div class="setup-section" id="cricket-options-section" hidden>
             <div class="setup-label">Cricket targets</div>
@@ -460,6 +494,11 @@
 
       <!-- Results host for GAME OVER / LEG COMPLETE / MARATHON COMPLETE /
            Checkout Blitz's TIME'S UP. Empty and hidden during play. -->
+      <!-- Maths Trainer's whole play surface (docs/minigames-roadmap.md Part A).
+           A mode with no darts has no use for the slots/status/pad or the board,
+           so renderGameMathsTrainer() hides #rail-play and .oche and renders
+           everything here instead. -->
+      <div class="mathsq" id="maths-quiz" hidden></div>
       <div class="game-result" id="game-result" hidden></div>
     </div>
 
@@ -1133,6 +1172,7 @@
 <script src="js/halve-it.js"></script>
 <script src="js/shanghai.js"></script>
 <script src="js/baseball.js"></script>
+<script src="js/maths-trainer.js"></script>
 <script>
 // Surfaces uncaught client-side errors visibly instead of failing silently —
 // on a phone, there's no console to check, so a button that "does nothing"
@@ -1329,7 +1369,12 @@ const DB = {
   async wipeAll(){ await Backend.send('POST','/api/wipe-all'); await this.refreshStats(); },
 
   // push the current game snapshot to any scoreboard screens
-  pushLive(snapshot){ Backend.send('POST','/api/live', snapshot).catch(logErr); }
+  pushLive(snapshot){ Backend.send('POST','/api/live', snapshot).catch(logErr); },
+  // Maths Trainer: a round is NOT a turn — this mode writes no turns and no darts
+  // at all, which is what gives it zero footprint on every other statistic. The
+  // server re-derives correctness from the prompt, so a failure here loses the
+  // record of one answer and never mis-scores it.
+  recordMathsRound(gameId, round){ return Backend.send('POST', `/api/games/${gameId}/maths-round`, round).catch(logErr); },
 };
 // The project's one way to say "this request failing is not worth interrupting the
 // player over." Use `.catch(logErr)` — never a bare `.catch(()=>{})`, which is the
@@ -1497,6 +1542,12 @@ let setup = { slots:[], start:501, legsPerSet:3, setsPerGame:1, practice:false, 
   doublesTargets:[], loadoutByName:{}, leagueFixtureId:null, pendingFixtures:[],
   checkoutTrainerMode:'freeform', checkoutTrainerDifficulty:'full', checkoutTrainerTricks:false, routeRecallCeiling:2,
   checkoutTrainerPin:null,
+  // Maths Trainer (docs/minigames-roadmap.md Part A). questionType and difficulty
+  // are two SKILLS in a progression rather than two difficulties of one thing —
+  // you cannot total a visit quickly while still computing what T17 is — so they
+  // are independent dials. promptStyle is counting-only: 'board' is what makes the
+  // second skill trainable instead of a text-comprehension exercise.
+  mathsQuestionType:'segment', mathsPromptStyle:'text', mathsDifficulty:'easy', mathsMode:'freeform',
   // Has the player actually PICKED a game on Step 1 yet? `mode`/`gameType`
   // above always hold some concrete value (they have to — startGame() reads
   // them directly), so neither can express "nothing chosen yet", and Step 1
@@ -1724,6 +1775,14 @@ function buildDartboard(){
 function padOnlyGame(){
   return !!(game && GAME_TYPES[game.gameType] && GAME_TYPES[game.gameType].padOnly);
 }
+// Whether the current game type takes NO dart input at all — not "the pad rather
+// than the board" (that is padOnly above) but neither, because nothing is thrown.
+// Today only the Maths Trainer, whose answers are taps on four options. The
+// Pad/Dartboard toggle has nothing to switch between for such a mode, so it is
+// hidden alongside the pad-only case rather than offering a choice with no effect.
+function noDartInputGame(){
+  return !!(game && GAME_TYPES[game.gameType] && GAME_TYPES[game.gameType].noDartInput);
+}
 
 // The input mode actually in force right now. `dartboardMode` stays the household's
 // own PREFERENCE (seeded at boot from /api/settings/default-input, changed only by
@@ -1756,7 +1815,7 @@ function applyDartMode(){
   const board = document.getElementById('dart-board-wrap');
   const boardOn = boardInputActive();
   const imtRow = document.querySelector('#game-header-controls .imt-row');
-  if(imtRow) imtRow.hidden = padOnlyGame();
+  if(imtRow) imtRow.hidden = padOnlyGame() || noDartInputGame();
   // Bounce Out (docs/archive/dartboard-zone-tracking-roadmap.md "Bounce-out tracking") is
   // available in both Pad and Dartboard mode — unlike the old flat Miss button it
   // replaced (Dartboard-mode-only, now folded into the miss ring), it's never
@@ -2117,6 +2176,11 @@ const HOME_COMBO_SPECS={
     fetch(){ return Backend.get('/api/stats/checkout-blitz-leaderboard').then(blitzLeaderboard=>{ homeData.checkoutTrainer={blitzLeaderboard}; }); },
     hasCache(){ return !!homeData.checkoutTrainer; },
     fallback(){ homeData.checkoutTrainer={blitzLeaderboard:[]}; },
+  },
+  maths_trainer:{ perMode:false,
+    fetch(){ return Backend.get('/api/stats/maths-sprint-leaderboard').then(leaderboard=>{ homeData.mathsTrainer={leaderboard}; }); },
+    hasCache(){ return !!homeData.mathsTrainer; },
+    fallback(){ homeData.mathsTrainer={leaderboard:[]}; },
   },
   bobs_27:{ perMode:false,
     fetch(){ return Backend.get('/api/stats/bobs27-leaderboard').then(leaderboard=>{ homeData.bobs27={leaderboard}; }); },
@@ -4606,6 +4670,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'dead_man_walking', label:'💀 Dead Man Walking',
     blurb:"15 rounds. Each one drops you mid-checkout on one of YOUR OWN historically weakest finishes, with one fewer dart than you'd usually need. Close it — Walked Out. Bust, or run out of darts — Executed. No warmup, no easy numbers: the deficits are pulled straight from your own worst history and keep recurring until you solve them. The count of Walked Out rounds out of 15 lands on a result, from Pardoned down to Executed.",
     apply(){ setMode('dead_man_walking'); } },
+  { key:'maths_trainer', label:'🧠 Maths Trainer',
+    blurb:"No dartboard needed — this is the one for anyone who hasn't learned the doubles and trebles of the higher numbers. Two skills, in order: know what treble 19 IS off the top of your head, then total three darts at a glance. Four options, one tap, and it is graded on SPEED as well as correctness — a right answer you had to work out means you computed it rather than knew it, which is exactly the habit this removes. Your headline stat is how many segments you know cold; the session ends on a crib sheet naming the ones you still stall on.",
+    apply(){ setMode('maths_trainer'); } },
   { key:'killer', label:'🔪 Killer',
     blurb:"Elimination darts. Each player is randomly assigned their own number when the match starts. Land darts on your own number to build lives — reach the lives threshold and you become a killer. Once you're a killer, hitting an opponent's number costs them lives instead; drop to 0 lives and you're eliminated. Last player standing wins the leg (your own double is a self-kill if you're already a killer). Choose the lives threshold above.",
     apply(){ setMode('h2h'); setGameType('killer'); } },
@@ -4706,7 +4773,7 @@ const GAME_LEDGER_CATEGORIES = [
   // and since each category is named in text and carries its own glyph, the color
   // is reinforcement rather than a color-only signal.
   { key:'minigames', label:'Minigames', accent:'#4ec9b0', sub:'Short games you can finish in a few minutes',
-    keys:['checkout_trainer'] },
+    keys:['checkout_trainer','maths_trainer'] },
   { key:'traditional', label:'Traditional', accent:'var(--gold)', sub:'The games you know and love (or hate)',
     keys:['x01','cricket','baseball','shanghai','halve_it'] },
   { key:'training', label:'Practice & Drills', accent:'var(--green)', sub:'Throw for fun or train your skills',
@@ -4723,7 +4790,7 @@ const GAME_LEDGER_NAMES = {
   doubles_practice:'Doubles Practice', chuckin:"Just Chuckin' It", checkout_trainer:'Checkout Trainer',
   around_the_clock:'Around the Clock', around_the_world:'Around the World', bobs_27:"Bob's 27", checkout_ladder:'121 Checkout Ladder',
   pressure_chamber:'The Pressure Chamber', gauntlet:'The Gauntlet', dead_man_walking:'Dead Man Walking',
-  killer:'Killer', ghost:'Ghost Mode', marathon:'Marathon Mode',
+  killer:'Killer', ghost:'Ghost Mode', marathon:'Marathon Mode', maths_trainer:'Maths Trainer',
   // Deliberately no 'league_game' entry: it is not a ledger row (no category
   // lists it) and nothing renders a name for it any more. The removed fallback
   // panel was the one thing that did; setupLedgerRowKey() now resolves a league
@@ -4748,6 +4815,7 @@ const GAME_LEDGER_TEASERS = {
   killer:'Build lives on your own number, then hunt everyone else’s.',
   ghost:'Race a recording of your own past leg, dart for dart.',
   marathon:'45 minutes of chained 501 legs, back to back.',
+  maths_trainer:'Learn what treble 19 is — off the top of your head.',
 };
 // One small monoline icon per category (not per exact game) — a single
 // coherent visual system replacing the old ad hoc "some names have an emoji
@@ -5622,6 +5690,13 @@ async function startGame(){
   }
   beginGameSession('h2h-gated');
   if(game.gameType === 'checkout_trainer' && game.config.mode === 'blitz') startCheckoutBlitzTimer();
+  // Maths Trainer serves its first question here rather than from its render
+  // function: render is called on every state change, and generating a question
+  // there would reroll it (and reset its timer) every time the screen repainted.
+  if(game.gameType === 'maths_trainer'){
+    if(game.config.mode === 'sprint') startMathsSprint();
+    nextMathsQuestion();
+  }
 }
 
 // a player's per-match runtime record (separate from lifetime stats)
@@ -6357,6 +6432,11 @@ const BADGE_INFO = {
   checkout_trainer_perfectionist:  { icon:'🌟', label:'Perfectionist', desc:'Finish a Freeform session of 15+ attempts with a 100% optimal rate.', checkoutTrainer:true },
   checkout_trainer_perfect_minute: { icon:'💎', label:'Perfect Minute', desc:'Every round in one Checkout Blitz run (5+ rounds) graded optimal.', checkoutTrainer:true },
   checkout_trainer_photo_finish:   { icon:'📸', label:'Photo Finish', desc:'Submit a legal Checkout Blitz round with under 1 second left on the clock.', checkoutTrainer:true },
+  maths_flawless_minute: { icon:'⚡', label:'Flawless Minute', desc:'Answer every round of a 10+-round Maths Sprint correctly.', mathsTrainer:true },
+  // Board-only on purpose: the text prompt names the darts for you, so it cannot
+  // demonstrate reading them off a board, which is what this badge is about.
+  maths_at_a_glance:     { icon:'👁️', label:'At a Glance', desc:'Total 25 three-dart visits instantly, read straight off the board.', mathsTrainer:true },
+  maths_ton_counter:     { icon:'🔢', label:'Ton Counter', desc:'Correctly total 25 three-dart visits worth 100 or more.', mathsTrainer:true },
   checkout_trainer_bogey_buster:   { icon:'💣', label:'Bogey Buster', desc:'With trick questions on, correctly call "no possible checkout" on a bogey number.', checkoutTrainer:true },
   // Route Recall's one-off flagship (docs/archive/checkout-trainer-route-recall-roadmap.md).
   // The 10-route floor is what stops it firing on a trivially small hunt — "every
@@ -7725,6 +7805,75 @@ const ROUTE_RECALL_MILESTONE_LADDERS = [
 registerMilestoneLadders(ROUTE_RECALL_MILESTONE_LADDERS, {checkoutTrainer:true});
 // The floor for 🗺️ Cartographer — see its BADGE_INFO entry.
 const ROUTE_RECALL_CARTOGRAPHER_MIN = 10;
+
+/* Maths Trainer's ladders (docs/minigames-roadmap.md Part A). Note what is NOT
+   here: a "lifetime correct answers" ladder. Rewarding slow correct answers would
+   reward the exact habit this mode exists to remove, so the volume ladder counts
+   INSTANT answers, and the flagship ladder counts segments actually learned.
+   "Segments Known Cold" is the one that matters — its top tier is the whole pool,
+   which is a real finish line rather than an arbitrary big number. */
+const MATHS_MILESTONE_LADDERS = [
+  { metric:'known', idPrefix:'maths_known_', statNoun:'segments known cold',
+    descFor: t => `Answer ${t.toLocaleString()} different doubles/trebles instantly and reliably.`,
+    tiers: [
+      { threshold:3,  label:'First Few',        icon:'🌱' },
+      { threshold:6,  label:'Getting Somewhere', icon:'📈' },
+      { threshold:10, label:'Half the Board',   icon:'🎯' },
+      { threshold:15, label:'Quick Maths',      icon:'🧠' },
+      { threshold:22, label:'Knows the Numbers', icon:'👑' },
+    ] },
+  { metric:'rounds', idPrefix:'maths_rounds_', statNoun:'lifetime rounds',
+    descFor: t => `Answer ${t.toLocaleString()} lifetime Maths Trainer rounds.`,
+    tiers: [
+      { threshold:50,    label:'Warming Up',      icon:'🔥' },
+      { threshold:200,   label:'Doing the Reps',  icon:'🔁' },
+      { threshold:500,   label:'Times Table',     icon:'🖩' },
+      { threshold:1500,  label:'Mental Arithmetic', icon:'📐' },
+      { threshold:5000,  label:'Numbers Man',     icon:'🧾' },
+      { threshold:15000, label:'Human Calculator', icon:'🤖' },
+    ] },
+  { metric:'instant', idPrefix:'maths_instant_', statNoun:'answers known instantly',
+    descFor: t => `Answer ${t.toLocaleString()} lifetime rounds inside the instant threshold — knew it, didn't work it out.`,
+    tiers: [
+      { threshold:25,   label:'Off the Cuff',    icon:'💭' },
+      { threshold:100,  label:'No Hesitation',   icon:'⚡' },
+      { threshold:300,  label:'Straight Out',    icon:'🚀' },
+      { threshold:1000, label:'Second Nature',   icon:'🌀' },
+      { threshold:3000, label:'Instant Recall',  icon:'🧠' },
+    ] },
+  { metric:'streak', idPrefix:'maths_streak_', statNoun:'best instant streak',
+    descFor: t => `Answer ${t.toLocaleString()} rounds instantly in a row.`,
+    tiers: [
+      { threshold:5,   label:'On a Roll',      icon:'🎲' },
+      { threshold:15,  label:'Rhythm',         icon:'🥁' },
+      { threshold:30,  label:'Locked In',      icon:'🔒' },
+      { threshold:75,  label:'Metronomic',     icon:'⏲️' },
+      { threshold:150, label:'Faultless',      icon:'💎' },
+    ] },
+];
+registerMilestoneLadders(MATHS_MILESTONE_LADDERS, {mathsTrainer:true});
+const MATHS_SPRINT_MILESTONE_LADDERS = [
+  { metric:'sprint', idPrefix:'maths_sprint_', statNoun:'best Maths Sprint score',
+    descFor: t => `Answer ${t.toLocaleString()}+ correctly in a single 60-second Maths Sprint.`,
+    tiers: [
+      { threshold:10, label:'Quick Off the Mark', icon:'🏁' },
+      { threshold:20, label:'Rapid Fire',         icon:'💨' },
+      { threshold:30, label:'Sharp',              icon:'🪒' },
+      { threshold:45, label:'Lightning',          icon:'⚡' },
+      { threshold:60, label:'One a Second',       icon:'🌟' },
+    ] },
+];
+registerMilestoneLadders(MATHS_SPRINT_MILESTONE_LADDERS, {mathsTrainer:true});
+// Sprint's length. Single-valued today but stored in config and validated
+// server-side rather than assumed — the same "store it even though it has one
+// value for now" precedent Checkout Blitz's durationSec and tournament_rounds set.
+// Lives here rather than in js/maths-trainer.js because GAME_TYPES' own
+// buildConfig() reads it.
+const MATHS_SPRINT_SECONDS = 60;
+// Floors for the three one-off Maths Trainer badges — see their BADGE_INFO entries.
+const MATHS_FLAWLESS_MIN_ROUNDS = 10;
+const MATHS_AT_A_GLANCE_MIN = 25;
+const MATHS_TON_COUNTER_MIN = 25;
 // Called after every Route Recall submission. Reads base + session exactly as
 // checkCheckoutTrainerMilestones() does, for the same reason: the lifetime figure
 // is fetched once at game start, never re-queried per submission.
@@ -10424,6 +10573,11 @@ function renderGameShell(){
         <div class="dart-board-wrap" id="dart-board-wrap" role="img"
              aria-label="Dartboard — tap a segment to score. This input needs a pointer; switch to Pad for keyboard scoring."></div>
       </div>
+      <!-- Maths Trainer's play surface. Present in BOTH this template and the
+           static markup above for the same reason #game-result is: renderGameShell()
+           replaces .game-play-area's innerHTML wholesale, so an element that only
+           exists in the static markup is gone the moment a game starts. -->
+      <div class="mathsq" id="maths-quiz" hidden></div>
       <div class="game-result" id="game-result" hidden></div>`;
   applyDartMode();
   updateSaveButtonVisibility();
@@ -10708,6 +10862,18 @@ const CHECKOUT_TRAINER_STAT_DEFS = [
   { key:'checkouttraineraccuracypct', label:'Accuracy %', desc:'Legal finishes ÷ total attempts', fmt:pctFmt, primary:true },
   { key:'checkouttrainerattempts', label:'Attempts', desc:'Total checkout attempts, Freeform and Checkout Blitz combined', fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
 ];
+/* Maths Trainer (REFERENCE.md §19b). "Segments known cold" leads deliberately —
+   correctness is not this mode's headline, because a player multiplying by three
+   every time is 100% correct and has learned nothing. */
+const MATHS_TRAINER_STAT_DEFS = [
+  { key:'mathssegmentsknown', label:'Known Cold', desc:'Doubles/trebles you answer instantly and reliably — the last 3 attempts all correct and all inside the instant threshold', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'mathsinstantpct', label:'Knew It %', desc:'Answers that were correct AND inside the instant threshold, ÷ answered rounds — a right answer you had to work out does not count', fmt:pctFmt, primary:true },
+  { key:'mathscorrectpct', label:'Correct %', desc:'Correct answers ÷ answered rounds, regardless of how long they took', fmt:pctFmt, primary:true },
+  { key:'mathsrounds', label:'Rounds', desc:'Total Maths Trainer rounds answered, every question type and session type combined', fmt:v=>v!=null?Number(v).toLocaleString():'—', primary:true },
+];
+const MATHS_TRAINER_BUBBLE_KEY_MAP = { mathssegmentsknown:'segmentsKnown',
+  mathsinstantpct:'instantPct', mathscorrectpct:'correctPct', mathsrounds:'rounds' };
+
 const CHECKOUT_TRAINER_BUBBLE_KEY_MAP = { checkouttraineroptimalpct:'optimalPct',
   checkouttraineraccuracypct:'accuracyPct', checkouttrainerattempts:'totalAttempts' };
 
@@ -11680,6 +11846,64 @@ const GAME_TYPES = {
       };
     }
   },
+  /* Maths Trainer (docs/minigames-roadmap.md Part A, REFERENCE.md §19b).
+     The first game type with NO darts at all: nothing is thrown, so there is no
+     visit to evaluate, no pad, no board, and no turns/darts rows — its rounds go
+     to maths_trainer_rounds instead, which is what gives it zero footprint on
+     every other statistic by construction rather than by remembering to exclude
+     it from fifteen queries.
+     That is why the turn-loop members every other type declares are absent here:
+     throwDart/enterTurn/undoLastTurn/evaluateVisit have nothing to act on. The
+     round lifecycle lives in answerMaths()/nextMathsQuestion() instead. */
+  maths_trainer: {
+    id: 'maths_trainer',
+    label: 'Maths Trainer',
+    soloOnly: true,
+    render: renderGameMathsTrainer,
+    newMatchPlayer: newMatchPlayerMathsTrainer,
+    ctorArg: 'config',
+    resetForNextLeg: resetPlayerForNextLegMathsTrainer,
+    resetLegState: resetLegStateNone,
+    playerSnapshot: playerSnapshotMathsTrainer,
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
+    // Its own crib-sheet summary (showMathsSessionSummary()), so the X01-shaped
+    // Trophy Cabinet fallback would fight it — same reasoning as Checkout
+    // Trainer's and Chuckin's.
+    noCompletionStats: true,
+    // Nothing about a quiz belongs on a TV across the room; pushLive() skips it.
+    noLiveDisplay: true,
+    // The cream checkout-card skin. Its own comment on Checkout Trainer's entry
+    // anticipated exactly this: paperTheme is a SEPARATE member from padOnly
+    // because "this mode looks like paper" and "this mode can't use the
+    // dartboard" are different claims, and a future no-board mode might want one
+    // without the other. This mode wants the skin and uses neither input.
+    paperTheme: true,
+    // Neither pad nor dartboard: an answer is a tap on one of four options, so the
+    // input toggle has nothing to switch between. Distinct from padOnly, which
+    // means "the pad, not the board" — see noDartInputGame().
+    noDartInput: true,
+    optionsSectionId: 'maths-options-section',
+    category: (setup, config) => config.mode === 'sprint' ? 'Maths Sprint'
+      : `Maths Trainer (${config.questionType === 'counting' ? 'counting' : 'segments'})`,
+    buildConfig: (setup) => ({
+      questionType: setup.mathsQuestionType || 'segment',
+      // Counting-only: a board prompt on a single segment would ask you to read
+      // something the label already says, and createGame() rejects that pairing.
+      promptStyle: (setup.mathsQuestionType === 'counting' && setup.mathsPromptStyle === 'board') ? 'board' : 'text',
+      difficulty: setup.mathsDifficulty || 'easy',
+      mode: setup.mathsMode || 'freeform',
+      durationSec: setup.mathsMode === 'sprint' ? MATHS_SPRINT_SECONDS : null,
+    }),
+    restoreSetup: (config) => {
+      setup.mathsQuestionType = config.questionType || 'segment';
+      setup.mathsPromptStyle = config.promptStyle || 'text';
+      setup.mathsDifficulty = config.difficulty || 'easy';
+      setup.mathsMode = config.mode || 'freeform';
+    },
+    statDefs: MATHS_TRAINER_STAT_DEFS,
+    personalBestsRenderer: null,
+    homeTabRenderer: renderHomeTabBodyMathsTrainer,
+  },
   killer: {
     id: 'killer',
     // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
@@ -12298,7 +12522,9 @@ GAME_TYPES.marathon.bubbleKeyMap = MARATHON_BUBBLE_KEY_MAP;
 // (isCurrentGameSavable(), startGame()) run at click time, long after load. Mirrors the
 // server's SAVABLE_GAME_TYPES (backend/db.js); the server re-validates every write and
 // never trusts this check (docs/archive/saved-games-roadmap.md).
-const NON_SAVABLE_GAME_TYPES = ['doubles_practice', 'chuckin', 'checkout_trainer', 'killer'];
+// maths_trainer joins these because resume is replay-from-turns and this mode
+// writes none: there is literally no visit history to reconstruct a session from.
+const NON_SAVABLE_GAME_TYPES = ['doubles_practice', 'chuckin', 'checkout_trainer', 'killer', 'maths_trainer'];
 const SAVABLE_GAME_TYPES = Object.keys(GAME_TYPES).filter(k =>
   !GAME_TYPES[k].dispatchOnly && !NON_SAVABLE_GAME_TYPES.includes(k));
 // Bow-out eligibility (docs/open-roadmap-items.md "Forfeiting a multiplayer
@@ -13200,6 +13426,7 @@ GAME_TYPES.pressure_chamber.bubbleKeyMap = PRESSURE_CHAMBER_BUBBLE_KEY_MAP;
 GAME_TYPES.doubles_practice.bubbleKeyMap = DOUBLES_PRACTICE_BUBBLE_KEY_MAP;
 GAME_TYPES.chuckin.bubbleKeyMap = CHUCKIN_BUBBLE_KEY_MAP;
 GAME_TYPES.checkout_trainer.bubbleKeyMap = CHECKOUT_TRAINER_BUBBLE_KEY_MAP;
+GAME_TYPES.maths_trainer.bubbleKeyMap = MATHS_TRAINER_BUBBLE_KEY_MAP;
 GAME_TYPES.around_the_clock.bubbleKeyMap = AROUND_THE_CLOCK_BUBBLE_KEY_MAP;
 GAME_TYPES.around_the_world.bubbleKeyMap = AROUND_THE_WORLD_BUBBLE_KEY_MAP;
 GAME_TYPES.bobs_27.bubbleKeyMap = BOBS_27_BUBBLE_KEY_MAP;

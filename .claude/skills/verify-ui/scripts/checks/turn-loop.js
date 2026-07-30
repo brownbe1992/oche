@@ -117,6 +117,38 @@ module.exports = async function run() {
       // Some modes commit per dart and have no Enter turn at all — calling it
       // there is harmless, since every enterTurn* opens with its own
       // no-darts-thrown guard.
+      /* A DARTLESS mode (GAME_TYPES.<type>.noDartInput — today the Maths Trainer)
+         has no turn loop to exercise: nothing is thrown, so throwDart/enterTurn/
+         undoLastTurn are deliberately absent from its registry entry and its rounds
+         go to their own table rather than `turns`. Detected from the registry rather
+         than named here, and its OWN loop is exercised instead so the type is not
+         silently uncovered — an answered round must move the fingerprint exactly as
+         a thrown visit does for every other mode. */
+      const dartless = await page.evaluate(() =>
+        !!(GAME_TYPES[game.gameType] && GAME_TYPES[game.gameType].noDartInput));
+      if (dartless) {
+        const advanced = await page.evaluate(async () => {
+          const errs = [];
+          try {
+            for (let i = 0; i < 3; i++) {
+              answerMaths(game.q.answer);
+              await new Promise(r => setTimeout(r, 60));
+              nextMathsQuestion();
+              await new Promise(r => setTimeout(r, 40));
+            }
+          } catch (e) { errs.push(String(e && e.message || e)); }
+          return { errs, rounds: game.players[0].rounds };
+        }).catch(e => ({ errs: [String(e && e.message || e)], rounds: 0 }));
+        rep.ok(`${key}: its own round loop runs without throwing`,
+          advanced.errs.length === 0, advanced.errs.join('; '));
+        rep.ok(`${key}: an answered round moves the game's state`, advanced.rounds === 3,
+          `${advanced.rounds} rounds recorded`);
+        rep.ok(`${key}: declares no dart-loop members — nothing to throw`,
+          await page.evaluate(() => ['throwDart', 'enterTurn', 'undoLastTurn']
+            .every(m => typeof GAME_TYPES[game.gameType][m] !== 'function')));
+        continue;
+      }
+
       const thrown = await page.evaluate(async () => {
         const err = [];
         for (let v = 0; v < 3; v++) {

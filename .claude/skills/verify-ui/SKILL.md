@@ -40,7 +40,7 @@ series, on purpose (see Rate limiting below).
 
 ## What it covers
 
-510 assertions across nineteen checks.
+554 assertions across twenty checks.
 
 **Each check's assertion count is recorded in `scripts/run.js`'s `CHECKS` table, and
 running fewer than that fails the suite.** That is the check on the checks: a suite
@@ -56,6 +56,7 @@ commit; the suite tells you which way it disagrees and by how much.
 |---|---|
 | `results-takeover` | Scoreboard and winner banner survive a leg win; play controls hide and restore across Next leg; results card is scrollable when it overflows; a whole-session summary clears the stale scoreboard. Portrait and landscape. |
 | `new-game` | Step 1 opens with no game selected and every category collapsed; expanding a category then picking a game renders its settings panel *inside that category* — never stranded below the ledger — with Continue and reachable per-game options; collapsing hides the panel and re-expanding restores the selection; enforced for every category, not just the first. Plus keyboard activation of buttons nested inside activatable cards. |
+| `maths-trainer` | The Maths Trainer end to end: its play surface survives `renderGameShell()`'s innerHTML replace (it did not, at first — the container was in the static markup only); the revealed correct answer is readable rather than cream-on-pale; the Pad/Dartboard toggle is hidden for a mode that takes neither input; a slow correct answer says *you worked it out* and is not styled as good; a live option set carries no arithmetic shortcut; the board prompt draws a real board with one marker per dart; and the Sprint clock is a wall-clock hard stop that refuses an answer past the buzzer. |
 | `ghost-picker` | Deep-linked "Race this leg" arms the exact leg asked for; an unfindable one arms nothing and says so; an empty filter clears a stale selection; the deep link costs one fetch. |
 | `scoring-modes` | X01, Cricket, Around the Clock and Checkout Trainer in depth — the right shell (slots row, undo labels, enter button) for each shape. |
 | `live-shell` | Every live-capable type in `GAME_TYPES` renders a lane or a stage on /display at 1920x1080, draws its board where it declares a stage, shows the throw strip, and leaks no markup into visible text; plus the post-leg result view (verdict line, one lane per player, tally band replacing the strip, and the full-screen banner NOT covering it). |

@@ -71,8 +71,11 @@ const resolveMatchUnits = new Function('GAME_TYPES', 'SINGLE_UNIT_MODES',
 // its value is being exactly what shipped, so any difference the sweep finds is a real
 // behaviour change rather than a transcription of it.
 function referenceMatchUnits(setup, gameType) {
+  // Frozen snapshot of the pre-registry logic. maths_trainer postdates it and is
+  // listed here for the same reason every other entry is: it is a solo drill whose
+  // wizard `mode` IS its game type, so one round is one leg and one set.
   const drillModes = ['challenge', 'ghost', 'doubles_practice', 'chuckin', 'checkout_trainer',
-    'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
+    'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet', 'maths_trainer'];
   const isPracticeBaseball = setup.gameType === 'baseball' && setup.mode !== 'h2h';
   const isPracticeShanghai = setup.gameType === 'shanghai' && setup.mode !== 'h2h';
   const isPracticeHalveIt = setup.gameType === 'halve_it' && setup.mode !== 'h2h';
