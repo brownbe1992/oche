@@ -39,6 +39,8 @@
 | 7 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
 | 8 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
 | 9 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
+| 10 | **Maths Trainer** — a Minigames-category trainer for darts arithmetic (owner request). Two question types, four-option multiple choice: segment values ("what is treble 19?") and visit counting ("T17, 13, D19"). Own difficulty tiers, a 60-second Sprint, own achievements and lifetime correctness stats. Writes **no** `turns`/`darts` rows — its own `maths_trainer_rounds` table is what makes "counts toward nothing else" structural instead of fifteen more exclusion-constant call sites | `docs/minigames-roadmap.md` Part A | Medium |
+| 11 | **Minigames: pick which further trainers to build** (decision, not a build). Four are proposed and specified — Bust or Safe, Countdown, Cricket Marks, The Leave — none approved. Deliberately one tracker row rather than four, so "on the roadmap" is not read as "agreed"; each becomes its own row once chosen. Part B also argues for extracting the shared four-option quiz engine during item 10 rather than after, since all five games are one interaction | `docs/minigames-roadmap.md` Part B | Low (a decision) |
 | 14 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
 | 15 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
 | 16 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
@@ -61,6 +63,15 @@
   this game count toward, vs. is this specific pairing's match still owed).
 - **Mobile app's steps are sequential as listed** (step 2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
 - **Row 5** (voice announcement i18n) is the one remaining order-independent Low-Medium item — it can be interleaved anywhere, including ahead of the bigger lifts.
+- **Rows 10 and 11 (Minigames) are order-dependent in one specific way**: item 11 is a
+  decision, and it wants making *before* item 10 is built, not after. All five proposed
+  minigames are the same interaction (generate a question, offer four options, grade the
+  tap, keep a streak, optionally race a clock), so if any of Part B is going to be built,
+  item 10 should extract that loop as a shared engine as it goes rather than shipping a
+  bespoke mode that the second one then has to either duplicate or refactor. If the answer
+  to item 11 is "none of them," item 10 is cheaper built bespoke — which is exactly why
+  the decision is worth having first. Item 11 can otherwise be interleaved anywhere; it is
+  a conversation, not a build.
 
 ### Code-quality cluster (items 34–59): recommended completion order
 
