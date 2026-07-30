@@ -82,22 +82,63 @@ The engine is worth it at two or more.
 
 ## Goal
 
-Learn the arithmetic of darts by recall rather than by counting up each time.
-Two things a scoring player does constantly:
+**Who this is for, in the owner's own words: people who haven't learned the
+doubles and trebles of the higher numbers.** Not a fluency polish for someone who
+already knows them — a way to acquire them in the first place. That framing
+decides several things below, so it is stated first rather than left implied.
 
-1. **Segment values** — "treble 19 is 57." Recognised instantly by experienced
-   players, worked out laboriously by everyone else.
-2. **Adding a visit** — "treble 17, thirteen, double 19 — that's 102." Three
-   different multipliers, summed under mild time pressure, every visit of every
-   leg.
+Two skills, and they are a **progression**, not two difficulties of one thing:
 
-Answers are **multiple choice, four options**, not a number pad. This is a
-deliberate departure from Checkout Trainer and the reason the mode exists as its
-own thing: a checkout has many valid routes and typing one is the answer, whereas
-"what is treble 19" has exactly one right number, and recognising it among
-plausible neighbours is closer to what the skill actually is. Recognition also
-makes the mode playable one-handed in ten seconds, which is the point of a
-minigame.
+1. **Know the segment values cold** — "treble 19 is 57," *off the top of your
+   head*. Not 19 × 3 worked out in a second and a half. The target state is
+   recognition, the way you recognise a word rather than spelling it out.
+2. **Then total a visit at a glance** — look at three darts in the board and have
+   the number, in a split second, without walking through them one at a time.
+
+Skill 2 is built on skill 1: you cannot add T17 + 13 + D19 quickly while you are
+still computing what T17 *is*. So the modes are sequential, and the app should
+treat them that way — the segment mode is where a beginner starts, and the
+counting mode is what it is for.
+
+### Speed is the metric, not just correctness
+
+This is the most important consequence of the clarification, and it inverts what
+an obvious implementation would measure.
+
+**A right answer that took four seconds is a failure of this mode's actual goal.**
+The player computed it; they did not know it. Correctness alone cannot tell those
+apart, and a mode reporting "94% correct" to someone who is multiplying by three
+every single time would be telling them they had learned something they hadn't.
+
+So the design carries an explicit **instant threshold** — a per-answer distinction
+between *known* and *worked out*:
+
+- **Known**: correct, and answered inside the threshold.
+- **Worked out**: correct, but slower.
+- **Wrong**: incorrect, or not answered at all.
+
+The threshold needs choosing with a real number (start around **1.5 s** for a
+single segment, more for a 3-dart total, and make it a named constant so it can be
+tuned rather than hunted for). The headline statistic is then "**segments you know
+cold**" — how many of the pool you answer instantly and reliably — not a raw
+percentage. See Stats.
+
+Answers are **multiple choice, four options**, not a number pad, and for this goal
+that is the right shape rather than merely a convenient one: typing 57 measures
+your thumbs, and a recall drill wants the gap between seeing "T19" and knowing
+"57" measured as directly as possible. Four options also make the sub-second
+answer physically possible, which a keypad does not. Recognition among plausible
+neighbours is also the honest test — see the distractor rules, which exist so that
+recognising the answer requires knowing it.
+
+### "No dartboard" means no *physical* board
+
+Worth being explicit, because skill 2 is literally "look at the board and do the
+maths." An **on-screen board diagram is not a dartboard in the room** — the mode
+stays fully playable on a train, which is the criterion at the top of this
+document. The counting mode's board-style prompt (below) is a rendered SVG, and it
+is the thing that makes skill 2 trainable at all rather than a text-comprehension
+exercise.
 
 ## How this differs from Checkout Trainer (important — don't conflate)
 
@@ -119,38 +160,83 @@ one dart-entry path. A mode with no darts at all shares neither, and the resulti
 
 ## The two question types
 
-`config.questionType`, `'segment' | 'counting'`.
+`config.questionType`, `'segment' | 'counting'` — skill 1 and skill 2 from the
+Goal, in that order.
 
-**`segment`** — one board segment, asked as a value.
+**`segment`** — one board segment, asked as a value. Skill 1.
 > **What is treble 19?**  `52` · `57` · `55` · `59`
 
-**`counting`** — a visit of 2 or 3 darts, asked as a total.
+**`counting`** — a visit of 2 or 3 darts, asked as a total. Skill 2.
 > **Treble 17, 13, double 19**  `95` · `102` · `100` · `108`
 
 Both are one tap. Both reveal the correct answer immediately after, with the
 arithmetic spelled out on a wrong answer (`T17 = 51, S13 = 13, D19 = 38 → 102`),
 because a trainer that only says "wrong" teaches nothing. Checkout Trainer
-already sets this precedent by revealing the optimal route.
+already sets this precedent by revealing the optimal route. On a *slow but correct*
+answer the reveal should say so too — "right, but you worked it out" — since that
+is the distinction the mode exists to close.
+
+### Counting mode needs a board prompt, not only a text one
+
+The brief for skill 2 is "**quickly look at the board** and do the maths in a split
+second after throwing three darts." A text prompt reading "Treble 17, 13, double
+19" does not train that. It trains adding three numbers you have already been
+told — the reading has been done *for* you, and the reading is half the skill.
+
+So `counting` carries a prompt style, `config.promptStyle`:
+
+| | Prompt | Trains |
+|---|---|---|
+| `text` | "Treble 17, 13, double 19" | the arithmetic alone |
+| `board` | three dart markers drawn on a dartboard diagram | **reading the board *and* the arithmetic** — the real thing |
+
+`board` is the one that matches the request, and `text` is worth keeping as the
+gentler rung: a beginner who cannot yet find T17 on a wedge should be able to
+practise the addition without also hunting the board. Expect `board` to become the
+default once someone has played both.
+
+**This is cheap to build, which is the main reason to do it properly.**
+`BOARD_GEOM` (`frontend/index.html`) already exposes `xy(radius, degrees)` plus the
+ring radii (`trebleIn/trebleOut`, `doubleIn/doubleOut`, `bullIn/bullOut`), which is
+exactly what placing a marker at a segment's centre needs — mid-ring radius, sector
+centre angle. `buildDartboard()` already draws the board from that same geometry.
+A static, non-interactive board with three dots on it is a small amount of new SVG
+over machinery that exists and is already shared with `display.html`.
+
+Two things to get right in the visual:
+
+- **The markers must be unambiguous.** A dot near a ring boundary is a question
+  about the renderer, not about darts. Place markers at the *centre* of the ring
+  band, never near an edge, and consider a short leader line or a number on each
+  dart (1, 2, 3) so the player can tell which is which when two land close
+  together.
+- **It must not become a colour-only puzzle.** The board's own red/green already
+  encodes double/treble, and a colourblind player reading marker positions against
+  a recoloured board (colourblind mode remaps `--red`/`--green`) must still be able
+  to tell a treble ring from a double ring. Position does most of that work; check
+  it rather than assume it.
 
 ## Difficulty
 
-`config.difficulty`, `'easy' | 'hard'`, per question type:
+`config.difficulty`, `'easy' | 'hard'`:
 
 | | Easy | Hard |
 |---|---|---|
-| `segment` | doubles and trebles of **10–19** — the segments that carry real scoring | the full 62-segment alphabet: singles, doubles and trebles of 1–20, outer bull, bull |
+| `segment` | doubles and trebles of **10–20** | the same pool, plus the awkward extras — bull/outer bull, and doubles of the low odd numbers — and a **tighter instant threshold** |
 | `counting` | **2 darts** | **3 darts** |
 
-**This is an interpretation of the request and should be confirmed.** The brief
-said "the easy mode should be doubles/trebles of 10-19, and the hard mode should
-be 2-3 dart answers," which reads as difficulty and question type being the same
-dial — easy *is* segment mode, hard *is* counting mode. The table above instead
-treats them as independent, so a player can drill 3-dart counting without first
-being forced through single segments, and can still drill hard single segments
-(D3, T7, the bull) which are genuinely harder to recall than T15 and which the
-coupled reading makes unreachable. If the coupled reading was meant, collapse
-`questionType`/`difficulty` into one four-value enum and drop the second toggle.
-See "Open questions."
+**The segment pool deliberately does not open out to all 62 segments on Hard**, and
+that is a change from this doc's first draft. The clarification is that the mode
+exists to learn *the higher numbers'* multiples — and singles are already known by
+anyone who can read (S13 is 13), while D3 and T4 are trivial to compute. Padding
+the pool with them would dilute every session with questions that need no practice,
+and would make the headline "segments you know cold" statistic look better as it got
+less meaningful. **The escalation for skill 1 is speed, not coverage** — which
+follows directly from the goal being instant recall rather than breadth.
+
+10–20 rather than 10–19: T20 = 60 and D20 = 40 are probably already known, but
+excluding 20 from a pool the player is reading off a real board is a strange gap,
+and two easy questions in the mix cost nothing.
 
 Note `CHECKOUT_TRAINER_DIFFICULTY_TIERS` is the existing precedent for a
 difficulty dial baked into `config` at `startGame()` and immutable for the
@@ -191,12 +277,24 @@ Hard rules, all testable:
    rolls. A generator that puts the truth in slot 2 slightly too often is a
    generator players learn instead of learning darts — and it would never be
    noticed by hand.
-6. Deterministic given an injected `rng`, like `pickCheckoutTarget()` already is,
+6. **No arithmetic shortcut that isn't the skill.** Every treble is a multiple of
+   3 and every double is even, so a treble question offering `57 · 38 · 55 · 59`
+   can be solved by *anyone who knows that rule* without knowing T19 — 57 is the
+   only multiple of 3. That is a genuine darts insight, but it is not the one being
+   trained, and a generator that leaks it will produce a player who scores well and
+   still can't call T19 at the board. So for a treble question prefer distractors
+   that are themselves multiples of 3, and for a double question prefer even ones.
+   The wrong-multiplier distractor (T19 → 38) is valuable enough to keep in the mix
+   deliberately — just not as the *only* implausible-by-arithmetic option, which is
+   what makes it a giveaway.
+7. Deterministic given an injected `rng`, like `pickCheckoutTarget()` already is,
    so all of the above can be asserted rather than eyeballed.
 
 **Per `CLAUDE.md`, this is a new calculation and ships with a committed
 `node:test` in the same change.** Non-negotiable, and the interesting assertions
-are rules 4 and 5 — the ones a human reviewer cannot check by looking.
+are rules 4, 5 and 6 — the three a human reviewer cannot check by looking, and
+rule 6 is the one most likely to be absent without anyone noticing, because the
+questions still *look* fine.
 
 ## Timed mode
 
@@ -232,6 +330,7 @@ CREATE TABLE IF NOT EXISTS maths_trainer_rounds (
   player_id     INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
   round_no      INTEGER NOT NULL,
   question_type TEXT    NOT NULL,   -- 'segment' | 'counting'
+  prompt_style  TEXT    NOT NULL DEFAULT 'text',  -- 'text' | 'board' (counting only)
   prompt        TEXT    NOT NULL,   -- canonical, machine-readable: 'T19' or 'T17,S13,D19'
   correct_answer INTEGER NOT NULL,
   options       TEXT    NOT NULL,   -- JSON array of the four offered values, in displayed order
@@ -242,12 +341,27 @@ CREATE TABLE IF NOT EXISTS maths_trainer_rounds (
 );
 CREATE INDEX IF NOT EXISTS idx_maths_rounds_game   ON maths_trainer_rounds(game_id);
 CREATE INDEX IF NOT EXISTS idx_maths_rounds_player ON maths_trainer_rounds(player_id);
+-- The segment table and "known cold" both group by prompt for one player.
+CREATE INDEX IF NOT EXISTS idx_maths_rounds_prompt ON maths_trainer_rounds(player_id, prompt);
 ```
 
 `player_id REFERENCES players(id) ON DELETE CASCADE` matches `turns`/`darts`/
 `game_players`; it is what makes player deletion and the player-merge feature work
 without a special case. **Not `player_name`** — a name-keyed table would survive a
 merge as orphaned history.
+
+**`answered_ms` is load-bearing, not telemetry.** Every "known cold" statistic, the
+instant ladders and the whole known-vs-worked-out distinction are derived from it,
+so it is as much a first-class field here as `correct` is. Two consequences: it must
+be recorded for *every* round including wrong ones (a fast wrong answer and a slow
+wrong answer are different learner behaviours), and there is deliberately **no**
+stored `instant` boolean — the threshold is applied at read time. Storing a verdict
+computed from a tunable constant would freeze that constant into history and make
+retuning it silently rewrite the past.
+
+`prompt` stores the canonical segment notation rather than display text, which is
+what makes the segment table and the per-segment queries a `GROUP BY prompt` rather
+than string-parsing English.
 
 A `games` row is still written (`game_type='maths_trainer'`) so the mode has a
 session, a `config`, a `completed_at` and a place on the Player Profile.
@@ -295,20 +409,32 @@ over `maths_trainer_rounds`, scoped per question type where it matters (segment
 and counting correctness are different skills and averaging them together hides
 both):
 
-- **Correctness %** — correct ÷ answered, the headline.
+- **Segments known cold** — *the headline*, e.g. "14 of 22." A segment counts as
+  known when its recent answers are correct **and inside the instant threshold**
+  (define "recent" concretely — last 3 attempts, or a rolling window — and require
+  a minimum sample so one lucky fast tap doesn't promote it). This is the number
+  that answers "am I actually learning this?", which raw correctness cannot.
+- **Still working them out** — its complement, and the more useful half for a
+  learner: correct but slow. A player at "94% correct, 3 known cold" is being told
+  something true and actionable that "94% correct" alone actively hides.
+- **The segment table** — every segment in the pool with its correctness and median
+  time, so the player can see the shape of what they know. **This is the mode's
+  most valuable screen, not a nice-to-have** (see the note below on build order).
+- **Median answer time** per question type — median, not mean: one interrupted
+  round otherwise dominates.
+- **Correctness %** — kept, but deliberately *not* the headline, for the reason
+  above.
 - **Rounds answered** — lifetime volume.
-- **Median answer time** — median, not mean: one interrupted round otherwise
-  dominates. Reported per question type.
-- **Best correct streak** — longest-ever consecutive-correct run, computed by
-  walking rounds in order and resetting on any wrong answer, exactly as Checkout
-  Trainer's Best Optimal Streak is (not a maintained counter, so it can never
-  drift from the data).
+- **Best instant streak** — longest run of consecutive *known* (correct and inside
+  the threshold) answers. Walked over the rounds in order and reset on any miss,
+  exactly as Checkout Trainer's Best Optimal Streak is — not a maintained counter,
+  so it cannot drift from the data.
 - **Best Sprint score** — peak single 60-second run.
-- **Weakest segment** — the segment with the worst correctness over a minimum
-  sample (say 5 attempts). This is the one stat that closes the loop and makes the
-  mode a trainer rather than a scoreboard: it tells the player *which* number they
-  keep getting wrong. Consider a "drill this segment" deep link from it, mirroring
-  §19a's "Drill this checkout" — same pattern, same value.
+- **Weakest segment** — the worst segment over a minimum sample, by *time* as much
+  as by correctness. This is what closes the loop and makes the mode a trainer
+  rather than a scoreboard: it names the number you keep stalling on. A "drill this
+  segment" deep link mirroring §19a's "Drill this checkout" is the natural next
+  step, and for a learner it is arguably the whole product.
 
 Leaderboard: `getMathsSprintLeaderboard()`, one row per player, best-ever Sprint
 score, sorted desc — the peak-single-run shape (no minimum-attempts floor), like
@@ -327,19 +453,32 @@ Chuckin all already reuse it. All once-earned, permanent, non-revocable
 
 | Ladder | Metric | Tiers |
 |---|---|---|
+| **Segments Known Cold** | segments answered instantly and reliably (the headline stat) | 3 / 6 / 10 / 15 / 22 |
 | Lifetime Rounds | rounds answered, right or wrong | 50 / 200 / 500 / 1,500 / 5,000 / 15,000 |
-| Lifetime Correct | correct answers | 25 / 100 / 300 / 1,000 / 3,000 / 10,000 |
-| Best Correct Streak | longest consecutive-correct run | 5 / 15 / 30 / 75 / 150 |
+| Lifetime Instant Answers | correct **and** inside the threshold | 25 / 100 / 300 / 1,000 / 3,000 |
+| Best Instant Streak | longest consecutive-instant run | 5 / 15 / 30 / 75 / 150 |
 | Best Sprint Score | single best 60-second score | 10 / 20 / 30 / 45 / 60 |
+
+**Segments Known Cold is the ladder that matters** — it is the only one that tracks
+the thing the mode is for, and its top tier is "you have learned the whole pool,"
+which is a real finish line rather than an arbitrary big number. The old
+correctness-only ladder is deliberately replaced by the instant-answers one:
+rewarding slow correct answers would reward the habit the mode is trying to remove.
 
 One-off flagships:
 
-- 🧠 **Instant Recall** — a correct answer in under one second.
-- 🎓 **Full Board** — every one of the 62 segments answered correctly at least
-  once (lifetime, segment mode).
+- 🧠 **Off the Top of My Head** — every double and treble in the Easy pool answered
+  instantly at least once. The badge that means "I have actually learned these."
 - ⚡ **Flawless Minute** — a 10+-round Sprint with every answer correct.
+- 👁️ **At a Glance** — 25 instant, correct 3-dart totals from the **board** prompt.
+  Deliberately board-only: this is skill 2 as the owner described it, and the text
+  prompt does not demonstrate it.
 - 🔢 **Ton Counter** — 25 correct 3-dart counting answers where the total was 100+.
 - 🎲 **No Guessing** — 50 consecutive correct answers on Hard.
+
+Note the earlier draft's 🎓 **Full Board** (all 62 segments) is dropped: the pool no
+longer opens out to 62, and a badge for answering S7 correctly would reward
+nothing. "Off the Top of My Head" replaces it against the pool that matters.
 
 ## Registry members
 
@@ -362,7 +501,7 @@ maths_trainer: {
   practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
   category: (setup, config) => config.mode === 'sprint'
     ? 'Maths Sprint' : `Maths Trainer (${config.questionType})`,
-  buildConfig: (setup) => ({ /* questionType, difficulty, mode, durationSec */ }),
+  buildConfig: (setup) => ({ /* questionType, promptStyle, difficulty, mode, durationSec */ }),
   restoreSetup: (config) => { /* inverse */ },
   // NO evaluateVisit / throwDart / newMatchPlayer of the X01 shape —
   // nothing here is a visit. The engine owns the round lifecycle instead.
@@ -423,8 +562,12 @@ security property once a client can post rounds.
   disagrees. Do it. This is the same reasoning as SEC-22's scored-vs-darts
   consistency guard, at a fraction of the cost, and without it the Sprint
   leaderboard is a number the client is trusted to invent.
-- **Bound `answered_ms`** and reject negatives — it feeds "Instant Recall" and a
-  median.
+- **Bound `answered_ms`, and treat it as a scored field.** Reject negatives and
+  implausibly small values. It is not telemetry — it drives the instant ladders and
+  the "segments known cold" headline, so a client that reports 1 ms for every answer
+  earns the mode's flagship badge for nothing. This is the one field here worth
+  guarding as carefully as `correct`, and it is easy to overlook precisely because
+  in most apps a timing field *is* just telemetry.
 - Rate limiting already applies at the server level; a fast quiz posting one row
   per tap is the highest-frequency write path in the app, so check the round write
   is a single insert and not a read-modify-write.
@@ -433,25 +576,41 @@ security property once a client can post rounds.
 
 `backend/test/` gets, in the same change as the code:
 
-1. **Distractor generation** — the four hard rules above, especially the
-   plausibility band and the absence of positional bias, across both question
-   types, both difficulties, and every segment.
+1. **Distractor generation** — the hard rules above, across both question types,
+   both difficulties and every segment in the pool. The three that need real
+   assertions rather than a glance: the plausibility band, the absence of positional
+   bias, and **no arithmetic shortcut** — i.e. a treble question's options are not
+   distinguishable by divisibility by 3 alone, which is the rule whose absence looks
+   like nothing is wrong.
 2. **Question generation** — every generated `prompt` parses back to the segments
    it names; `correct_answer` equals their true sum; easy-mode segment questions
-   are all doubles/trebles of 10–19; counting questions carry the right dart count
-   for their difficulty.
-3. **Correctness/streak/median stats** — a seeded fixture with known answers,
+   are all doubles/trebles of 10–20; counting questions carry the right dart count
+   for their difficulty; and the Hard segment pool never contains a plain single
+   (the pool-narrowing decision, asserted rather than trusted to stay).
+3. **The instant threshold and "known cold"** — a seeded fixture of rounds with
+   deliberately chosen `answered_ms` values either side of the threshold, asserting
+   that a correct-but-slow answer counts as correct and **not** as known; that a
+   segment is promoted to known only once its window qualifies; that it is demoted
+   again when a slow answer enters the window; and that no stored boolean is
+   involved, i.e. changing the threshold constant reclassifies existing history.
+   This is the mode's core calculation and the one a reader is most likely to assume
+   works.
+4. **Board-prompt geometry** — for every segment in the pool, the marker position
+   lands inside the intended ring band and not within a tolerance of either edge.
+   A prompt that renders a treble as an ambiguous dot is a wrong question, and it is
+   invisible to every other test here.
+5. **Correctness/streak/median stats** — a seeded fixture with known answers,
    asserting each bubble, including that a streak resets on a wrong answer and
    that an unanswered (clock-expired) round counts as neither correct nor a
    streak-continuation.
-4. **Isolation** — the assertion that matters most and the easiest to forget:
+6. **Isolation** — the assertion that matters most and the easiest to forget:
    play a full Maths Trainer session in a fixture, then assert that **every**
    pre-existing statistic is byte-identical to before it. Darts thrown, last
    played, every average, every Personal Best, every leaderboard. Written as a
    before/after snapshot rather than a list of named stats, so a statistic added
    later is covered automatically. This is the test that would have caught
    Checkout Trainer's `fewestDartsCheckout` leak.
-5. **Play Again round-trip** — the new case in
+7. **Play Again round-trip** — the new case in
    `frontend.play-again-roundtrip.test.js`, with deliberately non-default choices.
 
 Browser side (`.claude/skills/verify-ui`): a new check driving a real session —
@@ -467,34 +626,61 @@ at zero, and the results screen renders. Remember the suite's assertion count in
 2. **Schema + write path** (`maths_trainer_rounds`, the insert, the server-side
    re-derivation guard).
 3. **The quiz engine and Freeform mode** end to end, one question type only
-   (`segment`, Easy) — the thinnest thing that is really playable.
-4. **The second question type and both difficulties.**
-5. **Stats, Personal Bests, the Player Profile tab.** Including the isolation test.
-6. **Sprint mode**, with the three-point hard stop and its leaderboard.
-7. **Achievements** — ladders first, one-offs after.
-8. **The "weakest segment" stat and its drill deep link**, if wanted. Genuinely
-   separable; a good candidate to defer and track as its own item rather than
-   letting it hold up the rest.
+   (`segment`, Easy) — the thinnest thing that is really playable. **Record
+   `answered_ms` from this step**, even before anything reads it: it is not a
+   later addition, and a session recorded without it is a session that can never
+   answer the mode's central question.
+4. **The segment table and "segments known cold."** Promoted from the end of this
+   list, where an earlier draft had it as an optional extra. For a player who has
+   not learned these numbers, "which ones do I still not know" *is* the product —
+   a percentage tells them nothing they can act on. Shipping steps 1–3 without it
+   would be shipping a quiz, not a trainer.
+5. **Counting mode: `text` prompt, then the `board` prompt.** Two rungs, in that
+   order. The board prompt is what the brief's second skill actually asks for, so
+   it is not optional, but the text prompt is the cheaper half and gets the
+   arithmetic path working before any SVG is involved.
+6. **Both difficulties**, including the tighter Hard threshold.
+7. **The rest of the stats, Personal Bests, the Player Profile tab.** Including the
+   isolation test.
+8. **Sprint mode**, with the three-point hard stop and its leaderboard.
+9. **Achievements** — ladders first, one-offs after.
+10. **The "drill this segment" deep link** from the weakest-segment stat. Genuinely
+    separable, and the one thing here that is fair to defer — track it as its own
+    item rather than letting it hold up the rest.
 
-Steps 1–7 are one shippable mode. If step 8 is deferred it becomes its own
+Steps 1–9 are one shippable mode. If step 10 is deferred it becomes its own
 tracker row — per `CLAUDE.md`, never a "partially completed" item.
+
+The reordering is the clarification's doing: the first draft built the whole quiz
+and treated the per-segment breakdown and the board prompt as extras. Both are
+now core, because the mode is for someone learning these values rather than
+someone testing values they already have.
 
 ## Open questions
 
-1. **Are question type and difficulty independent, or one dial?** The design above
-   treats them as independent and says why; the brief reads as coupled. This
-   changes the New Game options block and the `config` shape, so it is worth
-   answering before step 3. *(Answering "coupled" makes the mode simpler.)*
-2. **Does a wrong answer in Sprint cost time, or just score nothing?** Time
+1. ~~**Are question type and difficulty independent, or one dial?**~~ **Resolved by
+   the owner's clarification (2026-07): independent, because the two question types
+   are a *progression of two skills*, not two difficulties of one.** You cannot
+   total a visit quickly while still computing what T17 is, so segment mode is where
+   a beginner starts and counting mode is what it is for — and each needs its own
+   difficulty dial. The clarification also narrowed the Hard segment pool (speed,
+   not more segments) and added the board prompt; see those sections.
+2. **What exactly is the instant threshold, and does it differ per question type?**
+   The design says ~1.5 s for a single segment and more for a 3-dart total, as a
+   named constant. It wants a real number from someone who has played it — it is
+   the dial the whole "known cold" statistic hangs off, and too tight makes the
+   mode feel punitive while too loose makes it congratulate you for arithmetic.
+   Worth revisiting after step 4 with real data rather than guessing twice.
+3. **Does a wrong answer in Sprint cost time, or just score nothing?** Time
    penalties punish guessing, which is the failure mode a four-option quiz invites.
-3. **Should Sprint offer a "no wrong answers" variant** that ends the run on the
+4. **Should Sprint offer a "no wrong answers" variant** that ends the run on the
    first mistake? A different and arguably better test of recall, and cheap once
    the engine exists.
-4. **A Pocket Card equivalent on Home?** Checkout Trainer has one — a live
+5. **A Pocket Card equivalent on Home?** Checkout Trainer has one — a live
    unrecorded question answerable in place. A Maths Trainer question is even better
    suited to it (one tap, no route to enter). Same "deliberately not recorded"
    rules would apply, for the same three reasons §19 gives.
-5. **Naming.** "Maths Trainer" follows the brief. "Numbers", "Mental Arithmetic"
+6. **Naming.** "Maths Trainer" follows the brief. "Numbers", "Mental Arithmetic"
    and "Counting" were the alternatives; the row's teaser matters more than the
    name for a category the player is scanning.
 
