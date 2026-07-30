@@ -40,7 +40,7 @@ Stats page:
 Scoreboard
 - 9 darter celebration of some kind
 - Voice announcements (180, game shot, running score) — done, see docs/archive/voice-announcements-roadmap.md; full i18n follow-on in docs/voice-announcements-i18n-roadmap.md
-- Multiple live scoreboards at once (one per active match — e.g. four tournament matches being played simultaneously — plus an optional spectator "master" board showing every active match at once, tied to no single game; a one-game household sees no change) — full design in docs/multi-scoreboard-roadmap.md
+- Multiple live scoreboards at once (one per active match — e.g. four tournament matches being played simultaneously — plus an optional spectator "master" board showing every active match at once, tied to no single game; a one-game household sees no change, and any screen can be switched to a different match from the scoreboard itself, so an automatic choice is never one you're stuck with) — full design in docs/multi-scoreboard-roadmap.md
 
 Others
 - Schedule for the next session (Double Trouble badge, Busted Maximum badge,

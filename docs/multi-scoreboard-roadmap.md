@@ -160,7 +160,11 @@ match or holds none, and there are two kinds:
 | | How | When the match ends | Counts as "already pinned"? |
 |---|---|---|---|
 | **Implicit** | auto-followed, nobody chose it | released — the screen becomes eligible to auto-follow again | **yes** |
-| **Explicit** | `?game=<id>`, or picked from the picker | held; the screen says the match finished and offers the picker | **yes** |
+| **Explicit** | `?game=<id>`, `openScoreboard()` from the controller, or **switched by hand on the scoreboard** | held; the screen says the match finished and offers the switcher | **yes** |
+
+A manual switch therefore **upgrades** an implicit claim to an explicit one — the
+viewer has stated what they want to watch, and the app stops guessing on their
+behalf. See "Switching from the scoreboard" for why that asymmetry is deliberate.
 
 The full rule, including the case the owner's sentence doesn't cover:
 
@@ -285,22 +289,108 @@ state, and let the per-match board show the real thing.
 
 ### Choosing what a screen shows
 
+Three ways in, and the third is the one that makes the other two safe.
+
 - `?game=<id>` in the URL, parsed the way `?layout=` already is:
   `new URLSearchParams(location.search).get('layout')` in `display.html`. Same
   pattern, same place — a per-screen override that survives a reload, which
   matters for a screen that is mounted and then forgotten.
-- **An on-screen picker** whenever the screen isn't showing a match and can't
-  auto-follow one — i.e. another screen already holds a claim, or more than one
-  match is unclaimed. Rendered from `GET /api/live/channels`, keyboard-operable,
-  and dismissible: a spectator screen showing a modal over the darts is worse than
-  showing the wrong match. **With exactly one option it renders as a single "Show:
-  A vs B" button rather than a list** (see the claim rules above).
 - **From the controller**: `openScoreboard()` gains the current game's id, so
   "open scoreboard" from the tablet scoring a match opens *that* match, as an
   explicit claim, with no picker at all. This is the path most people will actually
   use in the multi-board case, and it means the tournament flow is "score on this
   tablet, open its scoreboard" per board — no choosing anywhere, even though every
   screen after the first is technically pinned manually.
+- **Switching match from the scoreboard itself** — see below. Available *always*,
+  not only when the screen has nothing to show.
+
+#### Switching from the scoreboard — always available
+
+**Owner request (2026-07), and it closes a real hole in the first draft.** That
+draft only offered the picker when a screen had *nothing* to show. But the whole
+point of auto-follow is that the app decides for you, and an app that decides can
+decide wrong — a screen that auto-followed the match on board 2 when you wanted
+board 1 had no way out except editing the URL by hand on a wall-mounted TV. **If
+something is chosen automatically, changing it must be easy.**
+
+So `display.html` gains a match switcher, reachable at any time:
+
+- **Idle-hidden, revealed on any input.** The scoreboard is a passive, chromeless
+  view and a permanent "change match" button would be clutter on a screen nobody
+  is touching for an hour at a time. The video-player pattern fits exactly: a small
+  control appears on any tap, pointer move or keypress and fades again after a few
+  seconds. Invisible while you are watching, present the moment you reach for it.
+- **Two deliberate steps, never one.** Revealing the control is one interaction;
+  choosing a match is a second. A spectator leaning on a mounted tablet must not
+  be able to reassign the screen by accident — a single-tap switcher is a screen
+  that changes match on its own in a crowded room, which is worse than no switcher.
+- **The list includes "All matches."** Switching to the master view is the same
+  kind of choice as switching between matches, so it belongs in the same list
+  rather than needing a different URL. That also means the master board can be
+  reached from any screen without anyone remembering `?master=1`.
+- **The list is live and never reshuffles under a finger.** It is driven by the
+  same channel data the screen is already receiving, so a match that ends while
+  the picker is open becomes **disabled in place** rather than vanishing and
+  shifting every row below it — the classic "the thing I was tapping moved" bug.
+- **An abandoned picker closes itself.** If it is opened and not used, it times out
+  and dismisses, so a half-opened overlay never sits across the darts for the rest
+  of the night. Escape and a tap outside also dismiss it.
+- **With exactly one match available it is still a switcher, not a list** — one
+  "Show: A vs B" entry plus "All matches" (see the claim rules above).
+
+An idle-hidden control has one obvious cost: **nobody knows it is there.** That
+matters most in precisely the case this feature exists for — a screen that
+auto-followed a match the viewer didn't want. So the moment a screen auto-follows
+*while more than one match is active*, it shows a brief, self-dismissing hint —
+"Showing A vs B · tap to change" — and then gets out of the way. Deliberately not
+shown when only one match exists: there is nothing to change to, and the garage
+screen should stay completely chromeless. This is the one piece of chrome the
+feature genuinely needs, and it is tied to the exact condition that makes it
+useful.
+
+##### Switching upgrades an implicit claim to an explicit one
+
+This is the subtle part, and it falls straight out of the claim model. A screen
+that auto-followed holds an *implicit* claim, which is released when that match
+ends so the screen is free to pick up the next game — the behaviour the garage case
+depends on. **A screen that was switched by hand holds an *explicit* claim**, and
+an explicit claim is held when the match ends: the screen says the match finished
+and offers the switcher, rather than silently jumping to some other game.
+
+That asymmetry is correct rather than incidental. Auto-follow is the app guessing,
+so it should keep guessing. A manual switch is the viewer stating what they want to
+watch, and the app should not quietly overrule that the moment the leg is over.
+
+Mechanically a switch is just a re-subscribe, which the claim model already makes
+atomic — the old claim is released and the new one taken in one step, with no
+"release" route to forget to call.
+
+##### The URL follows a manual switch, and only a manual switch
+
+A hand-switched screen should come back to the same match after a reload, a browser
+restart, or a tab restore — that is most of the value of switching on a screen you
+then walk away from. So a manual switch writes `?game=<id>` into the URL with
+`history.replaceState()`: same effect as having launched it that way, no reload, no
+navigation entry.
+
+Note this would be **the codebase's first use of the History API** — nothing in
+`frontend/` currently touches `window.history` (the `history` identifiers in
+`index.html` and `scoring.js` are local variables holding rating and dart history,
+which is worth knowing before grepping for precedent and concluding there is some).
+It is a plain, well-supported browser API and needs no abstraction, but it is a new
+tool here rather than an established pattern. The alternative — setting
+`location.search`, which reloads the page — was rejected because a reload drops the
+SSE connection and blanks the board for a beat, which is a visible flicker on a
+wall-mounted screen for no benefit. `replaceState` rather than `pushState`
+deliberately: a scoreboard has no back-button journey, and building one would mean a
+remote's Back button silently changing which match is showing.
+
+**An auto-follow must never write the URL.** Doing so would pin the garage screen
+to tonight's first game permanently, and the next game would find it claimed and
+unable to follow — silently converting the one household that must never choose a
+match into the one that always has to. Selecting "All matches" likewise replaces
+`?game=` with `?master=1`, so that choice is equally durable.
+
 - Consider a small "which screens are watching what" readout in Settings. Useful
   in the four-board case and cheap once `/api/live/channels` exists; genuinely
   separable, so track it separately rather than letting it hold this up.
@@ -357,11 +447,26 @@ things change shape here:
 - **Who's winning must not be colour-only.** The obvious master-board design tints
   the leader's row green. Pair it with a glyph or position, so it survives
   colourblind mode.
-- **The picker** needs keyboard operability, a visible focus ring meeting the
-  suite's luminance check, and a sensible focus order — it appears over live
-  content, so it must also be dismissible by Escape.
-- **Announce channel changes** through the existing `#sr-announcer` pattern when a
-  screen switches match, or a screen-reader user has no idea the picture changed.
+- **The switcher must be fully operable with arrow keys and Enter alone.** This is
+  where the accessibility requirement and the hardware requirement turn out to be
+  the same requirement, which is worth noticing: these screens are frequently a TV
+  driven by a Chromecast, a Fire Stick or an old tablet in a stand. Some have no
+  touch at all and no pointer — what they have is a remote that sends arrow keys and
+  Enter. A switcher reachable only by tapping is a switcher that does not exist on
+  half the screens it is for. Designing it for the remote gets keyboard operability
+  for free, and vice versa.
+- **The reveal must not depend on hover.** A pointer-move trigger is fine as *one*
+  of the triggers, but a touch-only or remote-only screen never produces one, so any
+  keypress and any tap must also reveal it.
+- **A visible focus ring** meeting the suite's luminance check, and a sensible focus
+  order. It appears over live content, so Escape must dismiss it — and focus must
+  return to the scoreboard rather than being left on a hidden control.
+- **Announce a match change** through the existing `#sr-announcer` pattern, and
+  announce the switcher opening. A screen-reader user otherwise has no idea either
+  the picture or the available choice changed.
+- **The auto-follow hint** ("tap to change") is text, not an icon alone, and is
+  announced once when it appears — an affordance nobody can perceive is not an
+  affordance.
 
 ## Testing
 
@@ -394,20 +499,34 @@ things change shape here:
    screen**, to prove a departed screen left no claim behind. A leaked claim would
    turn "never choose a game you only have one of" into "choose a game forever
    after," and nothing else in this list would notice.
-5. **Expiry** — a channel with no push past the TTL disappears from
+5. **Switching** — the owner's addition, and the half of it that is server-side:
+   re-subscribing releases the old claim and takes the new one, with no window in
+   which a screen holds two or none; a screen that switches by hand ends up holding
+   an **explicit** claim even if it arrived with an implicit one, so its new match
+   ending leaves it on the switcher rather than auto-following something else; and
+   switching to `?master=1` releases the claim entirely, so the next screen to
+   connect can auto-follow again.
+6. **Expiry** — a channel with no push past the TTL disappears from
    `/api/live/channels`; an explicit `DELETE` removes it immediately; an
    `active:false` push closes it; a channel closing releases the implicit claim on
-   it (renumbering the rest of this list).
-6. **Caps** — channel-count cap rejects past the limit; master frame stays under
+   it.
+7. **Caps** — channel-count cap rejects past the limit; master frame stays under
    its own byte bound with the maximum number of channels at their largest
    plausible summary.
-7. **`liveSummary()` projection** — correct `primary`/`secondary` for every game
+8. **`liveSummary()` projection** — correct `primary`/`secondary` for every game
    type in the registry, driven off `GAME_TYPES` rather than a hand-kept list, so
    a new mode arrives covered. `noLiveDisplay` modes never appear.
 
 Browser (`.claude/skills/verify-ui`): drive two games in two pages, open two
 displays, assert each shows its own match and neither flickers; assert the master
-shows both; assert a no-param display with one game is unchanged. Raise the
+shows both; assert a no-param display with one game is unchanged. The switcher needs
+its own assertions here, because all of it is behaviour that only exists once a
+browser has laid the page out: it is **hidden until an input arrives** and revealed
+by a keypress as well as a tap; it takes **two interactions** to change match, never
+one; **arrow keys and Enter alone** can complete a switch (the remote-control path,
+which a mouse-driven check would never exercise); a manual switch **writes `?game=`
+via `replaceState`** while an auto-follow leaves the URL untouched; and an abandoned
+switcher **dismisses itself**. Raise the
 check's assertion count in `run.js` in the same commit.
 
 ## Suggested build order
@@ -427,18 +546,26 @@ Each step is independently shippable and leaves the app working.
    implements the owner's rule, and the step where a leaked claim would first be
    able to break the garage case, so **Testing 4 lands here, not later.**
 5. **`GET /api/live/channels`, expiry sweep, `DELETE`, and the caps.**
-6. **`?game=` in `display.html`, the picker, plus `openScoreboard()` passing the
-   current id.** Requirement 3 is met here, and steps 1–6 are a complete, useful
+6. **`?game=` in `display.html`, plus `openScoreboard()` passing the current id.**
+   The URL and controller routes in, with no on-screen UI yet.
+7. **The on-screen switcher** — idle-hidden reveal, the two-step choice, the live
+   list, the `replaceState` URL write on manual switches only, the implicit→explicit
+   upgrade, and the auto-follow hint. Its own step rather than a bullet on step 6,
+   because it is where all of the fiddly interaction lives (reveal triggers, remote
+   operability, self-dismissal) and it is the safety net for auto-follow guessing
+   wrong. Requirement 3 is fully met here, and steps 1–7 are a complete, useful
    feature without the master board.
-7. **The master board** (`?master=1`, `liveSummary()`, the aggregate stream).
-8. **Voice rules and the accessibility pass.**
-9. **Audit for other single-active-game assumptions.** Grep the frontend for
+8. **The master board** (`?master=1`, `liveSummary()`, the aggregate stream).
+   It also becomes reachable from the switcher's "All matches" entry, so this step
+   adds one row to a list step 7 already built.
+9. **Voice rules and the accessibility pass.**
+10. **Audit for other single-active-game assumptions.** Grep the frontend for
    places that assume one live game — the achievement broadcast path, the Home
    ticker, any Settings readout. This step exists because the assumption is
-   plausibly wider than the live channel, and finding out during step 7 is worse
-   than looking on purpose.
+    plausibly wider than the live channel, and finding out during step 8 is worse
+    than looking on purpose.
 
-Steps 1–6 and step 7 are separately trackable, and should be split into two
+Steps 1–7 and step 8 are separately trackable, and should be split into two
 tracker rows the moment either ships — per `CLAUDE.md`, never one "partially
 completed" item.
 
