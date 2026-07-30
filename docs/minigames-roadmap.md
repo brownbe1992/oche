@@ -203,7 +203,17 @@ centre angle. `buildDartboard()` already draws the board from that same geometry
 A static, non-interactive board with three dots on it is a small amount of new SVG
 over machinery that exists and is already shared with `display.html`.
 
-Two things to get right in the visual:
+**Draw a printed diagram, not the live board.** Established by the design mockups
+(2026-07): rendering the app's actual dartboard on a cream sheet produces a dark
+slab dropped in the middle of the paper — the identical mistake Paper Mode's own CSS
+already warns about for `.oche` ("a black well in the middle of the sheet"). What
+works is line art: ink hairlines for the wedges, the two scoring rings filled with a
+light tone wash so they read as bands, the numbers in `--paper-soft` around the rim,
+and each dart a solid ink dot with a paper-coloured halo so it never merges into a
+wedge line. Position, not colour, tells a treble from a double — which is also what
+satisfies the colourblind requirement below rather than working against it.
+
+Two further things to get right in the visual:
 
 - **The markers must be unambiguous.** A dot near a ring boundary is a question
   about the renderer, not about darts. Place markers at the *centre* of the ring
@@ -277,16 +287,28 @@ Hard rules, all testable:
    rolls. A generator that puts the truth in slot 2 slightly too often is a
    generator players learn instead of learning darts — and it would never be
    noticed by hand.
-6. **No arithmetic shortcut that isn't the skill.** Every treble is a multiple of
-   3 and every double is even, so a treble question offering `57 · 38 · 55 · 59`
-   can be solved by *anyone who knows that rule* without knowing T19 — 57 is the
-   only multiple of 3. That is a genuine darts insight, but it is not the one being
-   trained, and a generator that leaks it will produce a player who scores well and
-   still can't call T19 at the board. So for a treble question prefer distractors
-   that are themselves multiples of 3, and for a double question prefer even ones.
-   The wrong-multiplier distractor (T19 → 38) is valuable enough to keep in the mix
-   deliberately — just not as the *only* implausible-by-arithmetic option, which is
-   what makes it a giveaway.
+6. **No arithmetic shortcut that isn't the skill.** Three separate leaks, and this
+   rule is not theoretical — the design mockups (2026-07) violated two of them on
+   the first pass, which is the best evidence available that it needs asserting:
+   - **Trebles are multiples of 3.** A treble question offering `57 · 38 · 55 · 59`
+     is solvable by anyone who knows that rule without knowing T19, because 57 is
+     the only multiple of 3. Prefer distractors that are also multiples of 3.
+   - **Doubles are even.** `D17 → 34 · 36 · 28 · 51` looks fine and is answerable
+     without knowing D17: 51 is the only odd option. Every option for a double
+     question should be even. *(This is the one the mockups shipped with.)*
+   - **A visit's total has derivable parity.** T17 + 13 + D19 is odd + odd + even,
+     so the total must be even — and a player can work that out *without knowing
+     any of the three values*, since "a double is even" and "17 and 13 are odd" are
+     free. An odd option in that answer set is a free elimination. So counting-mode
+     options must match the true total's parity too. *(The mockups shipped with this
+     one as well, which is how it was found.)*
+
+   These are all genuine darts insights, but none is the skill being trained, and a
+   generator that leaks them produces a player who scores well on the quiz and still
+   cannot call T19 at the board. The wrong-multiplier distractor (T19 → 38) is
+   valuable enough to keep in the mix deliberately — just never as the *only*
+   option that is implausible on arithmetic grounds, which is exactly what turns it
+   into a giveaway.
 7. Deterministic given an injected `rng`, like `pickCheckoutTarget()` already is,
    so all of the above can be asserted rather than eyeballed.
 
@@ -417,9 +439,18 @@ both):
 - **Still working them out** — its complement, and the more useful half for a
   learner: correct but slow. A player at "94% correct, 3 known cold" is being told
   something true and actionable that "94% correct" alone actively hides.
-- **The segment table** — every segment in the pool with its correctness and median
-  time, so the player can see the shape of what they know. **This is the mode's
-  most valuable screen, not a nice-to-have** (see the note below on build order).
+- **The segment table** — every segment in the pool with **its value**, its
+  correctness and its median time, so the player can see the shape of what they
+  know. **This is the mode's most valuable screen, not a nice-to-have** (see the
+  note below on build order). Showing the value is what makes it a *crib sheet* —
+  the printed card a learner actually carries, listing the answers — rather than a
+  bar chart that happens to be about segments. Established by the mockups, where
+  omitting the values left the screen looking like generic progress.
+- **One mark vocabulary across the whole mode.** The segment table, the Sprint
+  round-by-round strip and the per-answer verdict should use the same three marks
+  (known / still counting / not yet) rather than each inventing its own. That also
+  keeps the Sprint strip from encoding its outcomes in colour alone, which the
+  accessibility section rules out — the mockups' first pass did exactly that.
 - **Median answer time** per question type — median, not mean: one interrupted
   round otherwise dominates.
 - **Correctness %** — kept, but deliberately *not* the headline, for the reason
