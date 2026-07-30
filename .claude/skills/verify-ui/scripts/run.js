@@ -40,7 +40,7 @@ const CHECKS = {
   'maths-trainer':         { path: './checks/maths-trainer',         assertions: 36 },
   'ghost-picker':          { path: './checks/ghost-picker',          assertions: 11 },
   'scoring-modes':         { path: './checks/scoring-modes',         assertions: 32 },
-  'all-game-types':        { path: './checks/all-game-types',        assertions: 87 },
+  'all-game-types':        { path: './checks/all-game-types',        assertions: 89 },
   'turn-loop':             { path: './checks/turn-loop',             assertions: 50 },
   'save-resume':           { path: './checks/save-resume',           assertions: 6 },
   'leg-reset':             { path: './checks/leg-reset',             assertions: 12 },

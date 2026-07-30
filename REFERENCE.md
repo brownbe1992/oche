@@ -6494,6 +6494,21 @@ rather than in play (`docs/bug-roadmap.md` BUG-61/BUG-62):
   `_importPlayerExport()` therefore ends by running the migration's own body over
   anything it just wrote, reported as `legacyRoundsConverted`.
 
+**No undo, deliberately** — and by original design, not as an oversight:
+`docs/archive/checkout-trainer-roadmap.md` build step 2 hides "Bounce Out", "Miss"
+and "Undo Last Turn" for this game type because "they belong to live-match scoring,
+not a solo recall drill against a target", and marks it Done. The owner reconfirmed
+it in 2026-07 for both minigame modes. The
+"Undo Turn" button is `hidden` for Checkout Trainer in `renderGameShell()`'s
+template, and Maths Trainer hides `#rail-play` wholesale in
+`renderGameMathsTrainer()`, which takes the whole turn-actions block with it — so
+neither mode offers Bounce Out, Undo Dart, Undo Turn or Enter turn. An answer you
+have already been graded on is not a turn to take back. `all-game-types` asserts
+this as a property for the dartless class rather than for one mode, since the two
+achieve it by different mechanisms and a third minigame would arrive with its own.
+`undoLastTurnCheckoutTrainer()` and the registry's `deleteLastRecord` member remain
+wired and correct but unreachable — see the comment on that member.
+
 **The server grades the round, not the client.** `POST /api/games/:id/checkout-round`
 carries the target and the route (and `declaredUnsolvable` for a trick-question
 call); `addCheckoutTrainerRound()` re-derives the verdict with the same

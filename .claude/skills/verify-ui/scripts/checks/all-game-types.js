@@ -74,6 +74,22 @@ module.exports = async function run() {
           // mode arrives covered.
           dartless: !!(GAME_TYPES[game.gameType] && GAME_TYPES[game.gameType].noDartInput),
           ownSurfaceVisible: (() => { const q = document.getElementById('maths-quiz'); return !!q && q.offsetParent !== null; })(),
+          /* Every dart-entry control, measured by whether it actually RENDERS —
+             getBoundingClientRect(), NOT the element's own `hidden`/display. That
+             distinction is the whole assertion: these live inside .turn-actions,
+             which is inside #rail-play, and #rail-play is what the mode hides. An
+             element whose ancestor is hidden still reports its own display as
+             `block`, so a check written against the element's own style reports all
+             four as visible and is simply measuring the wrong thing — which is
+             precisely the mistake that made this look like a live bug. */
+          entryControls: ['bounce-out-btn', 'undo-turn-btn', 'undo-btn', 'enter-btn']
+            .filter(id => { const e = document.getElementById(id); if (!e) return false;
+                            const r = e.getBoundingClientRect(); return r.width > 0 || r.height > 0; }),
+          /* The two turn-loop members a dartless mode does not declare. Every control
+             above is wired to one of them, so a visible control is not a cosmetic
+             wart — pressing it throws. */
+          hasTurnLoopMembers: !!((GAME_TYPES[game.gameType] || {}).undoLastTurn)
+            || !!((GAME_TYPES[game.gameType] || {}).enterTurn),
         };
       });
 
@@ -90,6 +106,21 @@ module.exports = async function run() {
         rep.ok(`${key}: hides both dart inputs — it takes neither`, !shell.ocheVisible,
           `oche visible = ${shell.ocheVisible}`);
         rep.ok(`${key}: leaves the scoreboard empty deliberately`, !shell.scoreboardHasContent);
+        /* No dart-entry control renders at all — Bounce Out, Undo Dart, Undo Turn,
+           Enter turn. This is currently true because renderGameMathsTrainer() hides
+           #rail-play wholesale, not because any of the four is individually hidden,
+           which is exactly why it is asserted as a PROPERTY here: it must stay true
+           however the mode chooses to render itself, and a future dartless minigame
+           that builds its surface differently inherits the same requirement.
+
+           It matters more than a cosmetic wart would. Every one of those controls
+           dispatches through a turn-loop registry member (undoLastTurn, enterTurn)
+           that a dartless mode does not declare, so a control that DID render would
+           throw a TypeError on being pressed rather than merely looking wrong. */
+        rep.ok(`${key}: no dart-entry control renders — it takes neither input`,
+          shell.entryControls.length === 0, `visible: ${shell.entryControls.join(', ') || 'none'}`);
+        rep.ok(`${key}: and declares no turn-loop members for one to have called`,
+          !shell.hasTurnLoopMembers);
       } else {
         rep.ok(`${key}: reaches the game screen`, shell.onGameScreen && shell.ocheVisible);
         rep.ok(`${key}: exactly one input surface is live`, shell.inputSurfaces === 1,

@@ -11553,11 +11553,19 @@ const GAME_TYPES = {
     // Note for whoever reads this next: the "Undo Turn" button is `hidden` for this
     // mode (see renderGameShell()'s template), and nothing else calls undoLastTurn()
     // for it — so undoLastTurnCheckoutTrainer() and this member are correct but
-    // currently unreachable from the UI. That predates the move to its own table
-    // (the same path called DB.deleteLastTurn() before, equally unreachably). Kept
-    // wired rather than deleted because the mode's roadmap does specify one level of
-    // undo; whether the hidden button is the bug is a separate question, and either
-    // answer wants this to already be right. Verified against a real server.
+    // unreachable from the UI. That predates the move to its own table: the same
+    // path called DB.deleteLastTurn() before, equally unreachably.
+    //
+    // Hiding it is INTENDED and always was. docs/archive/checkout-trainer-roadmap.md
+    // build step 2 says so explicitly and marks it Done: "Bounce Out", "Miss" and
+    // "Undo Last Turn" are hidden for this game type because "they belong to
+    // live-match scoring, not a solo recall drill against a target." The owner
+    // reconfirmed it in 2026-07 for both minigame modes. So this is knowingly dead
+    // code — kept, not ripped out, because it costs nothing, because the snapshot
+    // machinery it hangs off is shared with every other mode, and because it is
+    // verified end-to-end against a real server: if the button is ever unhidden it
+    // works rather than corrupting a round. Delete it if that day clearly isn't
+    // coming.
     deleteLastRecord: () => DB.deleteLastCheckoutRound(),
     label: 'Checkout Trainer',
     // This mode has its own bespoke, paper-themed results screen (see paperTheme
