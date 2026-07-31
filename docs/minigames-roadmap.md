@@ -1,6 +1,6 @@
 # Minigames — Design Roadmap
 
-> Status (2026-07): **Part A is built and shipped. Part B is still proposals only.**
+> Status (2026-07): **Part A is built and shipped. One item remains open.**
 >
 > - **Part A — Maths Trainer**: **DONE.** Both question types (segment recall and
 >   visit counting, the latter with a text prompt and a board-diagram prompt), both
@@ -17,10 +17,20 @@
 >   rather than silently edited away** — the one substantive change is that Hard no
 >   longer carries a tighter instant threshold (see §19b for why: "known cold" has to
 >   mean one thing for a segment regardless of which difficulty served it).
-> - **Part B — four further trainers**: **proposals only, awaiting the owner's
->   selection.** None is approved and none should be built until one is chosen.
->   Tracked as a single decision item (11) on the tracker, not as four build
->   items, precisely so nobody reads "on the roadmap" as "agreed."
+>
+> **A Part B once sat here proposing four further trainers** — Bust or Safe,
+> Countdown, Cricket Marks, The Leave. The owner reviewed them, plus six more
+> proposed later (board geography, the double-halving tree, a rapid-fire
+> two-or-three-darts drill, a generalised rules trainer across Cricket/Halve-It/
+> Shanghai/Baseball/Bob's 27, a spot-the-scoreboard-error drill, and a mixed
+> retention session) and wanted none of them (2026-07). Removed rather than left
+> sitting unapproved: a roadmap full of things nobody intends to build is worse
+> than a short one, because it makes the rest look equally optional.
+>
+> Recorded so the same ground isn't covered a third time. If more minigames are
+> wanted later, **start from what skill is missing rather than from this list** —
+> ten proposals drawn from "what else could be a four-option quiz?" did not
+> produce one the owner liked, which is itself the useful signal.
 >
 > The **Minigames category itself** already exists on the New Game page (shipped
 > 2026-07, `REFERENCE.md` §20) and currently holds one game: Checkout Trainer.
@@ -73,15 +83,19 @@ to be repeated in more than a handful of places, the exclusion is the symptom.**
 
 ## Build the quiz engine once
 
-Part A is one game. Part B proposes four more, and **all five are the same
-interaction**: pose a generated question, offer four options, grade the tap,
-record the round, keep a streak, optionally race a clock. If the Maths Trainer is
-built as a bespoke mode and then the second one is built as another bespoke mode,
-the codebase acquires five ways to do one thing — the tax `CLAUDE.md` calls out
-as the one a newcomer pays forever.
+**This section is advice for a second minigame that is not currently planned.**
+It was written when four more were proposed; they have since been declined (see
+the status note at the top). It is kept because the argument holds whenever a
+second one is built, and because it explains why the Maths Trainer's loop looks
+the way it does.
 
-So: **build the Maths Trainer's loop as a shared engine from the start**, even
-though only one game uses it on day one. Concretely, one module owning
+Any two of these games are the same interaction: pose a generated question, offer
+four options, grade the tap, record the round, keep a streak, optionally race a
+clock. Build the second as another bespoke mode and the codebase acquires two ways
+to do one thing — the tax `CLAUDE.md` calls out as the one a newcomer pays forever.
+
+So if a second one is ever built: **extract the Maths Trainer's loop into a shared
+engine first**, rather than after. Concretely, one module owning
 
 - the round lifecycle (pose → await tap → grade → reveal → next),
 - the four-option presentation, keyboard handling and announcements,
@@ -89,13 +103,14 @@ though only one game uses it on day one. Concretely, one module owning
 - the `*_rounds` write path and the shared correctness/streak stat queries,
 
 with each minigame supplying only three things: a **question generator**, a
-**distractor generator**, and its **display strings**. That boundary is what
-makes minigame #5 a day of work instead of a week, and it is also the only way
-the five stay consistent for the person playing them.
+**distractor generator**, and its **display strings**. That boundary is what would
+make a later minigame a day of work instead of a week, and it is also the only way
+several of them stay consistent for the person playing them.
 
-This is a recommendation, not a hedge: if the owner intends to build only the
-Maths Trainer and none of Part B, a bespoke implementation is fine and cheaper.
-The engine is worth it at two or more.
+This is a recommendation, not a hedge — and as of 2026-07 the cheaper option is
+the live one: with only the Maths Trainer built and no second game planned, its
+bespoke implementation is correct and the engine would be speculative. The
+extraction is worth it at two or more, and not before.
 
 ---
 
@@ -739,144 +754,3 @@ someone testing values they already have.
 6. **Naming.** "Maths Trainer" follows the brief. "Numbers", "Mental Arithmetic"
    and "Counting" were the alternatives; the row's teaser matters more than the
    name for a category the player is scanning.
-
----
-
-# Part B — four further minigames, proposed
-
-**Status: proposals awaiting the owner's selection. None is approved.**
-
-All four meet the four criteria at the top of this document: no board, no darts,
-one trainable skill, objectively gradeable, and structurally isolated from
-physical stats (same dedicated-table approach as Part A). All four are four-option
-multiple choice, so all four are the shared engine plus a question generator — the
-argument for building that engine once.
-
-They are ordered by what they train, not by preference. Rough effort assumes the
-engine exists.
-
-## B1 — Bust or Safe *(risk judgment)*
-
-> **You're on 46. You throw T15, S1.** → `Finished` · `Bust` · `Left 0, not a
-> finish` · `Left 40`
-
-Given a remaining score and a played sequence of darts, say what happened.
-Trains the thing that actually costs legs: knowing when a route is unsafe, and
-knowing that reaching zero on a single is not a finish under double-out.
-
-- **Why it's good.** Bust awareness is a real, teachable, frequently-fumbled
-  skill, and the mode can be graded with **zero new logic** — `evaluateVisit()`
-  already returns exactly this verdict, and it is the same function Checkout
-  Trainer reuses. The question generator's only job is to produce sequences
-  weighted toward the interesting cases (near-misses, single-on-zero, exactly-one
-  over) rather than uniformly random ones, which would be boringly safe most of
-  the time.
-- **Difficulty.** Easy: 2 darts, remaining under 60. Hard: 3 darts, any remaining,
-  including single-out players' own rule.
-- **Honours the per-player out-mode**, which is a nice touch no other trainer
-  needs: a single-out player's correct answers genuinely differ.
-- **Effort: Low.** The smallest of the four and the best first candidate.
-
-## B2 — Countdown *(running subtraction under pressure)*
-
-> **You're on 501. You score 140.** → `361` · `371` · `359` · `461`
-> …then immediately: **You're on 361. You score 85.** → …
-
-A whole leg of subtraction, chained, each answer becoming the next question's
-starting score. Trains the single most-performed mental operation in darts, *in
-the sequence it is actually performed* — which is what makes it different from
-Part A's per-dart values.
-
-- **Why it's good.** Distinct skill from Part A (subtraction from a running total
-  vs. segment recall), trivially objective, and the chaining is the design idea:
-  an error compounds, exactly as it does on a real scoreboard, so the mode teaches
-  you to notice you've gone wrong. Ending a leg with a legitimate checkout is a
-  natural win condition, giving the mode a shape Part A doesn't have.
-- **Distractors** are the interesting part again: off-by-ten (the classic), the
-  digit-transposed difference, the *sum* instead of the difference, and
-  subtracting a plausible misread of the score.
-- **Difficulty.** Easy: scores from a common set (26, 41, 45, 60, 100, 140, 180),
-  starting at 501. Hard: arbitrary scores, arbitrary start, and occasional
-  bust-or-not decisions once under 170 — at which point it converges with B1 and
-  the two should probably stay separate rather than one growing into the other.
-- **Effort: Low-Medium.** The chaining needs a little state the others don't.
-
-## B3 — Cricket Marks *(a second rule system)*
-
-> **You have 2 marks on 20. Your opponent has 3. You throw T20.** → `20 closed,
-> 0 points` · `20 closed, 20 points` · `20 closed, 60 points` · `5 marks, 0
-> points`
-
-Trains Cricket scoring, which is genuinely confusing — marks, closing,
-who-can-score-on-what, and cut-throat inverting the goal.
-
-- **Why it's good.** The app has Cricket (standard *and* cut-throat) but nothing
-  that teaches its arithmetic, and Cricket's rules are the most common source of
-  "wait, why did that score?" of any mode in the app. It is also the only proposal
-  that trains a **rule system** rather than arithmetic, which makes it the most
-  differentiated of the four.
-- **Objective**, and grounded in code that already exists: the marks/points
-  transition is `enterTurnCricket()`'s own logic. Care needed so the trainer and
-  the real mode cannot disagree — reuse the same function rather than
-  reimplementing the rule, the same discipline the Pocket Card follows by calling
-  `gradeCheckoutAttempt()`.
-- **Difficulty.** Easy: standard, one number, no opponent state. Hard: cut-throat,
-  full board state, "who does this score go to."
-- **Effort: Medium.** The question generator has to construct a plausible board
-  state, which is more than a random number.
-
-## B4 — The Leave *(setup and strategy — highest value, weakest objectivity)*
-
-> **You're on 121 with 3 darts.** Which first dart? → `T20` · `T17` · `T15` ·
-> `S20`
-
-Trains what to leave — arguably the most valuable non-throwing skill in darts,
-and the one that separates players who score well from players who win.
-
-- **Why it's good.** Nothing in the app teaches it, and it is pure judgment rather
-  than arithmetic, so it complements all three above.
-- **The problem, stated plainly.** "Best" is not fully objective. On 121, T20
-  leaves 61 (T-out or 25+D18), T17 leaves 70 (a clean 2-dart finish), and which is
-  better depends on which double the player favours and how they score. A trainer
-  that marks a defensible answer wrong teaches the app's opinion, not darts —
-  and unlike every other proposal here, a wrong grading is *plausible enough that
-  the player will believe it*.
-- **Proposed resolution.** Grade against a **stated, visible policy** rather than
-  an implied truth: "prefer leaving a 2-dart finish; among those, prefer an even
-  double; among those, prefer the fewest darts." Show the policy on screen and in
-  the reveal, so the mode is honest about teaching *a* system. Offer at most one
-  clearly-correct option per question and reject generated questions where the
-  policy's top two candidates score within a threshold of each other — i.e. only
-  ask questions that have a defensible answer. That filter is the real work.
-- **Alternative if that feels too opinionated**: invert it to a purely objective
-  question — "which of these leaves a 2-dart finish?" — losing some of the
-  judgment but none of the correctness.
-- **Effort: Medium-High**, almost entirely in the question filter, and it needs an
-  owner decision on the policy before it can be built. **The only one of the four
-  that is blocked on a design call rather than on effort.**
-
-## Considered and rejected
-
-- **Reverse Route** ("these three darts checked out — from what score?"). Too
-  close to Part A's counting mode, which already asks for a sum; the inversion
-  adds a puzzle flavour without a distinct skill.
-- **Minimum Darts** ("fewest darts to finish 141?"). Already the thing Checkout
-  Trainer grades on — its Optimal % *is* this skill, measured while doing
-  something more useful.
-- **Caller's Ear** (the app announces a score aloud; you pick the remainder).
-  Genuinely distinct — trains listening, which a scorer really does — but it
-  depends on the voice work in `docs/voice-announcements-i18n-roadmap.md` and
-  would be unplayable for anyone with the audio off. Worth revisiting *after* that
-  doc's items land, not before.
-- **Averages quiz** ("60 darts, 501 scored — what's the 3-dart average?"). Trains
-  statistical literacy rather than a darts skill, and nobody computes this at the
-  board.
-
-## If only one is built
-
-**B1 (Bust or Safe).** Lowest effort by a distance, since `evaluateVisit()`
-already produces the verdict; trains a skill that costs real legs; fully
-objective, so there is no grading policy to agree; and it exercises the shared
-engine's one genuinely different requirement — a verdict-shaped answer rather
-than a numeric one — which is exactly what you want the second consumer of a new
-engine to prove.

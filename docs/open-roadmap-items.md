@@ -39,7 +39,6 @@
 | 7 | Mobile: Capacitor scaffold (iOS + Android) with the native Server Setup screen (step 2) | `docs/mobile-app-roadmap.md` | Medium |
 | 8 | Mobile: ATS/cleartext config + self-signed cert trust-prompt (step 3) | `docs/mobile-app-roadmap.md` | Medium |
 | 9 | Environmental logging (new inbound HA auth model; explicitly scoped as a niche, manually-enabled feature) | `docs/environmental-logging-roadmap.md` | Medium |
-| 11 | **Minigames: pick which further trainers to build** (decision, not a build). Four are proposed and specified — Bust or Safe, Countdown, Cricket Marks, The Leave — none approved. Deliberately one tracker row rather than four, so "on the roadmap" is not read as "agreed"; each becomes its own row once chosen. Part B also argues for extracting the shared four-option quiz engine during item 10 rather than after, since all five games are one interaction | `docs/minigames-roadmap.md` Part B | Low (a decision) |
 | 13 | **Maths Trainer: "drill this segment" deep link** — from the crib sheet's weakest-segment row straight into a session drilling that one segment, mirroring §19a's "Drill this checkout". Deliberately deferred at build time as step 10 of the roadmap's own build order: the mode is complete and useful without it, and for a learner it is the natural next step rather than a prerequisite | `docs/minigames-roadmap.md` Part A step 10 | Low |
 | 12 | **Multiple live scoreboards at once** — one per active match, plus an optional spectator "master" board showing every match (owner request; the four-simultaneous-tournament-matches case). Concurrent *play* already works — `tournament_matches.game_id` is per match and `createGame()` has no single-active-game guard — so the whole limitation is that `liveState` is one object broadcast to every screen, i.e. two controllers produce one scoreboard flickering between two matches. Becomes a channel map keyed by `games.id`, plus a per-connection **claim** registry implementing the owner's selection rule: a screen auto-follows while no screen holds a claim, and once one does, every later screen is pinned manually — so the single-game household is never asked to choose a game it only has one of, on the first game of the night or the fifth. That rule is cross-screen state, so claims live on the server (per SSE connection, released by the existing close handler); a claim outliving its screen would reintroduce the exact friction the rule removes, and is the thing to test hardest. The scoreboard also carries an **always-available match switcher** — idle-hidden and revealed on any input, two deliberate taps to change, operable by arrow keys and Enter alone since these screens are often a TV with only a remote — so an auto-follow that guessed wrong is fixed on the screen rather than by editing a URL on something wall-mounted. Switching by hand upgrades the claim from implicit to explicit and writes `?game=` via `replaceState`; an auto-follow deliberately writes nothing, or the garage screen would pin itself to tonight's first game | `docs/multi-scoreboard-roadmap.md` | Medium |
 | 14 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
@@ -64,15 +63,15 @@
   this game count toward, vs. is this specific pairing's match still owed).
 - **Mobile app's steps are sequential as listed** (step 2 → 3 → 4 → 5 → 6 → 7) per `docs/mobile-app-roadmap.md`'s own suggested build order; its one prerequisite (the responsive CSS pass) is already done.
 - **Row 5** (voice announcement i18n) is the one remaining order-independent Low-Medium item — it can be interleaved anywhere, including ahead of the bigger lifts.
-- **Rows 10 and 11 (Minigames) are order-dependent in one specific way**: item 11 is a
-  decision, and it wants making *before* item 10 is built, not after. All five proposed
-  minigames are the same interaction (generate a question, offer four options, grade the
-  tap, keep a streak, optionally race a clock), so if any of Part B is going to be built,
-  item 10 should extract that loop as a shared engine as it goes rather than shipping a
-  bespoke mode that the second one then has to either duplicate or refactor. If the answer
-  to item 11 is "none of them," item 10 is cheaper built bespoke — which is exactly why
-  the decision is worth having first. Item 11 can otherwise be interleaved anywhere; it is
-  a conversation, not a build.
+- **The Minigames sequencing question is closed** (2026-07), and it closed the cheap way.
+  It used to read: item 11 (which further trainers to build) wants deciding *before*
+  item 10 (build the Maths Trainer), because if any second trainer were coming, item 10
+  should extract the shared quiz-engine loop as it went rather than ship a bespoke mode
+  the second one would have to duplicate or refactor — and if the answer were "none of
+  them," bespoke is cheaper. The answer was none of them: four proposals, then six more,
+  none wanted. So the Maths Trainer's bespoke loop is the correct implementation, item 11
+  is off this tracker, and the extraction is documented in
+  `docs/minigames-roadmap.md` as advice for a second minigame that is not planned.
 
 ### Code-quality cluster (items 34–59): recommended completion order
 
