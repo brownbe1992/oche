@@ -32,6 +32,14 @@
 > ten proposals drawn from "what else could be a four-option quiz?" did not
 > produce one the owner liked, which is itself the useful signal.
 >
+> **A third minigame is in design**: "The Visit"
+> (`docs/board-checkout-trainer-roadmap.md`, tracker item 17, owner-requested
+> 2026-07) — a checkout tapped out on the *dartboard* rather than the pad, with no
+> running remainder and a per-visit clock. It is filed separately because it is a
+> sub-mode of Checkout Trainer rather than a new game type, and because it is the
+> one boardless-family idea that came from the owner rather than from this doc's
+> proposal lists.
+>
 > The **Minigames category itself** already exists on the New Game page (shipped
 > 2026-07, `REFERENCE.md` §20) and currently holds one game: Checkout Trainer.
 > This doc is about filling it.

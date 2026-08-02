@@ -44,6 +44,7 @@
 | 14 | Online multiplayer (needs someone else running their own Oche instance too — a real adoption chicken-and-egg problem) | `docs/online-multiplayer-roadmap.md` | Very high |
 | 15 | Camera/ML scoring (genuinely novel CV engineering; only useful to whoever mounts the hardware) | `docs/camera-scoring-roadmap.md` | Extremely high |
 | 16 | Companion website (persistent hosted infrastructure — accounts, matchmaking, a cloud database — the one item requiring the project to operate long-term infra, not just be self-hostable) | `docs/companion-website-roadmap.md` | Extremely high |
+| 17 | **"The Visit" — board checkout trainer** (owner request, 2026-07). A checkout target, tapped out on the **dartboard** rather than the pad, with **no running remainder shown** and a **per-round clock about the length of one real visit**. Proposed as a fourth `checkout_trainer` sub-mode (`config.mode='board'`) rather than a new game type — same question, same grader, and `checkout_trainer_rounds` already holds everything it produces. Most of it exists; the value is entirely in those three deltas, and the doc says so plainly: drop any one and it collapses back into Freeform. Two real obstacles to clear first — the dartboard's miss rings, which are why that mode is `padOnly` today (BUG-32), and the fact that Paper Mode has never styled a board because it has never rendered one | `docs/board-checkout-trainer-roadmap.md` | Medium |
 
 ### Build-order notes that still apply
 
