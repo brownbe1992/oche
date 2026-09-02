@@ -7063,11 +7063,13 @@ function renderGameX01(){
    columns=players), not per-player cards — matches how cricket is scored on a
    real board. Marks render as / (1), X (2), circled X (3/closed) — the circle
    is the non-color-only "closed" signal per docs/accessibility-roadmap.md. */
-// Shared chalkboard scaffolding for the 5 modes below (Cricket/Baseball/
-// Shanghai/Halve-It/Pressure Chamber) — every one of them builds the same
-// per-player head-cell column (name, throw-chip, standing) and assembles it
-// into the same head/body/foot .cs-table shape; only the body rows' data
-// source and the foot label are genuinely mode-specific.
+// Shared chalkboard scaffolding for the 6 modes that use it (Cricket/Baseball/
+// Shanghai/Halve-It/Pressure Chamber/Bob's 27) — every one of them builds the
+// same per-player head-cell column (name, throw-chip, standing) and assembles
+// it into the same head/body/foot .cs-table shape; only the body rows' data
+// source and the foot label are genuinely mode-specific. Bob's 27 is solo and
+// always 1/1 legs/sets, so the standing line simply doesn't render for it —
+// which is why it can share this rather than needing a variant.
 function csHeadCellsHtml(){
   const showStanding = game.legsPerSet>1 || game.setsPerGame>1;
   return game.players.map((p,i)=>{
@@ -7093,10 +7095,54 @@ function csTableInto(sb, headCells, bodyRowsHtml, footLabel, footCells){
     ${bodyRowsHtml}
     <div class="cs-row cs-foot"><div class="cs-label">${footLabel}</div>${footCells}</div>`;
   sb.appendChild(table);
+  keepActiveChalkboardRowInView(table);
 }
-// The "Round N of M — target X" (or Baseball's "Inning N of 9") banner
-// shared by Baseball/Shanghai/Halve-It/Pressure Chamber; Cricket has no
-// per-round concept so it never calls this.
+/* Scroll the round you are actually throwing at back into view.
+ *
+ * app.css caps the scoreboard and lets a long chalkboard scroll inside it,
+ * because the alternative — which is what shipped for a while — was that a
+ * 20-row ladder (Bob's 27) or a 15-row one (The Pressure Chamber) simply ate
+ * the whole phone screen and squeezed the dart pad to ZERO pixels tall, so the
+ * mode could not be played at all. But a scroll box that never moves is only
+ * half a fix: by round 15 of Bob's 27 the ladder still showed D1-D8 and the
+ * row you were on was somewhere below the fold.
+ *
+ * Deliberately measured against the STICKY head/foot rather than the table's
+ * own box: those two are painted over the scrolling rows, so a row scrolled
+ * flush to the top edge is a row sitting underneath the header and just as
+ * invisible as one below the bottom.
+ *
+ * Called from csTableInto() rather than by each mode, so all six modes that
+ * share that builder share this too and a seventh gets it for free. The rAF is
+ * load-bearing: the table's height depends on siblings its own caller appends
+ * AFTER this returns (the round banner, the Pressure Chamber card), so
+ * measuring inline reads a height the table is about to lose.
+ */
+function keepActiveChalkboardRowInView(table){
+  requestAnimationFrame(() => {
+    // A newer render may already have replaced this table; scrolling a detached
+    // node is harmless but pointless, and skipping it keeps this honest.
+    if(!table.isConnected) return;
+    if(table.scrollHeight <= table.clientHeight + 1) return;   // nothing to scroll
+    const cell = table.querySelector('.cs-row:not(.cs-head):not(.cs-foot) .cs-cell.active');
+    const row = cell && cell.closest('.cs-row');
+    if(!row) return;
+    const head = table.querySelector('.cs-head');
+    const foot = table.querySelector('.cs-foot');
+    const t = table.getBoundingClientRect();
+    const r = row.getBoundingClientRect();
+    const top = t.top + (head ? head.getBoundingClientRect().height : 0);
+    const bottom = t.bottom - (foot ? foot.getBoundingClientRect().height : 0);
+    if(r.top < top) table.scrollTop += r.top - top;
+    else if(r.bottom > bottom) table.scrollTop += r.bottom - bottom;
+  });
+}
+// The "Round N of M — target X" (or Baseball's "Inning N of 9", or Bob's 27's
+// "D7 — running score: 41") banner, shared by Baseball/Shanghai/Halve-It/
+// Pressure Chamber/Bob's 27; Cricket has no per-round concept so it never calls
+// this. It sits AFTER the table inside #scoreboard and app.css deliberately
+// keeps it out of that table's scroll box — on a long ladder it is the only
+// thing on screen naming the current target.
 function roundBannerInto(sb, text){
   const banner = document.createElement('p');
   banner.className = 'pp-meta';

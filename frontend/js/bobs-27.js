@@ -46,20 +46,16 @@ function renderGameBobs27(){
   }
   const bodyRowsHtml = rows.join('');
 
-  const table = document.createElement('div');
-  table.className = 'cs-table';
-  table.style.setProperty('--cs-cols', 1);
-  table.innerHTML = `
-    <div class="cs-row cs-head" role="row"><div class="cs-label"></div><div class="cs-col-head active"><span>${escapeHtml(p.name)}</span><span class="cs-throw-chip">▸ throwing</span></div></div>
-    ${bodyRowsHtml}
-    <div class="cs-row cs-foot"><div class="cs-label">Score</div><div class="cs-cell"><span class="cs-points">${p.running}</span></div></div>`;
-  sb.appendChild(table);
+  // The shared chalkboard scaffolding, not a hand-rolled copy of it. Bob's 27
+  // is always solo and always 1/1 legs/sets, so csHeadCellsHtml() emits exactly
+  // the name + "▸ throwing" head cell this used to build inline — the standing
+  // line it adds for a real match is suppressed by that same 1/1. Going through
+  // the shared builder is also what gives this mode's twenty-row ladder the
+  // keep-the-current-round-on-screen scrolling every other chalkboard gets.
+  csTableInto(sb, csHeadCellsHtml(), bodyRowsHtml, 'Score',
+    `<div class="cs-cell"><span class="cs-points">${p.running}</span></div>`);
 
-  const roundBanner = document.createElement('p');
-  roundBanner.className = 'pp-meta';
-  roundBanner.style.cssText = 'text-align:center;margin:8px 0 0';
-  roundBanner.textContent = `D${game.bobs27Round} — running score: ${p.running}`;
-  sb.appendChild(roundBanner);
+  roundBannerInto(sb, `D${game.bobs27Round} — running score: ${p.running}`);
 
   renderSlots();
   renderPad();

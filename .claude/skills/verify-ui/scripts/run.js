@@ -41,6 +41,7 @@ const CHECKS = {
   'ghost-picker':          { path: './checks/ghost-picker',          assertions: 11 },
   'scoring-modes':         { path: './checks/scoring-modes',         assertions: 32 },
   'all-game-types':        { path: './checks/all-game-types',        assertions: 87 },
+  'score-entry-reachable': { path: './checks/score-entry-reachable', assertions: 173 },
   'turn-loop':             { path: './checks/turn-loop',             assertions: 50 },
   'save-resume':           { path: './checks/save-resume',           assertions: 6 },
   'leg-reset':             { path: './checks/leg-reset',             assertions: 12 },

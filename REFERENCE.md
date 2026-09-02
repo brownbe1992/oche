@@ -4160,16 +4160,108 @@ genuinely narrower than the old full-width scoring screen:
   one rail row instead of three.
 - Around the Clock/Around the World's solo scoreboard row (`.pscore`, which
   packs a name block, a meta block, a remaining-count, and a wrapping
-  20/63-cell outcome grid all into one flex row) switches to
-  `flex-direction:column` — in a flex row that content had squeezed the
-  outcome grid down to almost no width, wrapping it into dozens of rows and
-  ballooning the card's height; stacked, the grid gets the rail's full width.
-  This stays the DEFAULT for `.rail .pscore`; a compact single-row strip is
-  applied as the narrower exception, selected structurally via
-  `:not(:has(#atc-live-progress, #atw-live-progress))` — i.e. "a card that
-  does not contain the wrapping outcome grid" — rather than by naming game
-  types in CSS. Where `:has()` is unsupported the exception is simply dropped
-  and every card keeps the column stack, which is the safe direction.
+  20/63-cell outcome grid all into one flex row) is `flex-direction:column`.
+  In a flex row that content squeezed the outcome grid down to almost no
+  width, wrapping it into dozens of rows and ballooning the card's height;
+  stacked, the grid gets the card's full width.
+  The column stack belongs to the **card shape, not to one layout**: it is
+  applied wherever such a card renders, via
+  `body.game-active #scoreboard .pscore:has(.atc-live-progress,
+  #atw-live-progress)`. It was landscape-only for a while and portrait had
+  exactly the same bug unnoticed — on a 390px-wide phone the card measured
+  **573px wide** (overflowing the screen sideways) and **875px tall**, with the
+  grid crushed into a 53px column, which on its own pushed the whole scoreboard
+  past the height of the screen. Inside the rail, a compact single-row strip is
+  then applied as the narrower exception, selected structurally via
+  `.rail .pscore:not(:has(.atc-live-progress, #atw-live-progress))` — i.e. "a
+  card that does not contain the wrapping outcome grid" — rather than by naming
+  game types in CSS. (A CLASS for Around the Clock's host, not an id: a race
+  renders one card per player and duplicate ids would break both
+  `getElementById()` and this selector.) Where `:has()` is unsupported both
+  rules are simply dropped and every card keeps the row layout, which is the
+  pre-existing behavior.
+
+#### Who yields when the screen runs out: the scoreboard, never the input
+
+On the stacked (portrait/narrow) layout `#screen-game` is a flex column of
+`#scoreboard`, `.oche` (the input well) and `.turn-actions`. `#scoreboard` used
+to be `flex:none` — sized to its own content, never allowed to shrink — while
+`.oche` was `flex:1;min-height:0`, i.e. "take whatever is left, and zero is
+fine". For X01 (one ~66px card per player) and Cricket (~265px) that is
+harmless. For a mode whose scoreboard is a long ladder it is fatal. Measured at
+390 × 844:
+
+| Mode | Scoreboard's own height | Input surface |
+|---|---|---|
+| Bob's 27 | 619px (20-round ladder) | pad **0px tall** |
+| The Pressure Chamber | 641px (15-round table) | pad **0px tall** |
+| Around the Clock | 875px (wrapping outcome grid) | board **0px tall** |
+| Around the World | 901px | board **0px tall** |
+
+`.oche` absorbed the entire shortfall, so there was nothing to tap, and
+`body.game-active{overflow:hidden}` meant there was nothing to scroll to
+either — the modes could not be played on a phone at all. Reported as "Bob's 27
+does not currently allow me to enter any shots".
+
+The rule now, stated once and applied at two levels:
+
+1. **`#scoreboard` is the element that gives way** — `flex:0 1 auto`,
+   `min-height:0`, `max-height:40dvh`, `overflow-y:auto`. What does not fit
+   scrolls inside it rather than pushing the input surface off the screen. It
+   is also `display:flex;flex-direction:column` rather than the base
+   `display:grid`, purely so that rule 2 can nominate one child.
+   Applied in landscape too, where it does a second job: `.rail` is itself
+   `overflow-y:auto`, so a tall scoreboard used to push "Enter turn" below the
+   fold of the rail's own scroll.
+2. **Inside the scoreboard, the chalkboard table is the part that scrolls** —
+   `.scoreboard > .cs-table{flex:0 1 auto;min-height:0;overflow-y:auto}` with
+   `.scoreboard > *{flex:none}` for everything else. The trailing children
+   matter more than the history: Bob's 27 appends "D7 — running score: 41"
+   after its table and The Pressure Chamber appends its whole card (target,
+   modifier, and the No Warmup countdown) — the one thing on screen saying what
+   to throw at. Scrolling the scoreboard as a single block would push exactly
+   that off the bottom. The table's `.cs-head`/`.cs-foot` are `position:sticky`
+   at the edges of that scroll box, so a scrolled ladder still names the column
+   and shows the running total.
+3. **`.oche` carries a hard floor** — `min-height:clamp(170px,40dvh,320px)`, in
+   the stacked layout only (`@media (orientation:portrait), (max-width:699px)`,
+   the exact complement of the landscape query). Rule 1 caps one element; this
+   guarantees the other. It is deliberately NOT applied in the landscape rail
+   layout, where `.oche` is a grid item in a `1fr` row and a min-height would
+   inflate the row past the viewport instead of taking space from a neighbour —
+   the same class of bug as the row-spanning trap described above. `.oche`'s own
+   `min-height:0` is unchanged and still needed: that one lets its CHILDREN
+   shrink, this one floors `.oche` against its parent.
+
+`.pscore > *{min-width:0}` belongs to the same fix. A flex item's default
+`min-width:auto` refuses to shrink below its content's min-content width and a
+player name is one unbreakable token, so a long name pushed an X01 card to
+481px inside a 390px screen with the score itself past the right-hand edge;
+`.pscore .nm` is `overflow-wrap:anywhere` so it breaks instead. `.meta` and
+`.rem` set their own larger `min-width`s further down and out-specify this,
+which is what stops the score collapsing instead of the name.
+
+**`keepActiveChalkboardRowInView(table)`** (`frontend/index.html`) is the other
+half. A scroll box that never moves is only half a fix: by round 15 of Bob's 27
+the ladder still showed D1-D8. It is called from **`csTableInto()`**, so every
+mode sharing that builder gets it and a sixth gets it for free. Bob's 27 was
+folded onto that shared builder in the same change — it had been hand-rolling a
+near-identical `.cs-table` inline, and since the mode is always solo and always
+1/1 legs/sets, `csHeadCellsHtml()` emits exactly the name + "▸ throwing" head
+cell it used to build itself (the standing line is suppressed by that same
+1/1). It uses `roundBannerInto()` for its round banner for the same reason. It measures
+against the sticky head/foot rather than the table's outer box (a row flush
+with the top edge is a row underneath the header, and just as invisible), and
+it no-ops when the table does not overflow. The `requestAnimationFrame` is
+load-bearing: the table's height depends on siblings its own caller appends
+*after* `csTableInto()` returns, so measuring inline reads a height the table is
+about to lose.
+
+Browser-level coverage for all of the above is the `score-entry-reachable`
+check in the `verify-ui` skill — the only one that measures at phone sizes and
+the only one that interacts by clicking rendered pixels rather than calling
+`throwDart()` from `page.evaluate()`, which is why the zero-height pads went
+unnoticed by twenty other checks.
 
 #### Board size in landscape (2026-07): the container, not the geometry
 

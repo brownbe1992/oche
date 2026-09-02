@@ -288,7 +288,7 @@ Add a second player (or a third, or a fourth) and it becomes a **race** instead:
 
 ### Scoring
 
-The scoring screen is optimised for touchscreen entry on a tablet. Everything fits on screen without scrolling, and all sizes scale dynamically to the device's viewport.
+The scoring screen is optimised for touchscreen entry on a tablet, and all sizes scale dynamically to the device's viewport. **The dart pad or dartboard always keeps its place on screen**, whatever the mode and however small the phone — where there isn't room for everything, it's the scoreboard that gives way and scrolls, never the buttons you're throwing into. Modes with a long scorecard (Bob's 27's twenty doubles, The Pressure Chamber's fifteen rounds) scroll that card on a phone and keep the round you're on, its running total, and the target you're aiming at all in view as you go.
 
 **Player cards** — shown at the top for every player in the game:
 - Remaining score (large)

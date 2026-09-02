@@ -336,7 +336,17 @@
   .pscore{display:flex;align-items:center;gap:14px;background:var(--surface-2);border:1px solid var(--wire);
     border-radius:12px;padding:12px 16px}
   .pscore.active{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}
-  .pscore .nm{font-weight:600;font-size:15px}
+  /* A flex item's default `min-width:auto` refuses to shrink below its own
+     min-content width, and a player name is a single unbreakable token. So a
+     long one (a name with no spaces in it) pushed the whole card wider than
+     the phone: measured at 481px inside a 390px viewport, with the score
+     itself off the right-hand edge. This lets the name column give way, and
+     the rule on .nm below lets a long name break rather than demand the room.
+     Deliberately `.pscore > *` and not `.pscore *`: .meta and .rem set their
+     own larger min-widths further down and out-specify this, which is what
+     keeps the score and the averages from collapsing instead. */
+  .pscore > *{min-width:0}
+  .pscore .nm{font-weight:600;font-size:15px;overflow-wrap:anywhere}
   /* nowrap keeps the tag whole. Without it a long name leaves just enough room
      for "DOUBLE" and pushes "OUT" alone onto the next line, so one row in a
      3-4 player X01 stack renders a line taller than its neighbours. The tag is
@@ -1094,8 +1104,53 @@
     flex:1; display:flex; flex-direction:column; min-height:0; padding:8px 10px 0;
   }
   body.game-active #screen-game > .btn-row{display:none}
-  /* player scoreboard */
-  body.game-active .scoreboard{flex:none;gap:6px;margin-bottom:8px}
+  /* player scoreboard — THE PART THAT YIELDS.
+     It used to be `flex:none`, i.e. always sized to its own content and never
+     shrinkable. That is fine for X01 (one ~66px card per player) and Cricket
+     (~265px), and completely wrong for a mode whose scoreboard is a long
+     ladder: Bob's 27 renders 20 rows (619px), The Pressure Chamber 15 (641px),
+     Around the Clock/World a wrapping outcome grid (875-901px). On a phone all
+     four exceeded the whole screen, and because .oche below is `flex:1` with
+     `min-height:0` it absorbed the entire shortfall — the number pad and the
+     dartboard were measured at ZERO pixels tall on a 390x844 viewport, so
+     there was literally nothing to tap and the mode could not be played at
+     all. body.game-active{overflow:hidden} meant you could not scroll to it
+     either.
+     So the scoreboard is now the element that gives way: it may shrink
+     (`flex:0 1 auto` + `min-height:0`), it never takes more than 40dvh, and
+     what does not fit scrolls INSIDE it rather than pushing the input surface
+     off the screen. The score you are reading yields to the buttons you are
+     pressing — never the other way round.
+     Applies in landscape too, where it does a second job: `.rail` is itself
+     `overflow-y:auto`, so a tall scoreboard used to push "Enter turn" below
+     the fold of the rail's own scroll. Capping the scoreboard keeps the turn
+     actions anchored on screen instead. */
+  body.game-active .scoreboard{
+    /* flex column rather than the base `display:grid`, so the rule below can
+       nominate ONE child as the part that shrinks. Visually identical — both
+       lay a single column of full-width children out with the same gap. */
+    display:flex; flex-direction:column;
+    flex:0 1 auto; min-height:0; max-height:40dvh; overflow-y:auto;
+    gap:6px; margin-bottom:8px;
+  }
+  /* Inside the scoreboard, the same argument one level down: the chalkboard
+     table of ROUNDS ALREADY PLAYED is the part that scrolls, and everything
+     else stays put. The trailing children matter far more than the history —
+     Bob's 27 puts "D7 — running score: 41" after its table and The Pressure
+     Chamber puts the whole card there (the target, the modifier, and the No
+     Warmup countdown), which is to say the one thing on screen telling you
+     what to throw at. Letting the scoreboard scroll as a single block would
+     push exactly that off the bottom.
+     `flex:0 1 auto` on the table and `flex:none` on its siblings says it in
+     one line: the table gives up space, the banners never do. */
+  body.game-active .scoreboard > *{flex:none}
+  body.game-active .scoreboard > .cs-table{flex:0 1 auto; min-height:0; overflow-y:auto}
+  /* Head and foot pin to the edges of that scroll box, so a scrolled ladder
+     still says whose column it is and what the running total now stands at —
+     in Bob's 27 the foot IS the score you are playing for. Both already carry
+     an opaque background, so the rows pass behind rather than through them. */
+  body.game-active .scoreboard > .cs-table > .cs-head{position:sticky;top:0;z-index:1}
+  body.game-active .scoreboard > .cs-table > .cs-foot{position:sticky;bottom:0;z-index:1}
   body.game-active .pscore{padding:clamp(6px,1dvh,10px) clamp(8px,1.5vw,14px)}
   body.game-active .pscore .nm{font-size:clamp(12px,1.8dvh,16px)}
   body.game-active .pscore .nm-out{font-size:clamp(8px,1.1dvh,11px)}
@@ -1105,10 +1160,37 @@
   body.game-active .pscore .meta{min-width:70px}
   body.game-active .pscore .meta .avgs{font-size:clamp(9px,1.3dvh,12px)}
   body.game-active .pscore .turnflag{font-size:clamp(8px,1.1dvh,11px)}
+  /* Around the Clock / Around the World put a wrapping outcome grid (20 or 63
+     cells) INSIDE the .pscore card, as a fourth child of a `display:flex` ROW.
+     In the narrow landscape rail that squeezed the grid to almost no width and
+     wrapped it into dozens of rows; the rule further down fixed it there, and
+     only there. Portrait had exactly the same bug and nobody had looked: on a
+     390px phone the card measured 573px WIDE (overflowing the screen
+     sideways) and 875px TALL, with the grid crushed into a 53px column — which
+     on its own drove the whole scoreboard past the height of the screen and
+     collapsed the dartboard to nothing.
+     So the column stack belongs to the CARD SHAPE, not to one layout: a
+     .pscore holding an outcome grid stacks everywhere, and the landscape rail
+     rule below now only re-rows the cards that do NOT hold one. Selected by
+     the grid's own host rather than by listing game types, so a third mode
+     that renders one is covered the day it does. If :has() is unsupported the
+     rule is dropped and the layout is exactly what it was before. */
+  body.game-active #scoreboard .pscore:has(.atc-live-progress, #atw-live-progress){
+    flex-direction:column; align-items:stretch; gap:6px;
+  }
+  body.game-active #scoreboard .pscore:has(.atc-live-progress, #atw-live-progress) .rem-wrap{
+    align-items:flex-start; margin-left:0;
+  }
+  body.game-active #scoreboard .pscore:has(.atc-live-progress, #atw-live-progress) .meta{
+    margin-left:0; text-align:left;
+  }
   /* Cricket's chalkboard scorecard replaces .pscore — same "shrink to fit any
-     screen" treatment, since .scoreboard is flex:none (sized to its own content,
-     not stretched or clipped) and a fixed-size table here would eat into the
-     rest of the screen's available height on shorter phones. */
+     screen" treatment, so that a fixed-size table here does not eat into the
+     rest of the screen's available height on shorter phones. Shrinking the type
+     is the FIRST line of defence and rarely enough on its own: it is what keeps
+     Cricket's 7-row table (~265px) inside the scoreboard's 40dvh cap without
+     scrolling at all, while a 20-row ladder is past that cap whatever the font
+     size and scrolls instead. */
   body.game-active .cs-table{margin-bottom:0}
   body.game-active .cs-label,
   body.game-active .cs-cell,
@@ -1125,6 +1207,23 @@
   body.game-active .oche{
     flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden;
     border-radius:12px; padding:10px;
+  }
+  /* A hard floor under the input surface, for the STACKED layout only.
+     Capping the scoreboard above is what fixes the four long-ladder modes, but
+     it is a cap on one element, not a guarantee about this one: pile up a tall
+     scoreboard, the slots row, the status line and the turn actions on a short
+     screen and .oche can still be squeezed to a pad a few pixels tall. This
+     says the well the darts go into never drops below roughly 40% of the
+     screen, whatever else wants the space — the scoreboard scrolls instead.
+     `min-height:0` above is still needed and still there: it is what lets
+     .oche's own CHILDREN shrink. This floors .oche itself against its parent.
+     NOT applied in the landscape rail layout, where .oche is a grid item in a
+     `1fr` row — a min-height there would inflate the row past the viewport
+     rather than take space from a neighbour, which is the same class of bug
+     the rail's own comment describes hitting with a row-spanning item.
+     The media query is the exact complement of the landscape one below. */
+  @media (orientation:portrait), (max-width:699px){
+    body.game-active .oche{min-height:clamp(170px,40dvh,320px)}
   }
   /* dart slots */
   body.game-active .slots{flex:none;gap:6px;margin-bottom:6px}
@@ -1243,18 +1342,19 @@
       min-height:0; overflow-y:auto;
     }
     body.game-active #scoreboard{margin-bottom:0;max-width:none;overflow-x:auto}
-    /* Solo per-dart modes' scoreboard row (Around the Clock/World) packs a
-       name block, a meta block, a remaining-count, AND a wrapping 20/63-cell
-       outcome grid all into one flex ROW — fine in the old full-width layout,
-       but in the narrow rail the outcome grid gets squeezed to almost no
-       width and wraps into dozens of rows, ballooning the card's height.
-       Stack it as a column here so the grid gets the rail's full width. */
+    /* Every card in the rail stacks as a column, because the rail column is
+       narrow. The outcome-grid cards (Around the Clock/World) stack
+       EVERYWHERE, not just here — that rule now lives with the base
+       body.game-active rules above, since "this card holds a wrapping 20/63
+       cell grid" is a fact about the card and not about the viewport. It was
+       scoped to this media query for a while and portrait carried the identical
+       bug unnoticed: a 573px-wide card inside a 390px screen. */
     body.game-active .rail .pscore{flex-direction:column;align-items:stretch;gap:6px}
     body.game-active .rail .pscore .rem-wrap{align-items:flex-start;margin-left:0}
     /* Compact single-row strip. The column stack above stays the DEFAULT because
        it is load-bearing for the solo per-dart modes (see the comment on that
        rule) — this narrows the exception to "a card that does NOT contain the
-       wrapping outcome grid", tested structurally via the grid's own host id
+       wrapping outcome grid", tested structurally via the grid's own host class
        rather than by listing game types here. If :has() is unsupported the whole
        rule is dropped and the layout falls back to the column stack, i.e. to
        exactly today's behaviour.

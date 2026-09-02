@@ -20,7 +20,7 @@
 > the `node:test` suite under `backend/test/` (all green as of this writing). This doc
 > tracks the correctness gaps that suite doesn't yet assert.
 >
-> **BUG-1 through BUG-59 are all fixed.** BUG-58 was opened by the 2026-07 tenth-pass
+> **BUG-1 through BUG-60 are all fixed.** BUG-58 was opened by the 2026-07 tenth-pass
 > audit (see `docs/security-audit-roadmap.md` Part 12, whose SEC-29/SEC-30 came from the
 > same pass) and fixed in the following change, with a committed regression test proven
 > to fail against the pre-fix source. **BUG-59** was opened by a live user bug report
@@ -3060,6 +3060,70 @@ assertions for placement — that a settings panel is always inside a `.setup-ca
 collapsing removes it, and that re-expanding restores it along with a Continue that
 works. The placement half cannot be asserted without a browser, which is why the panel
 survived in that position for as long as it did.
+
+### BUG-60 — four game modes had a score-entry surface **zero pixels tall** on a phone, so no dart could be entered at all  **(HIGH, user-facing / a whole mode unplayable on the most likely device)**
+
+**Status: ✅ Fixed (2026-09).** From a live user bug report — "Bob's 27 does not
+currently allow me to enter any shots" — not an audit pass. Play-testing every mode's
+score-entry screen at phone sizes found the same defect in four of them, plus a
+second, quieter set of layout faults in six more.
+
+**Verification.** The browser suite's new `score-entry-reachable` check (173
+assertions). Reverting the one-line CSS cause turns 28 of them red, including
+`390x844 bobs_27: a real tap records a dart` — the reported symptom, asserted directly.
+No `node:test` case can cover this: nothing here is a calculation, and the whole defect
+only exists once a browser has laid the page out.
+
+**What actually goes wrong, in plain terms.** `#screen-game` is a flex column of
+`#scoreboard`, `.oche` (the input well holding the pad or the dartboard) and
+`.turn-actions`. `body.game-active .scoreboard` was `flex:none` — sized to its own
+content and never allowed to shrink — while `.oche` was `flex:1;min-height:0`, which
+says "take whatever is left over, and zero is an acceptable answer". For X01 (one ~66px
+card per player) and Cricket (~265px) there is always space left over. For a mode whose
+scoreboard is a long ladder there is not. Measured at 390 × 844:
+
+| Mode | Scoreboard's own height | Input surface |
+|---|---|---|
+| Bob's 27 | 619px (20-round ladder) | pad **0px tall** |
+| The Pressure Chamber | 641px (15-round table) | pad **0px tall** |
+| Around the Clock | 875px | board **0px tall** |
+| Around the World | 901px | board **0px tall** |
+
+The buttons were present, enabled, and `display:flex` — every existing assertion about
+them passed. They simply had no size, so there was nothing to tap, and
+`body.game-active{overflow:hidden}` meant there was nothing to scroll to either.
+
+Around the Clock and Around the World were worse again: their `.pscore` card packs a
+wrapping 20/63-cell outcome grid into a `display:flex` **row**, so on a 390px screen the
+card measured **573px wide** — off the side of the screen — with the grid crushed into a
+53px column. That exact bug had already been found and fixed *in the landscape rail*; the
+fix was scoped to the landscape media query and portrait was never looked at.
+
+**Why twenty browser checks stayed green through it.** Every check in the suite drives
+the app by calling `throwDart()` from `page.evaluate()`, which works perfectly against a
+button that is zero pixels tall, and the closest existing assertion —
+`all-game-types`' "exactly one input surface is live" — asks whether the element is
+*displayed*, not whether it has any size. It also runs in landscape, where there was
+room. Measuring at phone sizes and clicking real coordinates are both new here, and both
+are the point.
+
+**What shipped.** Three layout rules stating one idea — *the scoreboard yields, the
+input surface never does* — plus the scroll-follow that makes a scrolling ladder usable.
+Full detail in `REFERENCE.md` §"Who yields when the screen runs out". In summary:
+`#scoreboard` may shrink, caps at `40dvh` and scrolls internally; inside it the
+`.cs-table` is the part that scrolls so the round banner underneath (Bob's 27's target,
+The Pressure Chamber's whole card) stays on screen, with sticky head/foot;
+`.oche` carries a `min-height` floor in the stacked layout; the outcome-grid `.pscore`
+column stack is hoisted out of the landscape query to apply wherever such a card renders;
+and `keepActiveChalkboardRowInView()`, called from `csTableInto()`, keeps the round being
+thrown at in view (Bob's 27 at round 18 was still showing D1-D8). `.pscore > *{min-width:0}`
+fixes a related sideways overflow: a long unbroken player name pushed an X01 card to 481px
+inside a 390px screen, with the score itself past the right-hand edge.
+
+Bob's 27 was folded onto the shared `csTableInto()`/`roundBannerInto()` builders in the
+same change — it had been hand-rolling a near-identical `.cs-table` inline, which is both
+why it needed the scroll-follow wired separately and one fewer place for the next person
+to have to find.
 
 ## Standing practice
 
