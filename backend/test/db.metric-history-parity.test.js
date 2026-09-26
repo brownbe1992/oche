@@ -375,7 +375,7 @@ describe('the pair list itself', () => {
     // gain a FAMILIES entry above — and this list shrinking is the prompt.
     const chartless = ['shanghaippr', 'halveitavgtotal', 'pcavgcp', 'bobs27avgscore',
       'checkoutladderattempts', 'gauntletrunscompleted', 'killerwinrate',
-      'dmwrunscompleted', 'checkouttraineroptimalpct', 'marathonsessions'];
+      'dmwrunscompleted', 'checkouttraineroptimalpct', 'marathonsessions', 'grandtouravgscore'];
     for (const metric of chartless) {
       assert.equal(hasHistoryArm(metric), false,
         `${metric} now has a getMetricHistory() arm — add its family to FAMILIES so it gets a parity assertion`);

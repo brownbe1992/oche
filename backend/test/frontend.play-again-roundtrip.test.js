@@ -107,7 +107,7 @@ const MATHS_SPRINT_SECONDS = (() => {
 })();
 
 const NO_OPTIONS = ['baseball', 'pressure_chamber', 'chuckin', 'around_the_clock',
-  'around_the_world', 'bobs_27', 'checkout_ladder', 'gauntlet'];
+  'around_the_world', 'bobs_27', 'grand_tour', 'checkout_ladder', 'gauntlet'];
 
 function run(key, setupObj, startScore) {
   const body = ENTRIES.get(key);

@@ -612,6 +612,149 @@ function isBobs27FullAnderson(running){
   return running === 1287;
 }
 
+/* ---------- Grand Tour ----------
+   A tour of every bed on the board, in four stages, three darts a visit:
+
+     Singles  S1 → S20   20 visits   1 point  per hit     max  60
+     Trebles  T1 → T20   20 visits   3 points per hit     max 180
+     Doubles  D1 → D20   20 visits   2 points per hit     max 120
+     Bull     bull        5 visits   outer 2 · inner 4    max  60
+                         ---------                        -------
+                         65 visits · 195 darts            max 420
+
+   Note the stage order is singles, TREBLES, then doubles — the owner's own
+   sequence, not a typo for the more obvious S/D/T.
+
+   Only the exact bed scores. In the singles stage a treble or double of the
+   target number is worth nothing (and counts as a miss for accuracy); either
+   single area — inside or outside the treble ring — counts as the single.
+   There is no dying early (unlike Bob's 27): every tour runs all 195 darts.
+
+   ONE COPY OF THE RULE. Everything that needs to know "was that dart a hit,
+   and for how much" calls grandTourDartPoints() below: the live scoring screen,
+   the server's per-visit consistency check in addTurn() (backend/db.js), the
+   saved-game rebuild, and the Player Profile's accuracy stats — which read the
+   raw darts and score them here rather than re-expressing the rule as a SQL
+   CASE, so the stats can never disagree with what the scoreboard showed.
+
+   Rounds are numbered 1-65 across the whole tour (game.grandTourRound — game-
+   level, shared by both players, the same lockstep shape as Shanghai's
+   shanghaiRound: a round completes once every player has thrown at it).
+   A round's position is the only thing that decides its target, so a turn's
+   target is recoverable from nothing but its 1-based position in that
+   player's own visit sequence — which is exactly how the server re-derives it. */
+const GRAND_TOUR_STAGES = [
+  { key: 'single', label: 'Singles', bed: 'Single', mult: 1, points: 1, rounds: 20 },
+  { key: 'treble', label: 'Trebles', bed: 'Treble', mult: 3, points: 3, rounds: 20 },
+  { key: 'double', label: 'Doubles', bed: 'Double', mult: 2, points: 2, rounds: 20 },
+  // The bull has two scoring beds rather than one, so it carries its own points
+  // pair instead of a single multiplier. 5 visits × 3 darts = the 15 bull darts.
+  { key: 'bull',   label: 'Bull',    bed: 'Bull',   outerPoints: 2, innerPoints: 4, rounds: 5 },
+];
+const GRAND_TOUR_ROUNDS = GRAND_TOUR_STAGES.reduce((n, s) => n + s.rounds, 0);   // 65
+const GRAND_TOUR_BULL_DARTS = 15;
+const GRAND_TOUR_MAX_POINTS = 420;
+
+// What round `round` (1-65) is aiming at. Past the last round it clamps to the
+// last round rather than returning nothing, so a caller that asks one round
+// too far (the server guard, before it rejects the turn) never crashes.
+function grandTourRoundTarget(round){
+  let r = Math.max(1, Math.min(round, GRAND_TOUR_ROUNDS));
+  for(let i = 0; i < GRAND_TOUR_STAGES.length; i++){
+    const stage = GRAND_TOUR_STAGES[i];
+    if(r <= stage.rounds){
+      if(stage.key === 'bull'){
+        return { round, stage: stage.key, stageLabel: stage.label, stageIndex: i, stageRound: r, stageRounds: stage.rounds,
+          sector: 25, label: 'Bullseye', short: 'Bull', pointsNote: `outer ${stage.outerPoints} · inner ${stage.innerPoints}` };
+      }
+      const n = r;   // the stage's own round number IS the board number (1-20)
+      const prefix = stage.mult === 3 ? 'T' : stage.mult === 2 ? 'D' : '';
+      return { round, stage: stage.key, stageLabel: stage.label, stageIndex: i, stageRound: r, stageRounds: stage.rounds,
+        sector: n, mult: stage.mult, label: `${stage.bed} ${n}`, short: `${prefix}${n}`,
+        pointsNote: `${stage.points} point${stage.points === 1 ? '' : 's'} a hit` };
+    }
+    r -= stage.rounds;
+  }
+  return null;   // unreachable: r is clamped to GRAND_TOUR_ROUNDS above
+}
+
+// The whole rule, for one dart: its points against this round's target, 0 if it
+// missed the target bed. `dart` is a makeDartCore() shape ({sector, mult}).
+function grandTourDartPoints(dart, target){
+  if(!dart || !target || dart.sector !== target.sector) return 0;
+  if(target.stage === 'bull') return dart.mult === 2 ? 4 : 2;
+  return dart.mult === target.mult ? GRAND_TOUR_STAGES[target.stageIndex].points : 0;
+}
+
+// Per-stage accuracy counters. `points` rides along so the completion card can
+// show what each stage was worth without a second pass over the darts.
+function newGrandTourTally(){
+  const t = {};
+  GRAND_TOUR_STAGES.forEach(s => { t[s.key] = { hits: 0, darts: 0, points: 0 }; });
+  return t;
+}
+function cloneGrandTourTally(tally){
+  const t = newGrandTourTally();
+  GRAND_TOUR_STAGES.forEach(s => { if(tally && tally[s.key]) Object.assign(t[s.key], tally[s.key]); });
+  return t;
+}
+// {hits, darts, pct} for one stage, or for the whole tour when stageKey is
+// omitted. pct is null — not 0 — when nothing has been thrown at it yet: "not
+// reached" and "reached and missed everything" must read differently.
+function grandTourAccuracy(tally, stageKey){
+  const keys = stageKey ? [stageKey] : GRAND_TOUR_STAGES.map(s => s.key);
+  let hits = 0, darts = 0;
+  keys.forEach(k => { if(tally && tally[k]){ hits += tally[k].hits; darts += tally[k].darts; } });
+  return { hits, darts, pct: darts > 0 ? hits / darts * 100 : null };
+}
+
+// The two-player result. Most points wins; a tie on points goes to whoever hit
+// more darts overall (with the same 195 darts each, that is the steadier tour);
+// a tie on both goes to whoever threw first. Always a definite winner, never a
+// draw — the same convention and the same reasoning as The Pressure Chamber's
+// pressureChamberDecideWinnerIndex(): no game type in this app has a draw
+// result, and a real 420-point scale makes an exact double tie rare.
+// `standings` is one {points, hits} per player, in player-index order.
+function grandTourDecideWinnerIndex(standings){
+  let best = 0;
+  for(let i = 1; i < standings.length; i++){
+    const a = standings[best], b = standings[i];
+    if(b.points > a.points || (b.points === a.points && b.hits > a.hits)) best = i;
+  }
+  return best;
+}
+
+// One visit. Same (player, darts, game) signature as every other evaluateVisit*.
+// Reads game.grandTourRound for the target and game.players/current/starter to
+// know whether this visit closes the round (and, on round 65, the tour).
+function evaluateVisitGrandTour(player, darts, game){
+  const round = game.grandTourRound;
+  const target = grandTourRoundTarget(round);
+  let scored = 0, hits = 0;
+  darts.forEach(d => {
+    const pts = grandTourDartPoints(d, target);
+    scored += pts;
+    if(pts > 0) hits += 1;
+  });
+  const tally = cloneGrandTourTally(player.tally);
+  tally[target.stage].darts += darts.length;
+  tally[target.stage].hits += hits;
+  tally[target.stage].points += scored;
+  const totalPoints = (player.totalPoints || 0) + scored;
+  const roundComplete = isRoundComplete(game);
+  let matchComplete = false, winnerIndex = null;
+  if(roundComplete && round >= GRAND_TOUR_ROUNDS){
+    matchComplete = true;
+    // The thrower's own updated figures substituted in, since this runs before
+    // game.current's player object is mutated — the same timing every other
+    // lockstep evaluator relies on.
+    winnerIndex = grandTourDecideWinnerIndex(game.players.map((pl, i) => i === game.current
+      ? { points: totalPoints, hits: grandTourAccuracy(tally).hits }
+      : { points: pl.totalPoints || 0, hits: grandTourAccuracy(pl.tally).hits }));
+  }
+  return { round, target, scored, hits, totalPoints, tally, roundComplete, matchComplete, winnerIndex };
+}
+
 /* ---------- server timestamp parsing ----------
    SQLite's `datetime('now')` (backend/db.js's default for every *_at column)
    produces "YYYY-MM-DD HH:MM:SS" -- space-separated, always UTC, no 'Z' or
@@ -2135,6 +2278,24 @@ function rebuildBobs27State({ turns }){
   return { running, round, roundResults, legDarts: darts, setDarts: darts, gameDarts: darts };
 }
 
+// Grand Tour — the shared lockstep replay, exactly as Shanghai's rebuild uses it.
+// A tour is always one leg of one set (GAME_TYPES.grand_tour.matchUnit), so the
+// leg/set machinery in _replayVisits() never fires here; it is left in rather
+// than bypassed because it is also what walks whose turn it is, which a
+// two-player tour does need.
+function rebuildGrandTourState({ names, turns, dnfs }){
+  return _replayVisits({
+    names, turns, legsPerSet: 1, dnfs, roundKey: 'grandTourRound',
+    newPlayer: name => ({ name, totalPoints: 0, tally: newGrandTourTally(),
+      legsWon: 0, setsWon: 0, legDarts: 0, setDarts: 0, gameDarts: 0 }),
+    resetLeg: (p, newSet) => { p.totalPoints = 0; p.tally = newGrandTourTally(); p.legDarts = 0; if(newSet) p.setDarts = 0; },
+    context: ({ round }) => ({ grandTourRound: round }),
+    evaluateVisit: evaluateVisitGrandTour,
+    applyResult: (p, ev) => { p.totalPoints = ev.totalPoints; p.tally = ev.tally; },
+    winnerOf: ev => ev.matchComplete ? ev.winnerIndex : -1,
+  });
+}
+
 // The 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B) — solo
 // only, so no starter rotation/leg-set structure to replay: every leg_no is
 // simply this player's own next attempt in sequence. Each attempt reuses
@@ -3088,6 +3249,9 @@ if (typeof module !== 'undefined' && module.exports) {
     chuckinTiersReached,
     isCricketWhitewash, CRICKET_COMEBACK_THRESHOLD, cricketComebackAchieved, cricketStoneColdAchieved,
     evaluateVisitBobs27, isBobs27FullHouse, isBobs27FullAnderson,
+    GRAND_TOUR_STAGES, GRAND_TOUR_ROUNDS, GRAND_TOUR_BULL_DARTS, GRAND_TOUR_MAX_POINTS,
+    grandTourRoundTarget, grandTourDartPoints, newGrandTourTally, cloneGrandTourTally,
+    grandTourAccuracy, grandTourDecideWinnerIndex, evaluateVisitGrandTour, rebuildGrandTourState,
     rebuildX01State, rebuildCricketState, rebuildBaseballState,
     rebuildAroundTheClockState, rebuildAroundTheClockRaceState, rebuildAroundTheWorldState, rebuildBobs27State,
     rebuildCheckoutLadderState,

@@ -36,6 +36,10 @@ const { checkoutHint, dartLabel,
   normaliseDeadManWalkingDifficulty, DEAD_MAN_WALKING_DEFAULT_DIFFICULTY,
   rebuildDeadManWalkingState, deadManWalkingResultTier, CHALLENGE_CHECKOUTS,
   makeDartCore, PRESSURE_ROUNDS, generatePressureCard, computePressureRoundResult,
+  // Grand Tour: the server re-scores every visit, and every accuracy stat, with the
+  // exact function the scoring screen uses — see addTurn()'s grand_tour branch.
+  GRAND_TOUR_ROUNDS, GRAND_TOUR_STAGES, grandTourRoundTarget, grandTourDartPoints,
+  newGrandTourTally, grandTourAccuracy, rebuildGrandTourState,
   pressureMissPenaltyForCard, pressureComposureRating, rebuildPressureChamberState,
   doubleElimStructure,
   resolveBoardColors, allCheckoutRoutes, CRICKET_STANDARD_NUMBERS,
@@ -1847,6 +1851,30 @@ function addTurn(gameId, t, opts = {}) {
     if (!!t.bust !== expectedBust) throw httpError(400, 'bust must reflect whether this round was missed entirely');
     if (!!t.checkout !== expectedCheckout) throw httpError(400, 'checkout must reflect whether this round was at least a partial hit');
     if (!!t.legWon !== expectedLegWon) throw httpError(400, 'legWon must reflect whether this round was a full hit');
+  } else if (gameTypeRow && gameTypeRow.game_type === 'grand_tour') {
+    // Grand Tour: scored is this visit's points, re-derived here from the darts by
+    // grandTourDartPoints() — the one copy of the rule, shared with the scoring
+    // screen (frontend/scoring.js). The round is this player's own prior-turn count
+    // in this game/set/leg, plus one: in a two-player tour each player throws
+    // exactly once per round, so their own count IS the round — the same SEC-25
+    // derivation Baseball/Shanghai/Bob's 27 use. Nothing here is taken on trust
+    // from the client except the darts themselves, which validateDart() has
+    // already range-checked above.
+    // A points total can never bust or check out, and a tour's winner is decided on
+    // totals after the last round rather than by any one visit, so all three flags
+    // must be false (enterTurnGrandTour() sends none of them).
+    if (t.bust) throw httpError(400, 'a Grand Tour turn cannot be a bust');
+    if (t.checkout) throw httpError(400, 'a Grand Tour turn cannot be a checkout');
+    if (t.legWon) throw httpError(400, 'a Grand Tour leg is decided on totals, never by one visit');
+    const priorTurns = db.prepare('SELECT COUNT(*) AS n FROM turns WHERE game_id = ? AND player_id = ? AND set_no = ? AND leg_no = ?')
+      .get(Number(gameId), p.id, setNo, legNo).n;
+    const round = priorTurns + 1;
+    if (round > GRAND_TOUR_ROUNDS) throw httpError(400, `a Grand Tour only has ${GRAND_TOUR_ROUNDS} visits`);
+    const target = grandTourRoundTarget(round);
+    const expected = darts.reduce((sum, d) => sum + grandTourDartPoints(makeDartCore(d.sector, d.multiplier), target), 0);
+    if (scored !== expected) {
+      throw httpError(400, `scored does not match this visit's points at ${target.label}`);
+    }
   }
   // Checkout Trainer (docs/archive/checkout-trainer-roadmap.md): the target score offered
   // for this round. Server-computed context, not a scored value, so it's only
@@ -2086,6 +2114,13 @@ const GAME_TYPE_REGISTRY = {
   bobs_27:          { savable: true,  statBubbles: getBobs27StatBubbles,            personalBests: getBobs27PersonalBests,
     rebuild: (game, participants, turns) => rebuildBobs27State({ turns }),
     position: (game, r) => ({ round: r.round, running: r.running }) },
+  // Grand Tour: solo or two-player, always one tour (one leg, one set). The round is
+  // shared by both players, so the position names it once plus each player's total.
+  grand_tour:       { savable: true,  statBubbles: getGrandTourStatBubbles,         personalBests: getGrandTourPersonalBests,
+    rebuild: (game, participants, turns) => rebuildGrandTourState({ names: participants.map(p => p.name),
+      dnfs: participants.map(p => !!p.dnf), turns }),
+    position: (game, r) => ({ round: r.grandTourRound,
+      players: r.players.map(p => ({ name: p.name, totalPoints: p.totalPoints })) }) },
   checkout_ladder:  { savable: true,  statBubbles: getCheckoutLadderStatBubbles,    personalBests: getCheckoutLadderPersonalBests,
     rebuild: (game, participants, turns) => rebuildCheckoutLadderState({ turns }),
     position: (game, r) => ({ target: r.target, legNo: r.legNo, remaining: r.remaining }) },
@@ -5638,6 +5673,127 @@ function getBobs27Leaderboard() {
     if (!cur || r.finalScore > cur.bestScore) best.set(r.name, { name: r.name, bestScore: r.finalScore, achievedAt: r.achievedAt });
   }
   return Array.from(best.values()).sort((a, b) => b.bestScore - a.bestScore);
+}
+
+/* ---------- Grand Tour ----------
+   Singles 1-20, trebles 1-20, doubles 1-20, then 15 bull darts; 195 darts, max 420
+   (frontend/scoring.js has the full rule). Solo is a practice tour; two players is
+   a head-to-head tour, decided on points.
+
+   THE RULE IS NOT RESTATED IN SQL. The query below only fetches each dart and the
+   1-based position of the visit it belongs to; grandTourRoundTarget() turns the
+   position into a target and grandTourDartPoints() scores the dart — the same two
+   functions the scoring screen and addTurn()'s guard call. A SQL CASE expression
+   ("sector = round-20 AND multiplier = 3 ...") would be a second copy of the rule,
+   free to drift from the one the player actually saw scored. Household-scale
+   volumes make scoring darts in JS a non-issue (a hundred tours is ~20k rows).
+
+   A tour's position is numbered per game/player/set/leg, exactly as the guard
+   counts it, so the two can never disagree about which visit aimed at what. A tour
+   is always one leg of one set (GAME_TYPES.grand_tour.matchUnit), so one tour is
+   one (game, player) pair.
+
+   Tour-level figures (tours, average, best, the leaderboard) count only FINISHED
+   tours — a paused or abandoned tour's partial total is not a result, the same rule
+   Bob's 27 and The Gauntlet apply. Accuracy counts every dart thrown, finished tour
+   or not: they were real darts at a real target ("no hypothetical exclusion", as
+   Bob's 27's doubles hit rate puts it). */
+function _grandTourTours(whereSql, params) {
+  const rows = db.prepare(`
+    WITH numbered AS (
+      SELECT t.id AS turnId, t.game_id AS gameId, t.player_id AS playerId,
+        ROW_NUMBER() OVER (PARTITION BY t.game_id, t.player_id, t.set_no, t.leg_no ORDER BY t.id) AS round
+      FROM turns t JOIN games g ON g.id=t.game_id
+      WHERE 1=1 ${whereSql}
+    )
+    SELECT n.gameId, n.playerId, n.round, d.sector, d.multiplier AS mult,
+      g.completed_at AS completedAt, pl.name AS name
+    FROM numbered n JOIN darts d ON d.turn_id=n.turnId
+      JOIN games g ON g.id=n.gameId JOIN players pl ON pl.id=n.playerId
+  `).all(...params);
+  const tours = new Map();
+  for (const r of rows) {
+    const key = `${r.gameId}:${r.playerId}`;
+    let tour = tours.get(key);
+    if (!tour) {
+      tour = { gameId: r.gameId, playerId: r.playerId, name: r.name, completedAt: r.completedAt,
+        points: 0, tally: newGrandTourTally() };
+      tours.set(key, tour);
+    }
+    const target = grandTourRoundTarget(r.round);
+    const pts = grandTourDartPoints(makeDartCore(r.sector, r.mult), target);
+    const stage = tour.tally[target.stage];
+    stage.darts += 1;
+    if (pts > 0) { stage.hits += 1; stage.points += pts; }
+    tour.points += pts;
+  }
+  return Array.from(tours.values());
+}
+
+function getGrandTourStatBubbles(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'grand_tour' });
+  const tours = _grandTourTours(`AND t.player_id=? ${scope}`, [p.id]);
+
+  const finished = tours.filter(t => t.completedAt != null);
+  const avgScore = finished.length ? finished.reduce((s, t) => s + t.points, 0) / finished.length : null;
+
+  // Every dart, finished tour or not — see the section comment.
+  const all = newGrandTourTally();
+  for (const t of tours) {
+    for (const s of GRAND_TOUR_STAGES) {
+      all[s.key].hits += t.tally[s.key].hits;
+      all[s.key].darts += t.tally[s.key].darts;
+    }
+  }
+  const pct = key => grandTourAccuracy(all, key).pct;
+
+  // Win rate is a head-to-head figure, so it only ever counts two-player tours. A
+  // solo tour's only player is recorded as its winner, which would otherwise make
+  // every practice tour a "win" and the practice tab read a meaningless 100%.
+  const gamesRow = db.prepare(`
+    SELECT COUNT(*) AS played, SUM(CASE WHEN g.winner_id=? THEN 1 ELSE 0 END) AS won
+    FROM game_players gp JOIN games g ON g.id=gp.game_id
+    WHERE gp.player_id=? ${scope} AND g.completed_at IS NOT NULL AND g.player_count > 1
+  `).get(p.id, p.id);
+  const winPct = gamesRow && gamesRow.played > 0 ? (gamesRow.won / gamesRow.played * 100) : null;
+
+  return {
+    tours: finished.length, avgScore,
+    accuracy: pct(), singlesAccuracy: pct('single'), treblesAccuracy: pct('treble'),
+    doublesAccuracy: pct('double'), bullAccuracy: pct('bull'),
+    winPct, dartsThrown: grandTourAccuracy(all).darts,
+  };
+}
+
+// Personal Bests: the best finished tour by score, the most accurate finished tour,
+// and the most trebles landed in one tour — a peak each, so no minimum-tours floor.
+function getGrandTourPersonalBests(playerName, mode) {
+  const p = getPlayer(playerName);
+  if (!p) return null;
+  const scope = _scope({ mode, gameType: 'grand_tour' });
+  const finished = _grandTourTours(`AND t.player_id=? ${scope}`, [p.id]).filter(t => t.completedAt != null);
+  if (!finished.length) return { bestScore: null, bestAccuracy: null, mostTrebles: null };
+  return {
+    bestScore: Math.max(...finished.map(t => t.points)),
+    bestAccuracy: Math.max(...finished.map(t => grandTourAccuracy(t.tally).pct)),
+    mostTrebles: Math.max(...finished.map(t => t.tally.treble.hits)),
+  };
+}
+
+// The Home page board, one per tab: each player's best finished tour within that
+// mode, highest first. A tie on score ranks whoever got there first above.
+function getGrandTourLeaderboard(mode) {
+  const scope = _scope({ mode, gameType: 'grand_tour' });
+  const best = new Map();
+  for (const t of _grandTourTours(scope, [])) {
+    if (t.completedAt == null) continue;
+    const cur = best.get(t.name);
+    if (!cur || t.points > cur.bestScore) best.set(t.name, { name: t.name, bestScore: t.points, achievedAt: t.completedAt });
+  }
+  return Array.from(best.values()).sort((a, b) =>
+    b.bestScore - a.bestScore || String(a.achievedAt).localeCompare(String(b.achievedAt)));
 }
 
 /* ---------- Household Elo rating (docs/archive/rating-and-handicap-roadmap.md Part A) ----------
@@ -9228,6 +9384,7 @@ module.exports = {
   addMathsTrainerRound, getMathsTrainerStatBubbles, getMathsTrainerPersonalBests,
   getMathsTrainerSegments, getMathsSprintLeaderboard, getMathsSprintPersonalStats,
   getBobs27StatBubbles, getBobs27PersonalBests, getBobs27Leaderboard,
+  getGrandTourStatBubbles, getGrandTourPersonalBests, getGrandTourLeaderboard,
   getEloRatings, getEloLeaderboard, getPlayerElo,
   getCheckoutLadderStatBubbles, getCheckoutLadderPersonalBests, getCheckoutLadderLeaderboard,
   getGauntletStatBubbles, getGauntletPersonalBests, getGauntletLeaderboard, getGauntletScarMap,

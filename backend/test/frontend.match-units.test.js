@@ -44,6 +44,7 @@ function extract(name) {
 
 // Each entry's practiceUnit, read straight out of the registry so the test cannot
 // disagree with the app about what a mode declares.
+const H2H_UNITS = new Map();
 function registryPracticeUnits() {
   const out = new Map();
   const re = /\n {2}([a-z0-9_]+): \{\n {4}id: '([a-z0-9_]+)',/g;
@@ -56,12 +57,16 @@ function registryPracticeUnits() {
     assert.ok(pu, `${m[1]} declares no practiceUnit`);
     out.set(m[1], pu[1] === 'null' ? null
       : { legsPerSet: Number(pu[2]), setsPerGame: Number(pu[3]) });
+    // h2hUnit is optional — absent means "the player picks, via Format".
+    const hu = body.match(/\n {4}h2hUnit: \{ legsPerSet: (\d+), setsPerGame: (\d+) \}/);
+    if (hu) H2H_UNITS.set(m[1], { legsPerSet: Number(hu[1]), setsPerGame: Number(hu[2]) });
   }
   return out;
 }
 
 const UNITS = registryPracticeUnits();
-const GAME_TYPES = Object.fromEntries([...UNITS].map(([k, v]) => [k, { practiceUnit: v }]));
+const GAME_TYPES = Object.fromEntries([...UNITS].map(([k, v]) =>
+  [k, H2H_UNITS.has(k) ? { practiceUnit: v, h2hUnit: H2H_UNITS.get(k) } : { practiceUnit: v }]));
 const SINGLE_UNIT_MODES = ['challenge', 'ghost'];
 const resolveMatchUnits = new Function('GAME_TYPES', 'SINGLE_UNIT_MODES',
   `${extract('resolveMatchUnits')}; return resolveMatchUnits;`)(GAME_TYPES, SINGLE_UNIT_MODES);
@@ -80,6 +85,12 @@ function referenceMatchUnits(setup, gameType) {
   const isPracticeShanghai = setup.gameType === 'shanghai' && setup.mode !== 'h2h';
   const isPracticeHalveIt = setup.gameType === 'halve_it' && setup.mode !== 'h2h';
   const isDeadManWalking = gameType === 'dead_man_walking';
+  // NOT part of the frozen snapshot: Grand Tour postdates it, and unlike maths_trainer
+  // above it is not a transcription of an old rule but a new one — the first type whose
+  // HEAD-TO-HEAD is fixed too (h2hUnit). A tour is a complete 195-dart game however many
+  // are playing, so it is 1/1 in both modes. Stated here in its own line so the sweep
+  // checks the registry against it rather than quietly skipping the type.
+  if (gameType === 'grand_tour') return { legsPerSet: 1, setsPerGame: 1 };
   const isPracticePressureChamber = setup.gameType === 'pressure_chamber' && setup.mode !== 'h2h';
   const legsPerSet = isDeadManWalking ? 15
     : (drillModes.includes(setup.mode) || isPracticeBaseball || isPracticeShanghai || isPracticeHalveIt || isPracticePressureChamber) ? 1 : setup.legsPerSet;
@@ -169,6 +180,15 @@ describe('match units (legs/sets) per game type', () => {
       const got = resolveMatchUnits({ gameType: key, mode: 'h2h', legsPerSet: 5, setsPerGame: 3 }, key);
       assert.deepEqual(got, { legsPerSet: 5, setsPerGame: 3 }, `${key} lost its H2H match structure`);
     }
+  });
+
+  test('Grand Tour is one tour in BOTH modes — the only type with a fixed head-to-head unit', () => {
+    for (const mode of ['practice', 'h2h']) {
+      const got = resolveMatchUnits({ gameType: 'grand_tour', mode, legsPerSet: 5, setsPerGame: 3 }, 'grand_tour');
+      assert.deepEqual(got, { legsPerSet: 1, setsPerGame: 1 }, `grand_tour ${mode} was not one tour`);
+    }
+    assert.deepEqual([...H2H_UNITS.keys()], ['grand_tour'],
+      'another type now fixes its head-to-head unit — intended? Its Format picker is hidden.');
   });
 
   test('Dead Man Walking is 15 legs, and is the only mode that is not 1/1 or free', () => {

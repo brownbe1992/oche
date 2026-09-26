@@ -360,6 +360,11 @@
   .pscore .meta .avgs{font-size:12px;color:var(--muted)}
   .pscore .meta .avgs b{color:var(--ink);font-weight:600}
   .pscore .meta .standing{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--gold)}
+  /* One figure in a card's meta line ("S 63%", "195 darts") — the line may wrap
+     BETWEEN figures but never inside one. Without it a narrow phone broke Grand
+     Tour's "S 100 · T — · D — · B —" as "…· D" / "— · B —": an orphaned letter,
+     and a dash at the start of a line that reads as a bullet point. */
+  .pscore .meta .fig{white-space:nowrap}
   @keyframes coflash{0%{color:#fff}100%{color:var(--gold)}}
   .pscore .co-inline.flash{animation:coflash .5s ease-out}
 

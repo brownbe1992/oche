@@ -464,6 +464,25 @@
   .stage-board{flex:none;display:flex;flex-direction:column;align-items:center;gap:1.2vmin}
   .stage-board svg{width:62vmin;height:62vmin;display:block}
   .stage-cap{font-size:1.4vmin;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  /* Grand Tour's stage: the caption names the bed being aimed at, larger than the
+     other modes' captions because on this screen it IS the instruction. */
+  .stage-cap.aim{font-size:2.3vmin;color:var(--cream);letter-spacing:.14em}
+  .stage-cap.aim b{color:var(--gold)}
+  /* Accuracy: overall as the headline across the top, then the four stages in the
+     order they are played, two by two. A stage not reached yet is dimmed and reads
+     "not reached yet" rather than 0% — nothing has been missed there. */
+  .acc-title{font-size:1.6vmin;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);font-weight:700}
+  .acc-grid{display:grid;grid-template-columns:repeat(2,auto);gap:2.4vmin 4.2vmin;margin-top:1.4vmin}
+  .stage-side.r .acc-grid{justify-content:end}
+  .acc{display:flex;flex-direction:column;gap:.35vmin}
+  .stage-side.r .acc{align-items:flex-end}
+  .acc .v{font-family:'Bebas Neue';font-size:7.2vmin;line-height:.85;color:var(--cream)}
+  .acc .v small{font-size:3.4vmin;color:var(--muted);margin-left:.3vmin}
+  .acc .k{font-size:1.45vmin;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  .acc .n{font-size:1.5vmin;color:#8e9a92}
+  .acc.overall{grid-column:1/-1}
+  .acc.overall .v{color:var(--gold);font-size:9vmin}
+  .acc.dim .v{color:#4d5852}
   body.orientation-portrait .stage{flex-direction:column;gap:2vmin;padding:2vmin 3vmin}
   body.orientation-portrait .stage-side,
   body.orientation-portrait .stage-side.r{align-items:flex-start;text-align:left;width:100%}
@@ -1089,6 +1108,17 @@ function fmtText(s){
   if(s.modeState && s.modeState.challengeFormat){
     return `🎯 <b>Daily Challenge</b> &nbsp;·&nbsp; ${esc(s.modeState.challengeLabel)}`;
   }
+  // Grand Tour: a tour is always one leg, so "Leg 1" would say nothing — the stage
+  // and how far through it are what the room wants to know.
+  const gt = grandTourTargetOf(s.modeState);
+  if(gt){
+    const stageNo = GRAND_TOUR_STAGE_KEYS.indexOf(gt.stage) + 1;
+    const where = gt.stage === 'bull'
+      ? `darts ${(gt.stageRound - 1) * 3 + 1}–${(gt.stageRound - 1) * 3 + 3} of ${GRAND_TOUR_BULL_DARTS}`
+      : `${gt.stageRound} of ${gt.stageRounds}`;
+    return `<b>Grand Tour</b> &nbsp; ${s.practice ? 'Practice' : 'Head to head'} &nbsp;·&nbsp; ` +
+      `Stage ${stageNo} of 4 · ${esc(GRAND_TOUR_STAGE_NAMES[gt.stage])} · ${esc(where)}`;
+  }
   if(s.practice){
     return `${roundPrefix}<b>${cat}</b> &nbsp; Practice &nbsp;·&nbsp; Leg ${legNo}`;
   }
@@ -1360,6 +1390,105 @@ function buildClockBoard(hitNumbers){
   s += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="#0d0e0b"/>`;
   s += `</svg>`;
   return s;
+}
+
+/* ---- Grand Tour ----
+   The controller resolves the target and sends it whole in modeState
+   (GAME_TYPES.grand_tour.liveModeState, frontend/index.html), so nothing here knows
+   the rule — this file has no shared scoring module, and a second copy of "round 29
+   is treble 9" would be free to drift from the one that actually scores. What IS
+   here is arithmetic on the per-player tally (hits over darts), which is not the
+   rule, only a percentage.
+
+   Everything read from the payload is constrained or coerced before it reaches the
+   markup (docs/security-audit-roadmap.md SEC-18): the stage must be one of four
+   known keys and the sector a real board number, or there is no target at all;
+   counts go through num(), and text through esc() at the point of output. */
+const GRAND_TOUR_STAGE_KEYS = ['single', 'treble', 'double', 'bull'];
+const GRAND_TOUR_STAGE_NAMES = { single: 'Singles', treble: 'Trebles', double: 'Doubles', bull: 'Bull' };
+const GRAND_TOUR_BULL_DARTS = 15;
+
+function grandTourTargetOf(modeState){
+  const t = modeState && modeState.grandTourTarget;
+  if(!t || typeof t !== 'object' || !GRAND_TOUR_STAGE_KEYS.includes(t.stage)) return null;
+  const sector = t.stage === 'bull' ? 25 : num(t.sector);
+  if(t.stage !== 'bull' && !(Number.isInteger(sector) && sector >= 1 && sector <= 20)) return null;
+  return { stage: t.stage, sector, stageRound: num(t.stageRound), stageRounds: num(t.stageRounds),
+    label: String(t.label || ''), pointsNote: String(t.pointsNote || '') };
+}
+
+// {h, d, pct} for one stage, or the whole tour. pct is null when nothing has been
+// thrown at it — "not reached" must not read as 0%.
+function grandTourAcc(tally, stageKey){
+  let h = 0, d = 0;
+  (stageKey ? [stageKey] : GRAND_TOUR_STAGE_KEYS).forEach(k => {
+    const x = tally && tally[k];
+    if(x){ h += num(x.hits); d += num(x.darts); }
+  });
+  return { h, d, pct: d > 0 ? Math.round(100 * h / d) : null };
+}
+
+// A dartboard with exactly ONE bed lit: both single areas of the number, just its
+// treble ring, just its double ring, or the bull. Lit means a gold fill AND a pale
+// outline with a glow, so the target is a shape as well as a colour (the
+// accessibility roadmap's no-colour-only rule); the caption above the board names
+// it in words too. Every other bed is drawn dark but keeps its rings visible —
+// knowing WHERE the treble ring is matters more on this board than on any other.
+function buildGrandTourBoard(target){
+  const { CX, CY, R, DEG, xy, f, annulus } = BOARD_GEOM;
+  const LIT = '#d9b46a', LIT_INNER = '#f3dfa6';
+  const outline = 'stroke="#fff6de" stroke-width="3.5"';
+  const bullOn = target.stage === 'bull';
+  let s = `<svg viewBox="0 0 660 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dartboard — aiming at ${esc(target.label)}">
+    <defs><filter id="gt-aim-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+    <circle cx="${CX}" cy="${CY}" r="${R.bg}" fill="#0b0c0a"/>
+    <circle cx="${CX}" cy="${CY}" r="${R.doubleOut + 1}" fill="#111210"/>`;
+  const lit = [];
+  DB_SECTORS.forEach((n, i) => {
+    const s0 = i * DEG - DEG / 2, e0 = s0 + DEG;
+    const single = i % 2 === 0 ? '#1b1d19' : '#24271f';
+    const ring = i % 2 === 0 ? '#2a2e27' : '#343a31';
+    const on = stage => target.stage === stage && target.sector === n;
+    const seg = (r1, r2, fill, isOn) => {
+      const d = annulus(r1, r2, s0, e0);
+      if(isOn) lit.push(d);
+      return `<path d="${d}" fill="${isOn ? LIT : fill}" stroke="#0e0f0d" stroke-width="1"/>`;
+    };
+    s += seg(R.bullOut, R.trebleIn, single, on('single'));
+    s += seg(R.trebleIn, R.trebleOut, ring, on('treble'));
+    s += seg(R.trebleOut, R.doubleIn, single, on('single'));
+    s += seg(R.doubleIn, R.doubleOut, ring, on('double'));
+    const [nx, ny] = xy(R.numAt, s0 + DEG / 2);
+    const isTarget = !bullOn && target.sector === n;
+    s += `<text x="${f(nx)}" y="${f(ny)}" text-anchor="middle" dominant-baseline="central"
+      font-family="Bebas Neue,sans-serif" font-size="${isTarget ? 30 : 19}" fill="${isTarget ? LIT : '#8f9a92'}"
+      style="pointer-events:none;user-select:none">${n}</text>`;
+  });
+  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="${bullOn ? LIT : '#2a2e27'}" stroke="#0e0f0d" stroke-width="1" ${bullOn ? 'filter="url(#gt-aim-glow)"' : ''}/>`;
+  s += `<circle cx="${CX}" cy="${CY}" r="${R.bullIn}" fill="${bullOn ? LIT_INNER : '#343a31'}" stroke="${bullOn ? '#fff6de' : '#0e0f0d'}" stroke-width="${bullOn ? 3 : 1}"/>`;
+  if(bullOn){
+    // The two bulls' points, on the beds themselves: the only stage where two
+    // different beds score, and the difference is the point of throwing for it.
+    s += `<circle cx="${CX}" cy="${CY}" r="${R.bullOut}" fill="none" ${outline}/>`;
+    s += `<text x="${CX}" y="${CY - 29}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="17" fill="#1a160c">2</text>`;
+    s += `<text x="${CX}" y="${CY}" text-anchor="middle" dominant-baseline="central" font-family="Bebas Neue,sans-serif" font-size="20" fill="#1a160c">4</text>`;
+  }
+  // The lit bed again, on top: glowing and outlined, never hidden under a neighbour.
+  lit.forEach(d => { s += `<path d="${d}" fill="${LIT}" ${outline} filter="url(#gt-aim-glow)"/>`; });
+  return s + '</svg>';
+}
+
+// Five accuracy tiles — overall as the headline, then the stages in play order.
+function grandTourAccGridHtml(tally){
+  const tile = (label, a, cls) => `<div class="acc ${cls || ''}${a.pct == null ? ' dim' : ''}">
+      <span class="v">${a.pct == null ? '—' : `${a.pct}<small>%</small>`}</span>
+      <span class="k">${esc(label)}</span>
+      <span class="n">${a.d ? `${a.h} of ${a.d} darts` : 'not reached yet'}</span></div>`;
+  return `<div class="acc-grid">
+      ${tile('overall', grandTourAcc(tally), 'overall')}
+      ${GRAND_TOUR_STAGE_KEYS.map(k => tile(GRAND_TOUR_STAGE_NAMES[k].toLowerCase(), grandTourAcc(tally, k))).join('')}
+    </div>`;
 }
 
 
@@ -1650,6 +1779,97 @@ const renderers = {
       });
     },
     resultStats(p){ return [{ v: p.running, k: 'final score' }]; },
+  },
+  /* Grand Tour: a stage, not a lane — the owner's own brief was "a dartboard
+     highlighting which number is being aimed at", and a board only reads across a
+     room at stage size. Solo: points left, the board in the middle, accuracy right.
+     Two players: one side each, the shared target between them — both are aiming
+     at the same bed, so one board serves both. (The mode caps at two; lane() is
+     here only so a hand-made three-player payload still shows everyone.) */
+  grand_tour: {
+    // The 180 / Big Fish / Bust counters mean nothing in a points tour.
+    hideX01Stats: true,
+    strip(s){
+      const m = s.modeState || {};
+      const t = grandTourTargetOf(m);
+      const labels = Array.isArray(s.darts) ? s.darts : [];
+      const pts = num(m.grandTourVisitPoints);
+      return {
+        darts: [0, 1, 2].map(i => labels[i] != null
+          ? { label: labels[i], cls: dartClass(labels[i]) }
+          : { label: `dart ${i + 1}`, pending: true }),
+        // The rule-scored total, not the snapshot's face-value visitScored: a T9
+        // is worth 3 here, not 27.
+        visit: { k: 'this visit', v: pts, unit: pts === 1 ? 'pt' : 'pts' },
+        need: t ? { k: 'aiming at', r: t.label, note: t.pointsNote } : null,
+      };
+    },
+    stage(s){
+      const players = s.players || [];
+      if(players.length > 2) return '';   // → lane(); see the comment above
+      const t = grandTourTargetOf(s.modeState);
+      if(!t) return '';
+      const thrower = players[s.currentIndex] || players[0] || {};
+      const inHand = Array.isArray(s.darts) ? s.darts.length : 0;
+      const bullBefore = num(((thrower.tally || {}).bull || {}).darts);
+      const dartOf = inHand >= 3 ? 'visit complete'
+        : t.stage === 'bull' ? `dart ${Math.min(bullBefore + inHand + 1, GRAND_TOUR_BULL_DARTS)} of ${GRAND_TOUR_BULL_DARTS}`
+        : `dart ${inHand + 1} of 3`;
+      const board = `<div class="stage-board">
+          <span class="stage-cap aim">aim · <b>${esc(t.label)}</b> · ${esc(dartOf)}</span>
+          ${buildGrandTourBoard(t)}
+        </div>`;
+      if(players.length <= 1){
+        const p = players[0] || {};
+        const progress = t.stage === 'bull'
+          ? { v: `${bullBefore} / ${GRAND_TOUR_BULL_DARTS}`, k: 'bull darts' }
+          : { v: `${t.stageRound} / ${t.stageRounds}`, k: GRAND_TOUR_STAGE_NAMES[t.stage].toLowerCase() };
+        return stageSideHtml({
+          eyebrow: '▸ at the oche', name: p.name || '',
+          hero: String(num(p.totalPoints)), heroUnit: '/ 420', sub: 'points this session',
+          stats: [{ v: grandTourAcc(p.tally).d, k: 'darts thrown' }, progress],
+        }) + board +
+          `<div class="stage-side r"><div class="acc-title">Accuracy</div>${grandTourAccGridHtml(p.tally)}</div>`;
+      }
+      const side = (p, i) => `<div class="stage-side${i ? ' r' : ''}">
+          ${i === s.currentIndex
+            ? `<div class="stage-sub" style="color:var(--gold);letter-spacing:.18em;text-transform:uppercase;font-weight:700">▸ at the oche</div>`
+            : `<div class="stage-sub" style="letter-spacing:.18em;text-transform:uppercase;font-weight:700">waiting · throws next</div>`}
+          <div class="stage-name">${esc(p.name)}</div>
+          <div class="stage-hero" style="font-size:12vmin">${num(p.totalPoints)}<span class="u">pts</span></div>
+          ${grandTourAccGridHtml(p.tally)}
+        </div>`;
+      return side(players[0], 0) + board + side(players[1], 1);
+    },
+    lane(p, i, s, L){
+      const a = grandTourAcc(p.tally);
+      return buildModeLane(p, i, s, L, {
+        big: num(p.totalPoints), bigUnit: 'pts',
+        sub: `${a.pct == null ? '—' : a.pct + '%'} accuracy · ${a.d} darts`,
+        cells: GRAND_TOUR_STAGE_KEYS.map(k => {
+          const x = grandTourAcc(p.tally, k);
+          return x.d ? { label: GRAND_TOUR_STAGE_NAMES[k], glyph: `${x.pct}%`, state: 'ok' }
+            : pendingCell(GRAND_TOUR_STAGE_NAMES[k]);
+        }),
+      });
+    },
+    resultStats(p){
+      return [{ v: num(p.points), k: 'points' },
+        { v: p.accuracy == null ? '—' : `${Math.round(num(p.accuracy))}%`, k: 'accuracy' }];
+    },
+    // The result band, in this mode's own terms (the winner's tour — or the only
+    // tour), instead of X01's 180s / big fish / busts, which are always zero here.
+    resultTallies(s){
+      const rows = s.legSummary || [];
+      const w = rows.find(r => r.won) || rows[0] || {};
+      const p = (s.players || []).find(x => x.name === w.name) || {};
+      const tally = p.tally || {};
+      return [
+        { em: '🎯', v: grandTourAcc(tally).h, k: 'hits' },
+        { em: '🔱', v: num((tally.treble || {}).hits), k: 'trebles' },
+        { em: '🐂', v: num((tally.bull || {}).hits), k: 'bulls' },
+      ];
+    },
   },
   // 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B): solo drill,
   // always exactly one player/card — a genuine X01-shaped visit (double-out,
@@ -2157,7 +2377,7 @@ function renderResultView(renderer, s, L){
   // The tally band, in the app's established emoji vocabulary — the same
   // counters the top bar carries during play, restated at result scale because
   // this is the moment they are actually read.
-  const t = [
+  const t = typeof renderer.resultTallies === 'function' ? renderer.resultTallies(s) : [
     { em:'🎯', v:num(s.gameOneEighties), k: num(s.gameOneEighties)===1 ? '180' : '180s' },
     { em:'🐟', v:num(s.gameBigFish),     k:'big fish' },
     { em:'💥', v:num(s.gameBusts),       k:'busts' },
@@ -2457,8 +2677,9 @@ function render(s){
   const renderer = renderers[s.gameType] || renderers.x01;
   const L = LAYOUTS[layout] || LAYOUTS.full;
 
-  // 180s + Big Fish in top bar (Full layout only — secondary info on Compact/Minimal)
-  if(L.showGameStats){
+  // 180s + Big Fish in top bar (Full layout only — secondary info on Compact/Minimal).
+  // A renderer declaring hideX01Stats (Grand Tour) has no 180s, fish or busts to count.
+  if(L.showGameStats && !renderer.hideX01Stats){
     gameStats.classList.remove('hidden');
     stat180s.textContent  = s.gameOneEighties ?? 0;
     statBF.textContent    = s.gameBigFish     ?? 0;

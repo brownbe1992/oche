@@ -30,7 +30,7 @@ describe('GAME_TYPE_REGISTRY — derived lists', () => {
     assert.deepEqual([...db.KNOWN_GAME_TYPES].sort(), [
       'around_the_clock', 'around_the_world', 'baseball', 'bobs_27', 'checkout_ladder',
       'checkout_trainer', 'chuckin', 'cricket', 'dead_man_walking', 'doubles_practice',
-      'gauntlet', 'halve_it', 'killer', 'maths_trainer', 'pressure_chamber', 'shanghai', 'x01',
+      'gauntlet', 'grand_tour', 'halve_it', 'killer', 'maths_trainer', 'pressure_chamber', 'shanghai', 'x01',
     ]);
     assert.ok(!db.KNOWN_GAME_TYPES.includes('marathon'), 'marathon is a dispatch-only routing key, not a real game type');
   });
@@ -38,7 +38,7 @@ describe('GAME_TYPE_REGISTRY — derived lists', () => {
   test('SAVABLE_GAME_TYPES excludes the non-resumable drill/match types', () => {
     assert.deepEqual([...db.SAVABLE_GAME_TYPES].sort(), [
       'around_the_clock', 'around_the_world', 'baseball', 'bobs_27', 'checkout_ladder',
-      'cricket', 'dead_man_walking', 'gauntlet', 'halve_it', 'pressure_chamber', 'shanghai', 'x01',
+      'cricket', 'dead_man_walking', 'gauntlet', 'grand_tour', 'halve_it', 'pressure_chamber', 'shanghai', 'x01',
     ]);
     for (const notSavable of ['doubles_practice', 'chuckin', 'checkout_trainer', 'killer']) {
       assert.ok(!db.SAVABLE_GAME_TYPES.includes(notSavable), `${notSavable} is not savable`);
@@ -60,6 +60,7 @@ describe('GAME_TYPE_REGISTRY — stat dispatch', () => {
       doubles_practice: db.getDoublesPracticeStatBubbles, chuckin: db.getChuckinStatBubbles,
       checkout_trainer: db.getCheckoutTrainerStatBubbles, around_the_clock: db.getAroundTheClockStatBubbles,
       around_the_world: db.getAroundTheWorldDrillStatBubbles, bobs_27: db.getBobs27StatBubbles,
+      grand_tour: db.getGrandTourStatBubbles,
       checkout_ladder: db.getCheckoutLadderStatBubbles, gauntlet: db.getGauntletStatBubbles,
       dead_man_walking: db.getDeadManWalkingStatBubbles, killer: db.getKillerStatBubbles, marathon: db.getMarathonStatBubbles,
     };
@@ -69,6 +70,7 @@ describe('GAME_TYPE_REGISTRY — stat dispatch', () => {
     // Personal-bests dispatch: representative real types plus marathon.
     assert.deepEqual(db.getPersonalBestsFor('cricket', P, 'practice'), db.getCricketPersonalBests(P, 'practice'));
     assert.deepEqual(db.getPersonalBestsFor('pressure_chamber', P, 'practice'), db.getPressureChamberPersonalBests(P, 'practice'));
+    assert.deepEqual(db.getPersonalBestsFor('grand_tour', P, 'practice'), db.getGrandTourPersonalBests(P, 'practice'));
     assert.deepEqual(db.getPersonalBestsFor('marathon', P, 'practice'), db.getMarathonPersonalBests(P, 'practice'));
   });
 

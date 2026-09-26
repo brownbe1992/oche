@@ -56,6 +56,7 @@ const ctx = vm.createContext({
     doubles_practice: { soloOnly: true }, checkout_ladder: { soloOnly: true },
     gauntlet: { soloOnly: true }, checkout_trainer: { soloOnly: true },
     dead_man_walking: { soloOnly: true },
+    grand_tour: {},
   },
 });
 vm.runInContext([
@@ -87,6 +88,10 @@ describe('the X01 player ceiling', () => {
     for (const key of ['cricket', 'baseball', 'shanghai', 'halve_it', 'pressure_chamber', 'killer']) {
       assert.equal(maxFor('h2h', key), GLOBAL_MAX, `${key} inherited X01's ceiling`);
     }
+  });
+
+  test('Grand Tour allows two — the owner\'s own cap, narrower than X01\'s', () => {
+    assert.equal(maxFor('h2h', 'grand_tour'), 2);
   });
 
   test('a solo-only type still allows exactly one slot', () => {

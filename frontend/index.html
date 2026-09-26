@@ -1158,6 +1158,7 @@
      scripts sharing one global scope with the inline script below, exactly like the
      six above; each holds the functions its GAME_TYPES entry names. -->
 <script src="js/bobs-27.js"></script>
+<script src="js/grand-tour.js"></script>
 <script src="js/cricket.js"></script>
 <script src="js/pressure-chamber.js"></script>
 <script src="js/dead-man-walking.js"></script>
@@ -2186,6 +2187,21 @@ const HOME_COMBO_SPECS={
     fetch(){ return Backend.get('/api/stats/bobs27-leaderboard').then(leaderboard=>{ homeData.bobs27={leaderboard}; }); },
     hasCache(){ return !!homeData.bobs27; },
     fallback(){ homeData.bobs27={leaderboard:[]}; },
+  },
+  // Dual (solo or two-player), so one board per tab — the best practice tour on
+  // Practice, the best two-player tour on H2H — rather than a single pooled board.
+  grand_tour:{ perMode:true,
+    fetch(mode){
+      return Backend.get(`/api/stats/grand-tour-leaderboard?mode=${mode}`).then(leaderboard=>{
+        if(!homeData.grandTour) homeData.grandTour={};
+        homeData.grandTour[mode]={leaderboard};
+      });
+    },
+    hasCache(mode){ return !!(homeData.grandTour && homeData.grandTour[mode]); },
+    fallback(mode){
+      if(!homeData.grandTour) homeData.grandTour={};
+      homeData.grandTour[mode]={leaderboard:[]};
+    },
   },
   checkout_ladder:{ perMode:false,
     fetch(){ return Backend.get('/api/stats/checkout-ladder-leaderboard').then(leaderboard=>{ homeData.checkoutLadder={leaderboard}; }); },
@@ -4658,6 +4674,9 @@ const NEW_GAME_MODE_OPTIONS = [
   { key:'bobs_27', label:"Bob's 27",
     blurb:"Bob Anderson's famous doubles routine. Start with 27 points, then throw 3 darts at D1, then D2, all the way to D20 — every dart that hits the double adds its value, but if all three miss, that double's value is SUBTRACTED instead. Drop to 0 or below and the run is over; survive to D20 and your final score is the result (a perfect run is 1287).",
     apply(){ setMode('bobs_27'); } },
+  { key:'grand_tour', label:'🚴 Grand Tour',
+    blurb:"A tour of every bed on the board, three darts at each. Singles 1 to 20 first (1 point for each single of that number), then trebles 1 to 20 (3 points each), then doubles 1 to 20 (2 points each), and finally 15 darts at the bull — 2 points for the outer bull, 4 for the inner. Only the exact bed counts: a treble 7 while you're on single 7 scores nothing. 195 darts, and a perfect tour is 420. Play it solo, or with one other player taking turns at the same target — most points at the end wins.",
+    apply(){ setMode(setupPlayerCount()>=2 ? 'h2h' : 'practice'); setGameType('grand_tour'); } },
   { key:'checkout_ladder', label:'🧗 121 Checkout Ladder',
     blurb:"The classic checkout ladder — the physical sibling of Checkout Trainer (that one asks what you'd throw; this makes you throw it). Start on 121, double out, up to 3 visits (9 darts) to check out. Check out and the target climbs one rung; fail all 3 visits and it drops one (never below 61). Play as long as you like — the story is how high you climb.",
     apply(){ setMode('checkout_ladder'); } },
@@ -4777,7 +4796,7 @@ const GAME_LEDGER_CATEGORIES = [
   { key:'traditional', label:'Traditional', accent:'var(--gold)', sub:'The games you know and love (or hate)',
     keys:['x01','cricket','baseball','shanghai','halve_it'] },
   { key:'training', label:'Practice & Drills', accent:'var(--green)', sub:'Throw for fun or train your skills',
-    keys:['doubles_practice','chuckin','around_the_clock','around_the_world','bobs_27','checkout_ladder'] },
+    keys:['doubles_practice','chuckin','around_the_clock','around_the_world','bobs_27','grand_tour','checkout_ladder'] },
   { key:'solo_stakes', label:'Solo Challenges', accent:'var(--red-text)', sub:'Test your skills under pressure',
     keys:['pressure_chamber','gauntlet','dead_man_walking'] },
   { key:'h2h_only', label:'Head-to-Head Only', accent:'#8a6fd1', sub:'Find a friend… or five',
@@ -4788,7 +4807,7 @@ const GAME_LEDGER_CATEGORIES = [
 const GAME_LEDGER_NAMES = {
   x01:'X01', cricket:'Cricket', baseball:'Baseball', shanghai:'Shanghai', halve_it:'Halve-It',
   doubles_practice:'Doubles Practice', chuckin:"Just Chuckin' It", checkout_trainer:'Checkout Trainer',
-  around_the_clock:'Around the Clock', around_the_world:'Around the World', bobs_27:"Bob's 27", checkout_ladder:'121 Checkout Ladder',
+  around_the_clock:'Around the Clock', around_the_world:'Around the World', bobs_27:"Bob's 27", grand_tour:'Grand Tour', checkout_ladder:'121 Checkout Ladder',
   pressure_chamber:'The Pressure Chamber', gauntlet:'The Gauntlet', dead_man_walking:'Dead Man Walking',
   killer:'Killer', ghost:'Ghost Mode', marathon:'Marathon Mode', maths_trainer:'Maths Trainer',
   // Deliberately no 'league_game' entry: it is not a ledger row (no category
@@ -4808,6 +4827,7 @@ const GAME_LEDGER_TEASERS = {
   around_the_clock:'Hit every number 1–20, in any order.',
   around_the_world:'Chip away at all 63 lifetime outcomes.',
   bobs_27:'The classic doubles routine — D1 through D20.',
+  grand_tour:'Every single, treble and double, then the bull — 195 darts.',
   checkout_ladder:'Climb the ladder one real checkout at a time.',
   pressure_chamber:'15 rounds, 15 cards — a target, stakes, and a modifier.',
   gauntlet:'20 stations, one repeat attempt if you miss.',
@@ -4985,8 +5005,12 @@ function mountSetupInlineOptions(){
   // it, regardless of setup.mode (see setMode()'s comment on why gating this
   // on mode instead of key would hide it until Step 2 knows the eventual
   // player count).
+  // ...except a type whose head-to-head is ALSO a fixed unit (GAME_TYPES.<type>.h2hUnit —
+  // Grand Tour: always one tour), where a legs/sets picker would offer a choice
+  // resolveMatchUnits() then ignores.
   const h2hOptions = document.getElementById('h2h-options');
-  if(h2hOptions) h2hOptions.hidden = !chosenGameContexts(currentSetupOptionKey()).includes('h2h');
+  const optKey = currentSetupOptionKey();
+  if(h2hOptions) h2hOptions.hidden = !chosenGameContexts(optKey).includes('h2h') || !!(GAME_TYPES[optKey] || {}).h2hUnit;
 }
 function toggleSetupRules(){
   setupRulesOpen = !setupRulesOpen;
@@ -5007,7 +5031,7 @@ const SETUP_MODE_GATED_OPTION_KEYS = ['x01', 'doubles_practice', 'checkout_train
 // Checkout Ladder, Chuckin, etc.), since there'd otherwise be nothing to look
 // at besides the teaser line already visible before selecting it.
 function keyHasInlineOptions(key){
-  if(chosenGameContexts(key).includes('h2h')) return true; // Format
+  if(chosenGameContexts(key).includes('h2h') && !(GAME_TYPES[key] || {}).h2hUnit) return true; // Format
   if(GAME_TYPES[key] && GAME_TYPES[key].optionsSectionId) return true; // Cricket/Killer/Shanghai/Halve-It
   return SETUP_MODE_GATED_OPTION_KEYS.includes(key);
 }
@@ -5037,12 +5061,16 @@ function maxPlayersForSetup(){
   // game you are playing and becomes one you are watching. Every other
   // dual-capable type keeps the global ceiling.
   if(key === 'x01') return 4;
+  // Grand Tour caps at 2 — the owner's own choice. Both players throw at the same
+  // target in turn, and a tour is 65 visits each: a third player would add another
+  // 65 visits of waiting between every one of yours.
+  if(key === 'grand_tour') return 2;
   return SETUP_GLOBAL_MAX_PLAYERS;
 }
 // The 6 game types playable either solo or head-to-head — the only ones whose
 // setup.mode ('practice' vs 'h2h') needs re-deriving as Step 2's player count
 // changes (every other key's mode is fixed regardless of player count).
-const SETUP_DUAL_MODE_KEYS = ['x01','cricket','baseball','shanghai','halve_it','pressure_chamber','around_the_clock'];
+const SETUP_DUAL_MODE_KEYS = ['x01','cricket','baseball','shanghai','halve_it','pressure_chamber','around_the_clock','grand_tour'];
 function resyncSetupModeForPlayerCount(){
   const key = currentSetupOptionKey();
   if(!SETUP_DUAL_MODE_KEYS.includes(key)) return;
@@ -5605,6 +5633,7 @@ async function startGame(){
     // Transient per-visit state, reset to null every turn — never persisted or resumed.
     pressureDeclared: null,
     bobs27Round: 1,    // Bob's 27 only (docs/archive/practice-ladders-roadmap.md Part A) — which double (1-20) is live
+    grandTourRound: 1, // Grand Tour only — which of its 65 visits (S1…S20, T1…T20, D1…D20, 5× bull) is live
     checkoutLadderTarget: 121, // 121 Checkout Ladder only (docs/archive/practice-ladders-roadmap.md Part B) — current attempt's target
     checkoutLadderVisits: 0,  // visits used so far in the current attempt (0-2 while live)
     gauntletStationIndex: 0,  // The Gauntlet only (docs/archive/gauntlet-roadmap.md) — index into GAUNTLET_STATION_ORDER of the live station
@@ -6905,6 +6934,11 @@ const PRESSURE_CHAMBER_PB_SPEC = { emptyMsg: 'Not enough runs recorded yet.', st
 const BOBS27_PB_SPEC = { emptyMsg: 'Not enough runs recorded yet.', stats: [
   { key:'bestFinalScore', label:'Best Final Score' },
   { key:'deepestDoubleOnFail', label:'Deepest Double Reached on a Fail', fmt:v=>'D'+v },
+] };
+const GRAND_TOUR_PB_SPEC = { emptyMsg: 'No finished tours yet.', stats: [
+  { key:'bestScore', label:'Best Tour Score', fmt:v=>`${v} / ${GRAND_TOUR_MAX_POINTS}` },
+  { key:'bestAccuracy', label:'Most Accurate Tour', fmt:v=>`${v.toFixed(1)}%` },
+  { key:'mostTrebles', label:'Most Trebles in a Tour' },
 ] };
 const CHECKOUT_LADDER_PB_SPEC = { emptyMsg: 'Not enough attempts recorded yet.', stats: [
   { key:'highestTargetReached', label:'Highest Target Reached' },
@@ -8412,11 +8446,12 @@ function throwDartVisit(sector, zone, missZone, missDepth, bounced){
   mult=1; updateMultUI();
   GAME_TYPES[game.gameType].afterDart();
 }
-/* Cricket, Baseball and Bob's 27: no bust and no live "win" to preview, so a
-   dart only moves the visit slots and the pad. Cricket has no bust/checkout
-   concept at all; Baseball's win resolves only at the end of a full round of
-   innings; Bob's 27's "all three missed" can only be judged once the whole
-   visit is in. Three modes, one reason, one function. */
+/* Cricket, Baseball, Bob's 27 and Grand Tour: no bust and no live "win" to
+   preview, so a dart only moves the visit slots and the pad. Cricket has no
+   bust/checkout concept at all; Baseball's win resolves only at the end of a
+   full round of innings; Bob's 27's "all three missed" can only be judged once
+   the whole visit is in; a Grand Tour is decided on totals after its last visit.
+   Four modes, one reason, one function. */
 function afterDartSlotsOnly(){ renderSlots(); renderPad(); pushLive(); }
 
 
@@ -8623,7 +8658,7 @@ async function resumeGame(gameId){
     players,
     blitzDeadline: null, blitzEnded: false,
     starter: 0, current: 0, setNo: 1, legNo: 1,
-    baseballInning: 1, shanghaiRound: 1, halveItRound: 1, bobs27Round: 1, checkoutLadderTarget: 121, checkoutLadderVisits: 0,
+    baseballInning: 1, shanghaiRound: 1, halveItRound: 1, bobs27Round: 1, grandTourRound: 1, checkoutLadderTarget: 121, checkoutLadderVisits: 0,
     gauntletStationIndex: 0, gauntletAwaitingRepeat: false, gauntletFinalMisses: [], gauntletCleanStreak: 0, gauntletBestCleanStreak: 0,
     dmwTarget: 0, dmwBudget: 0, dmwDartsUsedThisRound: 0, dmwWalkedOutCount: 0, dmwCurrentStreak: 0, dmwBestStreak: 0,
     // The Pressure Chamber only (docs/archive/pressure-chamber-roadmap.md): gameId is
@@ -8696,6 +8731,7 @@ function savedGamePositionLabel(sg){
     case 'around_the_clock': return `${pos.hit}/${pos.total} numbers hit`;
     case 'around_the_world': return `${pos.sessionDarts} dart${pos.sessionDarts===1?'':'s'} this session`;
     case 'bobs_27': return `D${pos.round} · running score ${pos.running}`;
+    case 'grand_tour': return `${grandTourRoundTarget(pos.round).label} · ${pos.players.map(p => `${p.name} ${p.totalPoints}`).join(' – ')}`;
     case 'checkout_ladder': return `Target ${pos.target} · attempt ${pos.legNo} · ${pos.remaining} remaining`;
     case 'gauntlet': return `Station ${pos.settled+1} of 20 · total Scars ${pos.totalScars}${pos.awaitingRepeat ? ' · repeat pending' : ''}`;
     case 'dead_man_walking': return `Round ${pos.round} of ${pos.totalRounds} · target ${pos.target} · ${pos.walkedOutCount} Walked Out`;
@@ -9983,10 +10019,15 @@ function resetLegStateNone(){}
  * @returns {{legsPerSet: number, setsPerGame: number}}
  */
 const SINGLE_UNIT_MODES = ['challenge', 'ghost'];
+// practiceUnit fixes a type's legs/sets when played solo; h2hUnit is the same thing
+// for head-to-head, and is absent (the player chooses, via Format) for every type
+// but Grand Tour — whose tour is a complete 195-dart game however many are playing,
+// so "first to three tours" is not a match anyone wants. One member per context.
 function resolveMatchUnits(setup, gameType){
+  const gt = GAME_TYPES[gameType] || {};
   const forced = SINGLE_UNIT_MODES.includes(setup.mode)
     ? { legsPerSet: 1, setsPerGame: 1 }
-    : (setup.mode !== 'h2h' ? (GAME_TYPES[gameType] || {}).practiceUnit : null);
+    : (setup.mode !== 'h2h' ? gt.practiceUnit : gt.h2hUnit);
   return forced
     ? { legsPerSet: forced.legsPerSet, setsPerGame: forced.setsPerGame }
     : { legsPerSet: setup.legsPerSet, setsPerGame: setup.setsPerGame };
@@ -10816,6 +10857,25 @@ const BOBS_27_STAT_DEFS = [
 ];
 const BOBS_27_BUBBLE_KEY_MAP = { bobs27survivalrate:'survivalRate', bobs27avgscore:'avgFinalScore',
   bobs27runs:'runs', bobs27dartsthrown:'dartsThrown', bobs27doubleshitrate:'doublesHitRate' };
+// Grand Tour — one field per getGrandTourStatBubbles() figure (backend/db.js). The
+// accuracies count every dart thrown, finished tour or not; tours, average and win
+// rate count finished tours only, and win rate only two-player ones — a solo
+// tour's only player is its recorded "winner", which would make practice read 100%.
+const GRAND_TOUR_STAT_DEFS = [
+  { key:'grandtouravgscore',  label:'Avg Tour Score',     desc:'Average points across every finished Grand Tour (a perfect tour is 420)', fmt:v=>v!=null?v.toFixed(0):'—', primary:true },
+  { key:'grandtouraccuracy',  label:'Accuracy',           desc:'% of Grand Tour darts that hit the bed being aimed at', fmt:pctFmt, primary:true },
+  { key:'grandtourtours',     label:'Tours Finished',     desc:'Grand Tours played all the way to the last bull dart', fmt:v=>v!=null?String(Math.round(v)):'—', primary:true },
+  { key:'grandtourwinpct',    label:'Win Rate',           desc:'% of two-player Grand Tours won', fmt:pctFmt, primary:true },
+  { key:'grandtoursingles',   label:'Singles %',          desc:'% of singles-stage darts that hit that number\'s single', fmt:pctFmt },
+  { key:'grandtourtrebles',   label:'Trebles %',          desc:'% of trebles-stage darts that hit that number\'s treble', fmt:pctFmt },
+  { key:'grandtourdoubles',   label:'Doubles %',          desc:'% of doubles-stage darts that hit that number\'s double', fmt:pctFmt },
+  { key:'grandtourbull',      label:'Bull %',             desc:'% of bull-stage darts in the outer or inner bull', fmt:pctFmt },
+  { key:'grandtourdarts',     label:'Darts Thrown',       desc:'Total darts thrown in Grand Tours', fmt:v=>v!=null?Number(v).toLocaleString():'—' },
+];
+const GRAND_TOUR_BUBBLE_KEY_MAP = { grandtouravgscore:'avgScore', grandtouraccuracy:'accuracy',
+  grandtourtours:'tours', grandtourwinpct:'winPct', grandtoursingles:'singlesAccuracy',
+  grandtourtrebles:'treblesAccuracy', grandtourdoubles:'doublesAccuracy', grandtourbull:'bullAccuracy',
+  grandtourdarts:'dartsThrown' };
 
 // The 121 Checkout Ladder (docs/archive/practice-ladders-roadmap.md Part B).
 const CHECKOUT_LADDER_STAT_DEFS = [
@@ -11795,6 +11855,79 @@ const GAME_TYPES = {
       return {
         overlay: { bobs27Round: r.round },
         statusMsg: `Resumed — D${r.round}, running score: ${r.running}.`,
+      };
+    }
+  },
+  grand_tour: {
+    id: 'grand_tour',
+    // Turn-loop dispatch (item 64) — render/throwDart/undoLastTurn/enterTurn
+    // are looked up here, never through a hand-maintained if-chain.
+    render: renderGameGrandTour,
+    throwDart: throwDartVisit,
+    afterDart: afterDartSlotsOnly,
+    undoLastTurn: undoLastTurnGrandTour,
+    enterTurn: enterTurnGrandTour,
+    // One row per player, winner flagged — solo is just the one-row case.
+    legSummary: (game, winner) => game.players.map(p => ({ name: p.name,
+      points: p.totalPoints || 0, accuracy: grandTourAccuracy(p.tally).pct,
+      darts: p.legDarts || 0, won: winner == null ? true : p.name === winner })),
+    h2hRows: (p) => [
+      statRow('Points', `${p.totalPoints || 0} / ${GRAND_TOUR_MAX_POINTS}`),
+      statRow('Accuracy', (pct => pct == null ? '—' : `${Math.round(pct)}%`)(grandTourAccuracy(p.tally).pct)),
+      statRow('Singles · trebles · doubles · bull', grandTourStageLine(p.tally), true),
+    ],
+    label: 'Grand Tour',
+    category: () => 'Grand Tour',
+    newMatchPlayer: newMatchPlayerGrandTour,
+    evaluateVisit: evaluateVisitGrandTour,
+    resetForNextLeg: resetPlayerForNextLegGrandTour,
+    // No per-leg game state to reset: a tour is always one leg, so startNextLeg()
+    // is never reached and grandTourRound only ever counts up through one tour —
+    // the same reasoning as Bob's 27's bobs27Round.
+    resetLegState: resetLegStateNone,
+    restoreSetup: restoreSetupNone,   // no options: the tour is the tour
+    practiceUnit: { legsPerSet: 1, setsPerGame: 1 },
+    // ...and head-to-head too, which no other type does: a tour is a complete
+    // 195-dart game whoever is playing it, so the Format picker is hidden for it
+    // (mountSetupInlineOptions()) and resolveMatchUnits() applies this instead.
+    h2hUnit: { legsPerSet: 1, setsPerGame: 1 },
+    buildConfig: buildConfigNone,
+    playerSnapshot: playerSnapshotGrandTour,
+    statDefs: GRAND_TOUR_STAT_DEFS,
+    personalBestsSpec: GRAND_TOUR_PB_SPEC,
+    homeTabRenderer: renderHomeTabBodyGrandTour,
+    completionPanel: grandTourPanelSpec,
+    // The target is resolved HERE and sent whole, rather than sending the round
+    // number and re-deriving the target on /display: display.html has no shared
+    // scoring.js module, so deriving it there would mean a second copy of the rule.
+    // grandTourVisitPoints likewise: the snapshot's generic top-level visitScored is
+    // the darts' FACE value (a T9 is 27), which is not what a Grand Tour visit is
+    // worth (a T9 on the trebles stage is 3). Scored here, by the rule.
+    liveModeState: game => {
+      const t = grandTourRoundTarget(game.grandTourRound || 1);
+      return { grandTourRound: game.grandTourRound || 1,
+        grandTourTarget: { stage: t.stage, stageLabel: t.stageLabel, stageIndex: t.stageIndex,
+          stageRound: t.stageRound, stageRounds: t.stageRounds, sector: t.sector,
+          label: t.label, short: t.short, pointsNote: t.pointsNote },
+        grandTourVisitPoints: (game.darts || []).reduce((n, d) => n + grandTourDartPoints(d, t), 0) };
+    },
+    // Dual, like Around the Clock and The Pressure Chamber: solo is a practice
+    // tour, two players a head-to-head one. Neither soloOnly nor h2hOnly.
+    resume: (ctx) => {
+      const { players, state } = ctx;
+      const r = rebuildGrandTourState({ dnfs: state.players.map(p => !!p.dnf),
+        names: players.map(p => p.name), turns: state.turns });
+      players.forEach((p, i) => {
+        const rp = r.players[i];
+        Object.assign(p, { totalPoints: rp.totalPoints, tally: rp.tally,
+          legsWon: rp.legsWon, setsWon: rp.setsWon,
+          legDarts: rp.legDarts, setDarts: rp.setDarts, gameDarts: rp.gameDarts });
+      });
+      const t = grandTourRoundTarget(r.grandTourRound);
+      return {
+        overlay: { current: r.current, starter: r.starter, setNo: r.setNo, legNo: r.legNo,
+          grandTourRound: r.grandTourRound },
+        statusMsg: `Resumed — ${t.label}` + (players.length > 1 ? `, ${players[r.current].name} to throw.` : '.'),
       };
     }
   },
@@ -13476,6 +13609,7 @@ GAME_TYPES.maths_trainer.bubbleKeyMap = MATHS_TRAINER_BUBBLE_KEY_MAP;
 GAME_TYPES.around_the_clock.bubbleKeyMap = AROUND_THE_CLOCK_BUBBLE_KEY_MAP;
 GAME_TYPES.around_the_world.bubbleKeyMap = AROUND_THE_WORLD_BUBBLE_KEY_MAP;
 GAME_TYPES.bobs_27.bubbleKeyMap = BOBS_27_BUBBLE_KEY_MAP;
+GAME_TYPES.grand_tour.bubbleKeyMap = GRAND_TOUR_BUBBLE_KEY_MAP;
 // docs/bug-roadmap.md-class gap, found while wiring the Gauntlet's own bubbleKeyMap
 // here: Checkout Ladder's (item 22) never got patched onto this list at all,
 // leaving GAME_TYPES.checkout_ladder.bubbleKeyMap undefined — activeBubbleKeyMap()

@@ -59,6 +59,11 @@ convention in `CLAUDE.md`.
 - [33. Dead Man Walking](#33-dead-man-walking)
 - [34. The Pressure Chamber](#34-the-pressure-chamber)
 - [35. Test Data Seeder](#35-test-data-seeder)
+- [36. Static Checks (`backend/check.js`)](#36-static-checks-backendcheckjs)
+- [37. Secret Scanning (`backend/scan-secrets.js`)](#37-secret-scanning-backendscan-secretsjs)
+- [38. Continuous Integration (`.github/workflows/test.yml`)](#38-continuous-integration-githubworkflowstestyml)
+- [39. Type Checking (`jsconfig.json`)](#39-type-checking-jsconfigjson)
+- [40. Grand Tour](#40-grand-tour)
 
 ---
 
@@ -188,12 +193,12 @@ oche/
   because `noDartsThrown()` happened to return early for them.
 
   `throwDart` has a fifth member, **`afterDart`**, because dart input is not a
-  plain per-type function: seven types replace it wholesale, and the other nine
+  plain per-type function: seven types replace it wholesale, and the other ten
   share one body, `throwDartVisit()`, that holds the guard
   (`darts.length>=3 || busted || won`) and the `pushThrownDarts()` call — the two
   lines that must never diverge between modes — then calls the type's own
-  `afterDart`. Those are `afterDartSlotsOnly` (Cricket, Baseball, Bob's 27: no
-  bust and no live win to preview, so a dart only moves the slots and the pad),
+  `afterDart`. Those are `afterDartSlotsOnly` (Cricket, Baseball, Bob's 27, Grand
+  Tour: no bust and no live win to preview, so a dart only moves the slots and the pad),
   `afterDartGauntlet`, `afterDartDeadManWalking` and `afterDartX01` (the live
   bust/win/leaves preview). A type declaring `afterDart` *and* its own
   `throwDart` is a contract violation — the `afterDart` would never run — and
@@ -261,6 +266,18 @@ oche/
   twice more. A sixth mode of that shape needed a sixth copy, and forgetting it is
   **silent**: a solo drill quietly structured as a best-of-3 and recorded that way,
   with nothing visibly wrong on screen.
+
+  **`h2hUnit` is the same thing for head-to-head**, and only Grand Tour declares
+  one (`{legsPerSet: 1, setsPerGame: 1}`). Every other dual type leaves head-to-head
+  to the player's Format choice; a Grand Tour is a complete 195-dart game however
+  many are playing, so "first to three tours" is not a match anyone wants.
+  `resolveMatchUnits()` reads `practiceUnit` when the mode is not `'h2h'` and
+  `h2hUnit` when it is — one member per context, so neither says the other's job —
+  and the New Game screen hides the Format picker for a type that declares it
+  (`mountSetupInlineOptions()`, `keyHasInlineOptions()`): a picker whose answer is
+  ignored is worse than none. `frontend.match-units.test.js` reads both members
+  from the registry and pins Grand Tour's rule as an explicitly NEW clause in its
+  frozen reference, rather than editing the snapshot it compares against.
 
   Daily Challenge and Ghost are deliberately **not** expressed this way. Both are
   plain X01 underneath, so the answer cannot live on x01's entry — an ordinary
@@ -3312,6 +3329,13 @@ this order: `stage() > lane()`, with `legSummary` winning over both. There is no
 third branch — the fourteen `card()`/`scorecard()` renderers they replaced were
 deleted once unreachable.
 
+Two optional renderer members let a mode opt out of X01's vocabulary where it has
+none: **`hideX01Stats: true`** hides the top bar's 180 / Big Fish / Bust counters
+during play, and **`resultTallies(s)`** replaces the result view's tally band (which
+otherwise restates those same three counters) with the mode's own
+`[{em, v, k}]`. Only Grand Tour declares either today (§40); every other mode's
+screens are unchanged.
+
 A mode **may declare both** and let `stage()` return `''` to fall through to
 `lane()`. `renderScoreboard()` therefore calls `stage()` **once**, up front, and
 tests its result rather than testing for the method — which is what makes "no
@@ -4933,7 +4957,7 @@ database, a defect the old catch had hidden since it was written.
 | `dnf_at` | `TEXT` | `NULL` unless the match ended without anyone reaching a real finish — set by `abandonGame()` (the "End game" early-exit) or by `forfeitPlayer()` when bowing out leaves zero active participants. Deliberately separate from `completed_at`: every `completed_at IS NOT NULL` stat query already means "this match reached a genuine finish" (e.g. `getBaseballWonLegs()`'s own comment on that invariant) — reusing it for an abandoned match would let a since-abandoned mid-leg's partial totals start counting as real results |
 | `practice` | `INTEGER NOT NULL DEFAULT 0` | Explicit practice flag, set at creation |
 | `game_type` | `TEXT NOT NULL DEFAULT 'x01'` | `'x01'`, `'cricket'`, `'baseball'`, `'doubles_practice'`, `'chuckin'`, `'checkout_trainer'`, `'around_the_clock'`, `'around_the_world'`, `'bobs_27'`, `'checkout_ladder'`, `'gauntlet'`, `'killer'`, `'shanghai'`, `'halve_it'`, `'dead_man_walking'`, or `'pressure_chamber'` (`KNOWN_GAME_TYPES` in `backend/db.js`). `createGame()` accepts it as an optional param, defaulting to `'x01'`; each New Game flow passes its own. Nine-darter detection queries filter on this + `config` instead of `category='501'`, and every `scored`-derived stat scopes on it via `X01_ONLY`/`_scope()` (§3). |
-| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows, both guided-drill rows, and Bob's 27 rows (no config needed — Bob's 27 always plays the fixed D1-D20 ladder), `{targets: [...]}` for Halve-It rows (§32), `{difficulty, rounds: [15 frozen {target, par} pairs]}` for Dead Man Walking rows — the targets computed once server-side at creation and never client-supplied; `difficulty` is a client choice validated against a fixed four-id list (§33), and `{rounds: 15}` for Pressure Chamber rows (fixed, server-overridden regardless of client input — §34) |
+| `config` | `TEXT` | JSON — `{startingScore}` for X01 rows (backfilled for rows created before this column existed), `{numbers: [seven in-play numbers]}` for Cricket rows (the source of truth for mark derivation, `CRICKET_MARK_CASE` in §3), `{innings: 9}` for Baseball rows (fixed, not yet a New Game choice), `{doubles: [target sectors]}` for Doubles Practice rows (`DOUBLES_HIT_CASE` in §3), `{}` for Chuckin rows, both guided-drill rows, Bob's 27 rows (no config needed — Bob's 27 always plays the fixed D1-D20 ladder) and Grand Tour rows (the tour is fixed — §40), `{targets: [...]}` for Halve-It rows (§32), `{difficulty, rounds: [15 frozen {target, par} pairs]}` for Dead Man Walking rows — the targets computed once server-side at creation and never client-supplied; `difficulty` is a client choice validated against a fixed four-id list (§33), and `{rounds: 15}` for Pressure Chamber rows (fixed, server-overridden regardless of client input — §34) |
 | `player_count` | `INTEGER` | **Frozen** participant count at creation (not a live subquery) — see §3's mode-scoping note |
 | `league_id` | `INTEGER REFERENCES leagues(id) ON DELETE SET NULL` | Nullable — set by the `onGameCreated` auto-tag hook (§18), never by `createGame()`'s own INSERT. `NULL` for every game that isn't a tagged league match (the overwhelming majority) |
 
@@ -7228,6 +7252,8 @@ up chosen.
   always exactly one pair); `4` for X01 — an X01-specific ceiling, deliberately
   narrower than the app's general one, because a 501 leg is long enough that
   six players stop playing and start watching (`docs/archive/multiplayer-x01-roadmap.md`);
+  `2` for Grand Tour — the owner's own cap: both players throw at the same target in
+  turn, and a third would add another 65 visits of waiting between each of yours;
   the global cap (6) for every other dual-capable type (Cricket, Baseball,
   Shanghai, Halve-It, Pressure Chamber) and for the one H2H-only type (Killer,
   which additionally still enforces its own existing "at least 2" floor in
@@ -7522,7 +7548,7 @@ block. Pure replay-rebuild math: `frontend/scoring.js`'s
 
 **Any H2H game** (any participant count the mode allows) or **solo practice
 game**, X01/Cricket/Baseball/guided Around the Clock/guided Around the World/
-Bob's 27 (`SAVABLE_GAME_TYPES`, defined identically in both `backend/db.js` and
+Bob's 27/Grand Tour (`SAVABLE_GAME_TYPES`, defined identically in both `backend/db.js` and
 `frontend/index.html` — the server never trusts the client's own copy). Bob's
 27 is savable for the same reason the guided drills are and Doubles Practice/
 Chuckin/Checkout Trainer aren't: it has a genuine mid-run "position" worth
@@ -10494,3 +10520,164 @@ compiler they are the same file, but the name tells editors "this is a JavaScrip
 project", so **VS Code picks it up automatically and a newcomer gets hover
 documentation and inline type errors with no setup at all**. That editor experience is
 most of the point; the CI job is what keeps it honest.
+
+---
+
+## 40. Grand Tour
+
+A tour of every bed on the board (owner request, 2026-09; the name was the owner's
+pick from three). Three darts at each target, 1 or 2 players, always one tour.
+
+| Stage | Targets | Visits | Points per hit | Stage max |
+|---|---|---|---|---|
+| Singles | S1 → S20 | 20 | 1 | 60 |
+| Trebles | T1 → T20 | 20 | 3 | 180 |
+| Doubles | D1 → D20 | 20 | 2 | 120 |
+| Bull | bull | 5 (15 darts) | outer 2 · inner 4 | 60 |
+| **Tour** | | **65 visits, 195 darts** | | **420** |
+
+The order is singles, **trebles**, then doubles — the owner's own sequence, not a
+typo for S/D/T. **Only the exact bed scores**: on "Single 7" a treble or double 7 is
+worth nothing and counts as a miss for accuracy; either single area (inside or
+outside the treble ring) is the single. Both bulls count as a *hit* for accuracy
+whatever they score. Misses and bounce-outs are darts thrown. There is no dying
+early (unlike Bob's 27): every tour runs all 195 darts.
+
+### One copy of the rule
+
+`frontend/scoring.js` holds it, and **everything that needs it calls it** rather than
+restating it:
+
+- `grandTourRoundTarget(round)` — round 1-65 → `{stage, sector, mult, label, short,
+  stageRound, stageRounds, pointsNote}`. A round past 65 clamps to the last (the
+  server guard asks before it rejects).
+- `grandTourDartPoints(dart, target)` — the whole rule for one dart.
+- `evaluateVisitGrandTour(player, darts, game)` — one visit: points, hits, the new
+  per-stage `tally` (`{single|treble|double|bull: {hits, darts, points}}`, always a
+  fresh copy — see "undo" below), whether the round and the tour are complete, and
+  the winner once they are.
+- `grandTourAccuracy(tally, stageKey?)` — `{hits, darts, pct}`; `pct` is **null**, not
+  0, when nothing has been thrown at that stage, because "not reached" and "missed
+  everything" must read differently.
+- `rebuildGrandTourState({names, turns, dnfs})` — the pure replay resume uses, via
+  the shared `_replayVisits()` (roundKey `grandTourRound`).
+
+The callers: the scoring screen (`frontend/js/grand-tour.js`), the server's per-visit
+check (`addTurn()`), the Player Profile stats and the Home leaderboard
+(`_grandTourTours()` in `backend/db.js`, which fetches raw darts and scores them with
+these functions — **no SQL `CASE` restates the rule**), and the live scoreboard, which
+receives the resolved target rather than deriving it (below).
+
+### Rounds, turns and the two-player result
+
+`game.grandTourRound` is **game-level** — both players throw at the same target in
+turn and the round advances only once both have thrown (`isRoundComplete()`, the
+Shanghai/Pressure Chamber lockstep). One player is a **practice** tour; two is a
+**head-to-head** tour (a dual type, like Around the Clock). Both are exactly one leg
+of one set: `practiceUnit` and `h2hUnit` (§1) are both `{1, 1}`, and the Format
+picker is hidden. `maxPlayersForSetup()` caps it at 2 (§20).
+
+`grandTourDecideWinnerIndex(standings)`: most points wins; a points tie goes to more
+hits overall (same 195 darts each, so the steadier tour); a tie on both goes to
+whoever threw first. **Always a definite winner** — the same convention, and the same
+reasoning, as `pressureChamberDecideWinnerIndex()` (§34): no game type here has a draw
+result. A tour's `turns.leg_won` is never set — the result is decided on totals after
+round 65, never by one visit.
+
+### The server check (`addTurn()`, `grand_tour` branch)
+
+Every visit is re-scored server-side. The round is **this player's own prior-turn
+count in this game/set/leg, plus one** (each player throws exactly once per round, so
+their count *is* the round — the SEC-25 derivation Baseball/Shanghai/Bob's 27 use);
+the target comes from `grandTourRoundTarget()`, and `scored` must equal the darts
+re-scored by `grandTourDartPoints()`. `bust`, `checkout` and `legWon` must all be
+false, and a 66th visit is refused. Nothing but the darts is taken from the client,
+and those are range-checked by `validateDart()` first. The server does not enforce
+the two-player cap (no mode's player count is enforced server-side); the per-player
+round derivation stays correct whatever the seat count.
+
+### Stats (`GRAND_TOUR_STAT_DEFS`, `getGrandTourStatBubbles(name, mode)`)
+
+| Bubble | Formula |
+|---|---|
+| Avg Tour Score | mean points over **finished** tours in scope |
+| Accuracy | hits ÷ darts over **every** Grand Tour dart in scope |
+| Tours Finished | finished tours in scope |
+| Win Rate | games won ÷ finished games **with `player_count > 1`** |
+| Singles / Trebles / Doubles / Bull % | that stage's hits ÷ that stage's darts, every dart |
+| Darts Thrown | every Grand Tour dart in scope |
+
+A tour is "finished" when its game has `completed_at`; a paused or abandoned tour's
+partial total is not a result (the Bob's 27 / Gauntlet rule), but its darts were real
+darts at a real target, so accuracy counts them ("no hypothetical exclusion"). **Win
+rate is two-player only**: a solo tour's only player is recorded as its winner, so
+without the filter every practice tour would be a "win" and the practice tab would
+read a meaningless 100% (The Pressure Chamber's own win rate has exactly that
+problem). No history charts — Grand Tour is bubble-only, like Bob's 27, and
+`db.metric-history-parity.test.js` lists it as chartless on purpose.
+
+A tour's position is numbered `ROW_NUMBER() OVER (PARTITION BY game_id, player_id,
+set_no, leg_no ORDER BY id)` — the same count the guard makes — so a stat can never
+disagree with the guard about which visit aimed at what.
+
+**Personal Bests** (`getGrandTourPersonalBests`): best finished tour score, most
+accurate finished tour, most trebles in a tour. **Home leaderboard**
+(`GET /api/stats/grand-tour-leaderboard?mode=practice|h2h`,
+`getGrandTourLeaderboard(mode)`): each player's best finished tour within that mode,
+highest first, a tie ranked by who got there first. Split by tab like every other
+dual type — solo tours on Practice, two-player tours on H2H.
+
+### Live scoreboard (`renderers.grand_tour`, `frontend/display.html`)
+
+A **stage** (§7) for one or two players: the board with **exactly one bed lit** —
+both single areas of the number, only its treble ring, only its double ring, or the
+bull — in gold with a pale outline and glow (a shape cue, not colour alone), a
+caption naming it ("AIM · TREBLE 9 · DART 2 OF 3"), points, and five accuracy tiles
+(overall as the headline, then the four stages in play order). Two players get one
+side each around the one shared board. `lane()` exists only as a fallback for a
+hand-made payload with more than two players.
+
+The controller sends everything the display needs in `modeState`
+(`GAME_TYPES.grand_tour.liveModeState`):
+
+- **`grandTourTarget`** — the target resolved by `grandTourRoundTarget()`. The display
+  has no shared scoring module, so deriving "round 29 is treble 9" there would be a
+  second copy of the rule. It validates what it receives (`grandTourTargetOf()`: the
+  stage must be one of four keys and the sector a real board number, or there is no
+  target) and escapes all text at output (SEC-18).
+- **`grandTourVisitPoints`** — the darts in hand scored by the rule. The snapshot's
+  generic top-level `visitScored` is **face value** (a T16 is 48), which on the
+  doubles stage would put a 48 on screen for a dart worth 0.
+
+It declares `hideX01Stats` (no 180 / Big Fish / Bust counters in the top bar) and
+`resultTallies` (the result band shows the tour's hits, trebles and bulls), and the
+top bar names the stage ("Stage 2 of 4 · Trebles · 9 of 20") instead of "Leg 1".
+
+### Undo, saving, and the scoring screen
+
+Undo uses the shared shallow `pushVisitSnapshot()`. That is safe **only because the
+tally is replaced, never edited in place** — `evaluateVisitGrandTour()` always returns
+a fresh copy, and `enterTurnGrandTour()` assigns it. A future change that mutates
+`p.tally[stage]` directly would make undo silently restore the mutated object.
+
+Savable (`SAVABLE_GAME_TYPES`): a resumed tour is rebuilt from its turns by
+`rebuildGrandTourState()`; the saved-games list reads "Treble 9 · Ben 50 – Sam 40".
+
+The phone scoreboard is one card per player (points, overall accuracy, the four stage
+figures as "S 63 · T 18 · D — · B 44") and a line naming the target. Each figure is a
+`.fig` that never breaks internally (`app.css`), after a narrow phone was found
+wrapping "· D" onto one line and "— · B —" onto the next. The bull stage's line gives
+the visit's dart range ("darts 10–12 of 15") rather than the next dart, because that
+line only redraws when a visit is entered. Input follows the household default (the
+owner's choice); on the Pad it is the full number pad, not a single target button.
+
+### Where it lives
+
+`frontend/scoring.js` (rules) · `frontend/js/grand-tour.js` (scoring screen, results
+card, Home board) · `frontend/index.html` (`GAME_TYPES.grand_tour`, stat/PB specs, New
+Game entry) · `frontend/display.html` (live scoreboard) · `backend/db.js` (guard,
+stats, leaderboard, registry) · `backend/server.js` (the leaderboard route).
+Tests: `backend/test/scoring.grand-tour.test.js` (the rule, by hand-worked numbers),
+`backend/test/db.grand-tour.test.js` (guard, stats, leaderboard, saved games), and the
+`verify-ui` skill's `grand-tour` check (wizard, a full tour, turn order, and the live
+board driven by a real game).

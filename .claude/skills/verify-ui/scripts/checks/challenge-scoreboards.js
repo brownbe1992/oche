@@ -58,7 +58,20 @@ module.exports = async function run() {
           const startScore = game.players[0].score;
           // One real visit, so there is a committed visit to count and the
           // score has actually moved off its starting value.
-          setMult(3); throwDart(20); setMult(1); throwDart(20); setMult(1); throwDart(20);
+          //
+          // A ton where the start leaves room for one, and a lone single 1 where it
+          // does not. 100 BUSTS from any start of 101 or less — leaving the score
+          // exactly where it was — and a checkout sprint's start is its target
+          // checkout, anywhere from 32 to 170 (CHALLENGE_CHECKOUTS). Which target
+          // this loop lands on depends on today's date (it takes the FIRST upcoming
+          // date whose rotation is the format), so the old unconditional ton passed
+          // for months and then failed the "score moved" assertion below one
+          // morning with no code having changed: the rotation had moved on to a
+          // day whose target was 50. A single 1 cannot bust from 32. The ton is
+          // kept wherever it fits because the ton-counting formats deserve a
+          // visit their metric actually counts.
+          if (startScore >= 102) { setMult(3); throwDart(20); setMult(1); throwDart(20); setMult(1); throwDart(20); }
+          else { setMult(1); throwDart(1); }
           enterTurn(); await new Promise(r => setTimeout(r, 250));
 
           const cs = challengeLiveState(game);

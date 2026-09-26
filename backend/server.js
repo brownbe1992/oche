@@ -828,6 +828,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.getMathsTrainerSegments(url.searchParams.get('name'), url.searchParams.get('difficulty')));
     }
     if (p === '/api/stats/bobs27-leaderboard' && m === 'GET') return send(res, 200, db.getBobs27Leaderboard());
+    if (p === '/api/stats/grand-tour-leaderboard' && m === 'GET') return send(res, 200, db.getGrandTourLeaderboard(url.searchParams.get('mode')));
     if (p === '/api/stats/elo-leaderboard' && m === 'GET') return send(res, 200, db.getEloLeaderboard());
     if (p === '/api/stats/checkout-ladder-leaderboard' && m === 'GET') return send(res, 200, db.getCheckoutLadderLeaderboard());
     if (p === '/api/stats/gauntlet-leaderboard' && m === 'GET') return send(res, 200, db.getGauntletLeaderboard());
